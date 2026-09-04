@@ -33,16 +33,49 @@ actual test-case detail. Once I tell you to continue, use `write_test` (or
 `write_test_skeleton` again) to fill in the real assertions matching what I
 wrote, then `run_tests()`.
 
-From there, work through the rest of the cycle the same way as usual:
+## How to verify (VERIFY_RED / VERIFY_GREEN)
 
-1. IMPLEMENT: `write_code(filePath, code)`, write the implementation, then
+Whenever the phase is VERIFY_RED or VERIFY_GREEN, follow this protocol
+before calling `verify()`:
+
+1. Show me what I need to judge: the failing test + failure output (RED), or
+   the implementation + passing test output (GREEN).
+2. Use `AskUserQuestion` to ask me to confirm — options like "Looks
+   right, continue" / "Not right, let me fix it" / "Cancel this feature".
+   This is the primary way to ask.
+3. If `AskUserQuestion` isn't available or the prompt doesn't come back to
+   you (tool error, no UI, or any other reason the structured prompt
+   doesn't resolve), fall back to a plain chat message: describe what's
+   ready and ask me to reply "go ahead" to continue, or tell you what's
+   wrong. Wait for my reply — don't proceed without one either way.
+4. Based on my answer:
+   - **Confirmed / "go ahead"** — call `verify()` and continue.
+   - **Not right / needs a fix** — do not call `verify()`. Go back and fix
+     the test (RED, re-fill the assertions) or the implementation
+     (IMPLEMENT) instead, per my feedback.
+   - **Cancelled** — call `reset_feature()` immediately and tell me plainly
+     that the feature was reset and no further tool calls will happen until
+     I start a new one. Stop there.
+
+Never call `verify()` on your own initiative — it's the one tool that's
+mine to call, through you, not yours to call on my behalf.
+
+## The rest of the cycle
+
+From there, work through the rest of the cycle the same way as usual. Once
+`run_tests()` after the real assertions fails, the phase moves to
+VERIFY_RED:
+
+1. VERIFY_RED: follow "How to verify" above before calling `verify()`.
+2. IMPLEMENT: `write_code(filePath, code)`, write the implementation, then
    `run_tests()` until it passes. If a piece needs its own test first (a
    different app, a unit test, anything), use `drill_down(testFile)` instead
-   of switching test files informally — it runs its own independent RED
-   through REFACTOR cycle. Call `return_to_parent()` once that's done, or
+   of switching test files informally — it runs its own independent
+   RED->VERIFY_RED->IMPLEMENT->VERIFY_GREEN->REFACTOR cycle, including its
+   own verify checkpoints. Call `return_to_parent()` once that's done, or
    `abandon_drill_down()` if it turns out unnecessary.
-2. GREEN: `run_tests()` again to advance to REFACTOR.
-3. REFACTOR: `refactor_code(description)`, then `run_tests()` to close the
+3. VERIFY_GREEN: follow "How to verify" above before calling `verify()`.
+4. REFACTOR: `refactor_code(description)`, then `run_tests()` to close the
    cycle (back to RED, cycle count +1).
 
 Repeat until the base-level feature test genuinely passes, then call
