@@ -94,6 +94,16 @@ TOOLS = [
         },
     ),
     types.Tool(
+        name="verify",
+        description=(
+            "User confirms the current checkpoint before the cycle "
+            "proceeds — a failing test in RED (advances to IMPLEMENT), or "
+            "a passing implementation in GREEN (advances to REFACTOR). "
+            "Only available in VERIFY_RED or VERIFY_GREEN phase."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    types.Tool(
         name="run_tests",
         description=(
             "Run the test suite via the configured adapter. "
@@ -131,9 +141,9 @@ TOOLS = [
             "Mark the current feature complete. Only allowed at the base "
             "level (depth 1 — return_to_parent out of any drill-downs "
             "first), in RED phase, after at least one full "
-            "RED->IMPLEMENT->GREEN->REFACTOR cycle. Clears feature state, "
-            "same as reset_feature, but signals success rather than "
-            "abandonment."
+            "RED->VERIFY_RED->IMPLEMENT->VERIFY_GREEN->REFACTOR cycle. "
+            "Clears feature state, same as reset_feature, but signals "
+            "success rather than abandonment."
         ),
         inputSchema={"type": "object", "properties": {}},
     ),
@@ -143,8 +153,9 @@ TOOLS = [
             "Push a nested test target on top of the current one — a unit "
             "test, a different app's tests, any test file you need along "
             "the way. Only allowed in IMPLEMENT phase. The nested level "
-            "runs its own independent RED->IMPLEMENT->GREEN->REFACTOR "
-            "cycle; call return_to_parent when it's done."
+            "runs its own independent "
+            "RED->VERIFY_RED->IMPLEMENT->VERIFY_GREEN->REFACTOR cycle; "
+            "call return_to_parent when it's done."
         ),
         inputSchema={
             "type": "object",
@@ -297,6 +308,10 @@ class TDDServer:
                         **self.sm.status(),
                     }
                 )
+
+            if name == "verify":
+                self.sm.verify()
+                return self._text({"ok": True, **self.sm.status()})
 
             if name == "run_tests":
                 return self._text(self._run_tests())

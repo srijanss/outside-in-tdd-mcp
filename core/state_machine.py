@@ -4,7 +4,8 @@ A feature is a stack of test-target "levels", not a single flat test file.
 init_feature() pushes the base level (typically a functional/acceptance
 test). drill_down() pushes a nested level for any test target you need
 along the way — a unit test, a different Django app's tests, whatever —
-each running its own independent RED->IMPLEMENT->GREEN->REFACTOR cycle.
+each running its own independent
+RED->VERIFY_RED->IMPLEMENT->VERIFY_GREEN->REFACTOR cycle.
 return_to_parent() pops back once a nested level finishes a full cycle.
 There's no "acceptance"/"unit" label anywhere: depth in the stack is the
 only signal, since a feature may fan out into any number of test files
@@ -17,12 +18,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-PHASES = ("red", "implement", "green", "refactor")
+PHASES = ("red", "verify_red", "implement", "verify_green", "refactor")
 
 TOOLS_BY_PHASE = {
     "red": ("write_test", "run_tests", "get_status", "init_feature"),
+    "verify_red": ("verify", "get_status"),
     "implement": ("write_code", "run_tests", "get_status"),
-    "green": ("run_tests", "get_status"),
+    "verify_green": ("verify", "get_status"),
     "refactor": ("refactor_code", "run_tests", "get_status"),
 }
 
@@ -116,7 +118,7 @@ class TDDStateMachine:
         if base.cycle_count < 1:
             raise PhaseError(
                 "complete_feature() requires at least one full "
-                "RED->IMPLEMENT->GREEN->REFACTOR cycle to complete "
+                "RED->VERIFY_RED->IMPLEMENT->VERIFY_GREEN->REFACTOR cycle to complete "
                 f"(cycle_count={base.cycle_count})."
             )
         summary = {
@@ -158,7 +160,7 @@ class TDDStateMachine:
         if top.cycle_count < 1:
             raise PhaseError(
                 "return_to_parent() requires at least one full "
-                "RED->IMPLEMENT->GREEN->REFACTOR cycle at this level to "
+                "RED->VERIFY_RED->IMPLEMENT->VERIFY_GREEN->REFACTOR cycle at this level to "
                 f"return (cycle_count={top.cycle_count})."
             )
         summary = {"testFile": top.test_file, "cyclesCompleted": top.cycle_count}
@@ -221,6 +223,22 @@ class TDDStateMachine:
     def refactor_code(self, description: str) -> None:
         self._require_phase("refactor", "refactor_code")
 
+    def verify(self) -> None:
+        """User confirms the current checkpoint (a failing test in RED, or
+        a passing implementation) before the cycle proceeds. Only allowed
+        in VERIFY_RED or VERIFY_GREEN phase."""
+        self._require_feature()
+        level = self.stack[-1]
+        if level.phase == "verify_red":
+            level.phase = "implement"
+        elif level.phase == "verify_green":
+            level.phase = "refactor"
+        else:
+            raise PhaseError(
+                "verify() is only allowed in VERIFY_RED or VERIFY_GREEN "
+                f"phase (current phase: {level.phase.upper()})."
+            )
+
     # -- run_tests: the only phase-advancing action -----------------------
 
     def record_test_result(
@@ -244,21 +262,18 @@ class TDDStateMachine:
 
         if level.phase == "red":
             if failed > 0:
-                level.phase = "implement"
+                level.phase = "verify_red"
             elif passed > 0:
                 # Test already passes with no implementation change: skip
-                # straight to GREEN.
-                level.phase = "green"
+                # straight to verifying green.
+                level.phase = "verify_green"
             # else: no tests ran at all — stay RED.
 
         elif level.phase == "implement":
             if failed > 0:
                 pass  # stay IMPLEMENT, keep fixing
             elif passed > 0:
-                level.phase = "green"
-
-        elif level.phase == "green":
-            level.phase = "refactor"
+                level.phase = "verify_green"
 
         elif level.phase == "refactor":
             if failed > 0:

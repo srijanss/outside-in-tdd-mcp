@@ -1,24 +1,31 @@
 # Outside-In TDD MCP Server
 
-A language-agnostic MCP server that enforces Outside-In TDD (RED → IMPLEMENT →
-GREEN → REFACTOR) when using Claude Code. The core has zero knowledge of any
-programming language or test framework — that knowledge lives entirely in
-swappable **adapters**.
+A language-agnostic MCP server that enforces Outside-In TDD (RED →
+VERIFY_RED → IMPLEMENT → VERIFY_GREEN → REFACTOR) when using Claude Code.
+The core has zero knowledge of any programming language or test framework —
+that knowledge lives entirely in swappable **adapters**.
 
 ## Phases
 
 ```
-RED        write_test only. run_tests: failing -> IMPLEMENT, already passing -> GREEN.
-IMPLEMENT  write_code only. run_tests: still failing -> stay, passing -> GREEN.
-GREEN      checkpoint. run_tests advances unconditionally to REFACTOR.
-REFACTOR   refactor_code only. run_tests: passing -> back to RED (cycle++), failing -> stay + surface error.
+RED           write_test only. run_tests: failing -> VERIFY_RED, already passing -> VERIFY_GREEN.
+VERIFY_RED    checkpoint. User confirms the failing test is the right one. verify() -> IMPLEMENT.
+IMPLEMENT     write_code only. run_tests: still failing -> stay, passing -> VERIFY_GREEN.
+VERIFY_GREEN  checkpoint. User confirms the passing implementation is correct. verify() -> REFACTOR.
+REFACTOR      refactor_code only. run_tests: passing -> back to RED (cycle++), failing -> stay + surface error.
 ```
 
 `RED` normally routes through `IMPLEMENT` (write the test, watch it fail for
 the right reason, then write the code that makes it pass) — the same shape as
 `SPEC.md`'s `RED`/`GREEN` but with the code-writing step given its own gated
 phase, since `write_code` can't be GREEN-only when GREEN is only reachable by
-already-passing tests.
+already-passing tests. `VERIFY_RED` and `VERIFY_GREEN` insert an explicit
+human checkpoint at the two points where an agent's judgment is easiest to
+get wrong unnoticed: right after a test goes red (is this actually testing
+the right thing?) and right after it goes green (does this implementation
+actually look right, not just pass?). Both are single-tool phases — only
+`verify()` (or `get_status()`) is callable — so nothing else can happen until
+a human explicitly advances the cycle.
 
 ## Architecture
 
@@ -44,10 +51,11 @@ original design gated `write_code` to GREEN-only, but GREEN was only
 reachable once tests already passed — a chicken-and-egg problem: you can't
 write the code that makes tests pass if you're not allowed to write code
 until they pass. `IMPLEMENT` sits between RED and GREEN to close that gap: a
-failing test in RED moves you into IMPLEMENT, where `write_code` unlocks, and
-only once tests pass there do you land in GREEN. GREEN is then a one-tool
-checkpoint — calling `run_tests` again unconditionally advances to REFACTOR,
-trusting you're ready to clean up.
+failing test in RED moves you into VERIFY_RED, then (once verified)
+IMPLEMENT, where `write_code` unlocks, and only once tests pass there do you
+land in VERIFY_GREEN. VERIFY_GREEN is then a one-tool checkpoint — calling
+`verify()` advances unconditionally to REFACTOR, trusting the human has
+looked at what's about to be cleaned up.
 
 **A feature is a stack of test targets, not one flat file.** A functional
 test rarely gets to GREEN in one leap — it usually needs several unit tests
@@ -55,7 +63,8 @@ underneath it, possibly across several apps (`cart/`, `orders/`, ...).
 `init_feature` pushes the base level (typically the functional/acceptance
 test). `drill_down(testFile)` — only callable in IMPLEMENT — pushes any
 other test target on top; it runs its own fully independent
-RED→IMPLEMENT→GREEN→REFACTOR cycle, gated exactly like the base level.
+RED→VERIFY_RED→IMPLEMENT→VERIFY_GREEN→REFACTOR cycle, gated exactly like
+the base level.
 `return_to_parent()` pops back once that nested level finishes a full cycle
 (same "RED phase, `cycleCount >= 1`" gate `complete_feature` uses), resuming
 the level below exactly where it left off — no phase change, since it was
@@ -98,8 +107,9 @@ opposite outcomes. `reset_feature` is phase-unguarded — callable from any
 phase, or with no feature active — and exists purely to abandon a feature
 (wrong approach, stuck in a broken REFACTOR, whatever). `complete_feature`
 only succeeds in RED with `cycleCount >= 1` (i.e. at least one full
-RED→IMPLEMENT→GREEN→REFACTOR loop has actually finished), and its response
-says so explicitly ("Feature 'x' completed after N cycle(s)."). Both clear
+RED→VERIFY_RED→IMPLEMENT→VERIFY_GREEN→REFACTOR loop has actually
+finished), and its response says so explicitly ("Feature 'x' completed
+after N cycle(s)."). Both clear
 state identically underneath; the difference is entirely in what got
 verified before clearing and what the response tells Claude happened.
 
@@ -235,7 +245,7 @@ this workflow — see `.claude/commands/*.md` for the full prompt each one
 sends):
 
 - `/tdd-start <feature-name> <test-file>` — starts a feature and walks
-  through RED→IMPLEMENT→GREEN→REFACTOR (with drill-downs) using the
+  through RED→VERIFY_RED→IMPLEMENT→VERIFY_GREEN→REFACTOR (with drill-downs) using the
   server's tools at each step. Quote the feature name if it has spaces:
   `/tdd-start "checkout discount" tests/functional/test_checkout.py`.
 - `/tdd-start-skeleton <feature-name> <test-file>` — same, but RED uses

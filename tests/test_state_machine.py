@@ -18,6 +18,24 @@ def make_sm():
     return sm
 
 
+def to_implement(sm):
+    sm.record_test_result(passed=0, failed=1)  # red -> verify_red
+    sm.verify()  # verify_red -> implement
+    return sm
+
+
+def to_refactor(sm):
+    sm.record_test_result(passed=1, failed=0)  # red -> verify_green
+    sm.verify()  # verify_green -> refactor
+    return sm
+
+
+def to_red_after_one_cycle(sm):
+    to_refactor(sm)
+    sm.record_test_result(passed=1, failed=0)  # refactor -> red, cycle 1
+    return sm
+
+
 def test_init_feature_starts_in_red():
     sm = make_sm()
     assert sm.phase == "red"
@@ -26,38 +44,58 @@ def test_init_feature_starts_in_red():
     assert sm.cycle_count == 0
 
 
-def test_red_moves_to_implement_on_failure_then_implement_stays_on_failure():
+def test_red_moves_to_verify_red_on_failure_and_verify_advances_to_implement():
     sm = make_sm()
     sm.record_test_result(passed=0, failed=1)
+    assert sm.phase == "verify_red"
+    sm.verify()
     assert sm.phase == "implement"
+
+
+def test_implement_stays_on_failure():
+    sm = make_sm()
+    to_implement(sm)
     sm.record_test_result(passed=0, failed=1)
     assert sm.phase == "implement"
 
 
-def test_implement_advances_to_green_on_pass():
+def test_implement_advances_to_verify_green_on_pass():
     sm = make_sm()
-    sm.record_test_result(passed=0, failed=1)  # red -> implement
-    sm.record_test_result(passed=1, failed=0)  # implement -> green
-    assert sm.phase == "green"
+    to_implement(sm)
+    sm.record_test_result(passed=1, failed=0)  # implement -> verify_green
+    assert sm.phase == "verify_green"
 
 
-def test_red_skips_directly_to_green_if_already_passing():
+def test_red_skips_directly_to_verify_green_if_already_passing():
     sm = make_sm()
     sm.record_test_result(passed=1, failed=0)
-    assert sm.phase == "green"
+    assert sm.phase == "verify_green"
 
 
-def test_green_advances_to_refactor_unconditionally():
+def test_verify_green_advances_to_refactor():
     sm = make_sm()
-    sm.record_test_result(passed=1, failed=0)  # red -> green
-    sm.record_test_result(passed=1, failed=0)  # green -> refactor
+    sm.record_test_result(passed=1, failed=0)  # red -> verify_green
+    sm.verify()
     assert sm.phase == "refactor"
+
+
+def test_verify_only_allowed_in_verify_red_or_verify_green():
+    sm = make_sm()
+    with pytest.raises(PhaseError):
+        sm.verify()  # blocked in red
+    to_implement(sm)
+    with pytest.raises(PhaseError):
+        sm.verify()  # blocked in implement
+    sm.record_test_result(passed=1, failed=0)  # implement -> verify_green
+    sm.verify()  # ok
+    assert sm.phase == "refactor"
+    with pytest.raises(PhaseError):
+        sm.verify()  # blocked in refactor
 
 
 def test_refactor_advances_to_red_and_increments_cycle_on_pass():
     sm = make_sm()
-    sm.record_test_result(passed=1, failed=0)  # red -> green
-    sm.record_test_result(passed=1, failed=0)  # green -> refactor
+    to_refactor(sm)
     assert sm.cycle_count == 0
     sm.record_test_result(passed=1, failed=0)  # refactor -> red
     assert sm.phase == "red"
@@ -66,8 +104,7 @@ def test_refactor_advances_to_red_and_increments_cycle_on_pass():
 
 def test_refactor_stays_and_surfaces_error_on_failure():
     sm = make_sm()
-    sm.record_test_result(passed=1, failed=0)  # red -> green
-    sm.record_test_result(passed=1, failed=0)  # green -> refactor
+    to_refactor(sm)
     sm.record_test_result(passed=0, failed=1)  # refactor, broke something
     assert sm.phase == "refactor"
     assert sm.cycle_count == 0
@@ -77,7 +114,7 @@ def test_refactor_stays_and_surfaces_error_on_failure():
 def test_write_test_only_allowed_in_red():
     sm = make_sm()
     sm.write_test("test_x", "code")  # ok in red
-    sm.record_test_result(passed=0, failed=1)  # -> implement
+    to_implement(sm)
     with pytest.raises(PhaseError):
         sm.write_test("test_x", "code")
 
@@ -85,7 +122,7 @@ def test_write_test_only_allowed_in_red():
 def test_write_test_skeleton_only_allowed_in_red():
     sm = make_sm()
     sm.write_test_skeleton("test_x", "# TODO: cover the happy path")  # ok in red
-    sm.record_test_result(passed=0, failed=1)  # -> implement
+    to_implement(sm)
     with pytest.raises(PhaseError):
         sm.write_test_skeleton("test_x", "code")
 
@@ -94,16 +131,16 @@ def test_write_code_only_allowed_in_implement():
     sm = make_sm()
     with pytest.raises(PhaseError):
         sm.write_code("f.py", "code")  # blocked in red
-    sm.record_test_result(passed=0, failed=1)  # -> implement
+    to_implement(sm)
     sm.write_code("f.py", "code")  # ok
 
 
-def test_write_code_blocked_in_green_and_refactor():
+def test_write_code_blocked_in_verify_green_and_refactor():
     sm = make_sm()
-    sm.record_test_result(passed=1, failed=0)  # -> green
+    sm.record_test_result(passed=1, failed=0)  # -> verify_green
     with pytest.raises(PhaseError):
         sm.write_code("f.py", "code")
-    sm.record_test_result(passed=1, failed=0)  # -> refactor
+    sm.verify()  # -> refactor
     with pytest.raises(PhaseError):
         sm.write_code("f.py", "code")
 
@@ -112,8 +149,7 @@ def test_refactor_code_only_allowed_in_refactor():
     sm = make_sm()
     with pytest.raises(PhaseError):
         sm.refactor_code("cleanup")
-    sm.record_test_result(passed=1, failed=0)  # -> green
-    sm.record_test_result(passed=1, failed=0)  # -> refactor
+    to_refactor(sm)
     sm.refactor_code("cleanup")  # ok
 
 
@@ -123,6 +159,8 @@ def test_no_active_feature_raises():
         sm.write_test("x", "y")
     with pytest.raises(NoActiveFeatureError):
         sm.record_test_result(passed=1, failed=0)
+    with pytest.raises(NoActiveFeatureError):
+        sm.verify()
 
 
 def test_reset_feature_clears_state():
@@ -132,18 +170,6 @@ def test_reset_feature_clears_state():
     assert sm.phase is None
     assert sm.feature_name is None
     assert sm.cycle_count == 0
-
-
-def to_implement(sm):
-    sm.record_test_result(passed=0, failed=1)  # red -> implement
-    return sm
-
-
-def to_red_after_one_cycle(sm):
-    sm.record_test_result(passed=1, failed=0)  # red -> green
-    sm.record_test_result(passed=1, failed=0)  # green -> refactor
-    sm.record_test_result(passed=1, failed=0)  # refactor -> red, cycle 1
-    return sm
 
 
 def test_drill_down_only_allowed_in_implement():
@@ -162,7 +188,8 @@ def test_drill_down_nested_level_runs_independent_cycle():
     to_implement(sm)
     sm.drill_down("cart/tests.py")
     sm.write_test("test_cart", "...")  # allowed: nested level is in red
-    sm.record_test_result(passed=0, failed=1)  # nested red -> implement
+    sm.record_test_result(passed=0, failed=1)  # nested red -> verify_red
+    sm.verify()  # nested verify_red -> implement
     assert sm.depth == 2
     assert sm.phase == "implement"
     sm.write_code("cart/models.py", "...")  # nested level's own implement
@@ -183,7 +210,7 @@ def test_return_to_parent_blocked_before_nested_cycle_completes():
     sm.drill_down("cart/tests.py")
     with pytest.raises(PhaseError):
         sm.return_to_parent()  # nested level still in red, cycle_count 0
-    sm.record_test_result(passed=1, failed=0)  # nested red -> green
+    sm.record_test_result(passed=1, failed=0)  # nested red -> verify_green
     with pytest.raises(PhaseError):
         sm.return_to_parent()  # nested still not back in red
 
@@ -224,7 +251,8 @@ def test_abandon_drill_down_pops_mid_implement_too():
     sm = make_sm()
     to_implement(sm)
     sm.drill_down("cart/tests.py")
-    sm.record_test_result(passed=0, failed=1)  # nested red -> implement
+    sm.record_test_result(passed=0, failed=1)  # nested red -> verify_red
+    sm.verify()  # nested verify_red -> implement
     summary = sm.abandon_drill_down()
     assert summary["phase"] == "implement"
     assert sm.depth == 1
@@ -255,10 +283,10 @@ def test_complete_feature_blocked_before_first_cycle():
 
 def test_complete_feature_blocked_outside_red():
     sm = make_sm()
-    sm.record_test_result(passed=1, failed=0)  # -> green
+    sm.record_test_result(passed=1, failed=0)  # -> verify_green
     with pytest.raises(PhaseError):
         sm.complete_feature()
-    sm.record_test_result(passed=1, failed=0)  # -> refactor
+    sm.verify()  # -> refactor
     with pytest.raises(PhaseError):
         sm.complete_feature()
 
@@ -276,9 +304,7 @@ def test_complete_feature_blocked_while_drilled_down():
 
 def test_complete_feature_allowed_after_full_cycle_and_clears_state():
     sm = make_sm()
-    sm.record_test_result(passed=1, failed=0)  # red -> green
-    sm.record_test_result(passed=1, failed=0)  # green -> refactor
-    sm.record_test_result(passed=1, failed=0)  # refactor -> red, cycle_count=1
+    to_red_after_one_cycle(sm)  # red -> ... -> red, cycle_count=1
     assert sm.phase == "red"
     assert sm.cycle_count == 1
 
@@ -302,10 +328,12 @@ def test_available_tools_per_phase():
         "init_feature",
     )
     sm.record_test_result(passed=0, failed=1)
+    assert sm.available_tools() == ("verify", "get_status")
+    sm.verify()
     assert sm.available_tools() == ("write_code", "run_tests", "get_status")
     sm.record_test_result(passed=1, failed=0)
-    assert sm.available_tools() == ("run_tests", "get_status")
-    sm.record_test_result(passed=1, failed=0)
+    assert sm.available_tools() == ("verify", "get_status")
+    sm.verify()
     assert sm.available_tools() == ("refactor_code", "run_tests", "get_status")
 
 
@@ -313,7 +341,7 @@ def test_status_shape():
     sm = make_sm()
     sm.record_test_result(passed=0, failed=1, duration_ms=42, failures=[{"name": "t"}])
     status = sm.status()
-    assert status["phase"] == "implement"
+    assert status["phase"] == "verify_red"
     assert status["lastResult"]["failed"] == 1
     assert status["lastResult"]["durationMs"] == 42
-    assert "write_code" in status["availableTools"]
+    assert "verify" in status["availableTools"]
