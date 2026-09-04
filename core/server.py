@@ -177,6 +177,10 @@ TOOLS = [
 ]
 
 
+class ConfigError(Exception):
+    """Raised when .tdd-config.json is missing, malformed, or incomplete."""
+
+
 def load_config(config_path: str) -> dict[str, Any]:
     path = Path(config_path)
     if not path.exists():
@@ -185,7 +189,39 @@ def load_config(config_path: str) -> dict[str, Any]:
             "Create one with 'adapter', 'adapterPath', 'defaultTestDir'."
         )
     with path.open() as f:
-        return json.load(f)
+        try:
+            config = json.load(f)
+        except json.JSONDecodeError as exc:
+            raise ConfigError(
+                f"'{config_path}' is not valid JSON: {exc}"
+            ) from exc
+
+    if not isinstance(config, dict):
+        raise ConfigError(
+            f"'{config_path}' must contain a JSON object, got {type(config).__name__}."
+        )
+
+    _require_string(config, "adapterPath", config_path, required=True)
+    _require_string(config, "defaultTestDir", config_path, required=False)
+
+    return config
+
+
+def _require_string(
+    config: dict[str, Any], field: str, config_path: str, *, required: bool
+) -> None:
+    if field not in config:
+        if required:
+            raise ConfigError(
+                f"'{config_path}' is missing required field '{field}'."
+            )
+        return
+    if not isinstance(config[field], str) or (required and not config[field]):
+        raise ConfigError(
+            f"'{config_path}' field '{field}' must be a non-empty string."
+            if required
+            else f"'{config_path}' field '{field}' must be a string."
+        )
 
 
 class TDDServer:
@@ -341,7 +377,7 @@ class TDDServer:
 
         try:
             config = load_config(self.config_path)
-        except FileNotFoundError as exc:
+        except (FileNotFoundError, ConfigError) as exc:
             return {"error": str(exc)}
 
         adapter_path = config["adapterPath"]
