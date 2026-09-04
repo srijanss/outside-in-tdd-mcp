@@ -102,3 +102,35 @@ def test_init_feature_returns_clear_error_when_adapter_path_does_not_exist(tmp_p
     # caught before any feature state is created.
     status = call(server, "get_status")
     assert status["featureName"] is None
+
+
+def test_refactor_closing_cycle_also_checks_full_suite_for_regressions(tmp_path):
+    # A base-level feature whose own target already passes, but where the
+    # configured defaultTestDir (the "whole suite") is currently broken.
+    # Closing the REFACTOR cycle must not advance back to RED / bump
+    # cycle_count while something else is broken — otherwise
+    # complete_feature() becomes reachable on top of a regression.
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "adapterPath": str(
+                    PROJECT_ROOT / "adapters" / "pytest-adapter" / "run.sh"
+                ),
+                "defaultTestDir": "tests/fixtures/broken_import_module.py",
+            }
+        )
+    )
+    server = TDDServer(project_root=str(PROJECT_ROOT), config_path=str(config_path))
+    call(server, "init_feature", featureName="f", testFile="tests/test_state_machine.py")
+
+    # test_state_machine.py already passes -> red skips straight to verify_green
+    payload = call(server, "run_tests")
+    assert payload["phase"] == "verify_green"
+    call(server, "verify")  # -> refactor
+
+    payload = call(server, "run_tests")
+
+    assert payload["phase"] == "refactor"
+    assert payload["cycleCount"] == 0
+    assert payload["testResult"]["failed"] >= 1

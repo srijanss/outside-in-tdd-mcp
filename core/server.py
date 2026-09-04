@@ -418,6 +418,31 @@ class TDDServer:
         except AdapterError as exc:
             return {"error": f"Adapter failed: {exc}"}
 
+        # Closing a base-level REFACTOR cycle is what unlocks
+        # complete_feature() — run the whole suite (not just this cycle's
+        # target) through the adapter first, so a regression elsewhere
+        # can't slip through unnoticed. Nested drill-down levels skip this;
+        # only the outer feature's cycle gates completion.
+        default_test_dir = config.get("defaultTestDir")
+        if (
+            self.sm.phase == "refactor"
+            and self.sm.depth == 1
+            and result.failed == 0
+            and default_test_dir
+        ):
+            try:
+                regression = run_adapter(
+                    adapter_path, default_test_dir, self.project_root
+                )
+            except AdapterError as exc:
+                return {"error": f"Regression check failed to run: {exc}"}
+            if regression.failed > 0:
+                result.failed += regression.failed
+                result.failures = result.failures + [
+                    {"name": f"REGRESSION: {f['name']}", "message": f["message"]}
+                    for f in regression.failures
+                ]
+
         self.sm.record_test_result(
             passed=result.passed,
             failed=result.failed,
