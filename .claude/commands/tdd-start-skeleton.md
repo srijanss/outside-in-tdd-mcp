@@ -35,30 +35,10 @@ wrote, then `run_tests()`.
 
 ## How to verify (VERIFY_RED / VERIFY_GREEN)
 
-Whenever the phase is VERIFY_RED or VERIFY_GREEN, follow this protocol
-before calling `verify()`:
-
-1. Show me what I need to judge: the failing test + failure output (RED), or
-   the implementation + passing test output (GREEN).
-2. Use `AskUserQuestion` to ask me to confirm — options like "Looks
-   right, continue" / "Not right, let me fix it" / "Cancel this feature".
-   This is the primary way to ask.
-3. If `AskUserQuestion` isn't available or the prompt doesn't come back to
-   you (tool error, no UI, or any other reason the structured prompt
-   doesn't resolve), fall back to a plain chat message: describe what's
-   ready and ask me to reply "go ahead" to continue, or tell you what's
-   wrong. Wait for my reply — don't proceed without one either way.
-4. Based on my answer:
-   - **Confirmed / "go ahead"** — call `verify()` and continue.
-   - **Not right / needs a fix** — do not call `verify()`. Go back and fix
-     the test (RED, re-fill the assertions) or the implementation
-     (IMPLEMENT) instead, per my feedback.
-   - **Cancelled** — call `reset_feature()` immediately and tell me plainly
-     that the feature was reset and no further tool calls will happen until
-     I start a new one. Stop there.
-
-Never call `verify()` on your own initiative — it's the one tool that's
-mine to call, through you, not yours to call on my behalf.
+Whenever the phase is VERIFY_RED or VERIFY_GREEN, read
+`.claude/docs/tdd-verify-protocol.md` and follow it before calling
+`verify()`. (At VERIFY_RED, "fix the test" means re-filling the
+assertions, same as elsewhere in this command.)
 
 ## The rest of the cycle
 
@@ -81,3 +61,11 @@ VERIFY_RED:
 Repeat until the base-level feature test genuinely passes, then call
 `complete_feature()`. Call `get_status()` any time you're unsure what's
 currently allowed.
+
+## After the feature completes
+
+Once `complete_feature()` succeeds, briefly summarize what was built, then
+read `.claude/docs/tdd-review-checklist.md` and follow it, scoped to the
+files/tests touched this cycle (not the whole repo). A chosen finding
+becomes the next `/tdd-start-skeleton` feature (test target resolved as
+above).
