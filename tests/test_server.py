@@ -246,3 +246,48 @@ def test_regression_check_attributes_failure_to_refactor_when_own_target_breaks(
         f["name"].startswith("REGRESSION:")
         for f in payload["testResult"]["failures"]
     )
+
+
+def test_regression_check_returns_error_when_own_target_recheck_adapter_fails(tmp_path):
+    # The second (own-target-only) adapter call in the closing-refactor
+    # regression check can itself fail to run (crash, timeout, bad output).
+    # That must surface as a normal {"error": ...} response, not raise.
+    counter_file = tmp_path / "count.txt"
+    fake_adapter = tmp_path / "fake_adapter.py"
+    fake_adapter.write_text(
+        f'''#!/usr/bin/env python3
+import json
+import pathlib
+import sys
+
+counter_file = pathlib.Path({str(counter_file)!r})
+count = int(counter_file.read_text()) if counter_file.exists() else 0
+count += 1
+counter_file.write_text(str(count))
+
+if count == 3:
+    # Simulate the own-target-only recheck call crashing.
+    sys.exit(1)
+
+if count == 2:
+    print(json.dumps({{"passed": 0, "failed": 1, "failures": [{{"name": "t", "message": "m"}}]}}))
+else:
+    print(json.dumps({{"passed": 1, "failed": 0, "failures": []}}))
+'''
+    )
+    fake_adapter.chmod(0o755)
+
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(
+        json.dumps({"adapterPath": str(fake_adapter), "defaultTestDir": "whole/"})
+    )
+    server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
+    call(server, "init_feature", featureName="f", testFile="own_test.py")
+
+    call(server, "run_tests")  # count=1: red -> verify_green (own target passes)
+    call(server, "verify")  # -> refactor
+
+    payload = call(server, "run_tests")  # count=2 combined fails, count=3 own-only crashes
+
+    assert "error" in payload
+    assert "Adapter failed" in payload["error"]

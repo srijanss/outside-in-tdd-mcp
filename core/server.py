@@ -37,11 +37,8 @@ TOOLS = [
                 "testFile": {
                     "type": "string",
                     "description": (
-                        "Test target(s), relative to project root. Passed "
-                        "through to the configured adapter as-is — for the "
-                        "pytest adapter this can be a single path, several "
-                        "space-separated paths, or a full pytest argument "
-                        'expression, e.g. \'cart/ order/ -m "not ft"\'.'
+                        "Test target(s), relative to project root (passed "
+                        "as-is to the adapter, e.g. a pytest path expression)."
                     ),
                 },
             },
@@ -63,14 +60,9 @@ TOOLS = [
     types.Tool(
         name="write_test_skeleton",
         description=(
-            "Optional alternative to write_test: use only when explicitly "
-            "asked to write a TODO-annotated test skeleton instead of a "
-            "finished test — e.g. stub test functions with TODO comments "
-            "describing the cases to cover, leaving the assertions for a "
-            "later write_test/write_test_skeleton call to fill in (often "
-            "after a human adds detail to the TODOs). Same RED-only gate "
-            "as write_test; otherwise identical. Don't use this unless the "
-            "skeleton-first workflow was asked for — default to write_test."
+            "Write a TODO-annotated test stub instead of a finished test. "
+            "RED phase only. Use only if the skeleton-first workflow was "
+            "explicitly requested — otherwise use write_test."
         ),
         inputSchema={
             "type": "object",
@@ -96,10 +88,8 @@ TOOLS = [
     types.Tool(
         name="verify",
         description=(
-            "User confirms the current checkpoint before the cycle "
-            "proceeds — a failing test in RED (advances to IMPLEMENT), or "
-            "a passing implementation in GREEN (advances to REFACTOR). "
-            "Only available in VERIFY_RED or VERIFY_GREEN phase."
+            "User confirms the checkpoint (failing test or passing impl) "
+            "and advances the cycle. VERIFY_RED or VERIFY_GREEN phase only."
         ),
         inputSchema={"type": "object", "properties": {}},
     ),
@@ -122,40 +112,32 @@ TOOLS = [
     ),
     types.Tool(
         name="get_status",
-        description="Get current feature, phase, test results, and available tools.",
+        description="Get current feature, phase, drill-down stack, and last test result.",
         inputSchema={"type": "object", "properties": {}},
     ),
     types.Tool(
         name="reset_feature",
         description=(
             "Discard the current feature from any phase and clear state. "
-            "Use this to abandon a feature (e.g. wrong approach, stuck in "
-            "REFACTOR). For finishing a feature that's actually done, use "
-            "complete_feature instead."
+            "Use complete_feature instead if it's actually done."
         ),
         inputSchema={"type": "object", "properties": {}},
     ),
     types.Tool(
         name="complete_feature",
         description=(
-            "Mark the current feature complete. Only allowed at the base "
-            "level (depth 1 — return_to_parent out of any drill-downs "
-            "first), in RED phase, after at least one full "
-            "RED->VERIFY_RED->IMPLEMENT->VERIFY_GREEN->REFACTOR cycle. "
-            "Clears feature state, same as reset_feature, but signals "
-            "success rather than abandonment."
+            "Mark the current feature complete and clear its state. Only "
+            "at base level (depth 1) in RED phase, after >=1 full cycle."
         ),
         inputSchema={"type": "object", "properties": {}},
     ),
     types.Tool(
         name="drill_down",
         description=(
-            "Push a nested test target on top of the current one — a unit "
-            "test, a different app's tests, any test file you need along "
-            "the way. Only allowed in IMPLEMENT phase. The nested level "
-            "runs its own independent "
-            "RED->VERIFY_RED->IMPLEMENT->VERIFY_GREEN->REFACTOR cycle; "
-            "call return_to_parent when it's done."
+            "Push a nested test target on top of the current one (e.g. a "
+            "unit test needed mid-implementation). IMPLEMENT phase only; "
+            "runs its own RED->...->REFACTOR cycle. Call return_to_parent "
+            "when done."
         ),
         inputSchema={
             "type": "object",
@@ -166,22 +148,18 @@ TOOLS = [
     types.Tool(
         name="return_to_parent",
         description=(
-            "Pop the current drill-down level and resume the one beneath "
-            "it. Only allowed in RED phase, after at least one full cycle "
-            "has finished at the current (nested) level. For popping a "
-            "drill-down that turned out to be unnecessary before it's "
-            "finished, use abandon_drill_down instead."
+            "Pop the finished drill-down level and resume the parent. "
+            "RED phase only, after >=1 full cycle at this level. Use "
+            "abandon_drill_down instead if the level isn't finished."
         ),
         inputSchema={"type": "object", "properties": {}},
     ),
     types.Tool(
         name="abandon_drill_down",
         description=(
-            "Unconditionally pop the current drill-down level — no phase "
-            "or cycle requirement — and resume the one beneath it. Use "
-            "this when a drilled-down test turns out not to be needed. "
-            "Not allowed at the base level (depth 1); use reset_feature "
-            "to discard the whole feature instead."
+            "Unconditionally pop the current drill-down level (no phase/"
+            "cycle requirement) when it turns out unneeded. Not allowed "
+            "at depth 1 — use reset_feature for that."
         ),
         inputSchema={"type": "object", "properties": {}},
     ),
@@ -269,7 +247,7 @@ class TDDServer:
                         "feature."
                     )
                 self.sm.init_feature(arguments["featureName"], arguments["testFile"])
-                return self._text(self.sm.status())
+                return self._text(self.sm.status(include_last_result=False))
 
             if name == "write_test":
                 self.sm.write_test(arguments["testName"], arguments["code"])
@@ -280,7 +258,7 @@ class TDDServer:
                             f"Test '{arguments['testName']}' recorded. "
                             "Write it to the test file, then call run_tests()."
                         ),
-                        **self.sm.status(),
+                        **self.sm.status(include_last_result=False),
                     }
                 )
 
@@ -295,7 +273,7 @@ class TDDServer:
                             "then fill it in (write_test or "
                             "write_test_skeleton again) before run_tests()."
                         ),
-                        **self.sm.status(),
+                        **self.sm.status(include_last_result=False),
                     }
                 )
 
@@ -308,7 +286,7 @@ class TDDServer:
                             f"Code change for '{arguments['filePath']}' recorded. "
                             "Write it to disk, then call run_tests()."
                         ),
-                        **self.sm.status(),
+                        **self.sm.status(include_last_result=False),
                     }
                 )
 
@@ -321,23 +299,27 @@ class TDDServer:
                             f"Refactor recorded: {arguments['description']}. "
                             "Call run_tests() to confirm nothing broke."
                         ),
-                        **self.sm.status(),
+                        **self.sm.status(include_last_result=False),
                     }
                 )
 
             if name == "verify":
                 self.sm.verify()
-                return self._text({"ok": True, **self.sm.status()})
+                return self._text(
+                    {"ok": True, **self.sm.status(include_last_result=False)}
+                )
 
             if name == "run_tests":
                 return self._text(self._run_tests())
 
             if name == "get_status":
-                return self._text(self.sm.status())
+                return self._text(self.sm.status(include_stack=True))
 
             if name == "reset_feature":
                 self.sm.reset_feature()
-                return self._text({"ok": True, **self.sm.status()})
+                return self._text(
+                    {"ok": True, **self.sm.status(include_last_result=False)}
+                )
 
             if name == "complete_feature":
                 summary = self.sm.complete_feature()
@@ -348,7 +330,7 @@ class TDDServer:
                             f"Feature '{summary['featureName']}' completed "
                             f"after {summary['cyclesCompleted']} cycle(s)."
                         ),
-                        **self.sm.status(),
+                        **self.sm.status(include_last_result=False),
                     }
                 )
 
@@ -362,7 +344,7 @@ class TDDServer:
                             f"(depth {self.sm.depth}). Write a failing test "
                             "there, then call run_tests()."
                         ),
-                        **self.sm.status(),
+                        **self.sm.status(include_last_result=False),
                     }
                 )
 
@@ -376,7 +358,7 @@ class TDDServer:
                             f"{summary['cyclesCompleted']} cycle(s). "
                             f"Back at depth {self.sm.depth}."
                         ),
-                        **self.sm.status(),
+                        **self.sm.status(include_last_result=False),
                     }
                 )
 
@@ -391,7 +373,7 @@ class TDDServer:
                             f"{summary['cycleCount']} cycle(s) completed). "
                             f"Back at depth {self.sm.depth}."
                         ),
-                        **self.sm.status(),
+                        **self.sm.status(include_last_result=False),
                     }
                 )
 

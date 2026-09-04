@@ -344,4 +344,4 @@ def test_status_shape():
     assert status["phase"] == "verify_red"
     assert status["lastResult"]["failed"] == 1
     assert status["lastResult"]["durationMs"] == 42
-    assert "verify" in status["availableTools"]
+    assert "verify" in sm.available_tools()

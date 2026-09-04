@@ -300,29 +300,42 @@ class TDDStateMachine:
             return ("init_feature", "get_status")
         return TOOLS_BY_PHASE[self.phase]
 
-    def status(self) -> dict[str, Any]:
-        return {
+    def status(
+        self, *, include_stack: bool = False, include_last_result: bool = True
+    ) -> dict[str, Any]:
+        """Build the status payload attached to tool responses.
+
+        Both extras default off/minimal for most calls to keep per-response
+        size down — only get_status() (include_stack) and calls that can
+        actually change last_result (include_last_result) need the full
+        picture; the caller decides per tool in server.py.
+        """
+        payload: dict[str, Any] = {
             "featureName": self.feature_name,
             "depth": self.depth,
             "testFile": self.test_file,
             "phase": self.phase,
             "cycleCount": self.cycle_count,
-            "stack": [
+            "lastError": self.last_error,
+        }
+        if include_stack:
+            payload["stack"] = [
                 {
                     "testFile": lvl.test_file,
                     "phase": lvl.phase,
                     "cycleCount": lvl.cycle_count,
                 }
                 for lvl in self.stack
-            ],
-            "lastResult": None
-            if self.last_result is None
-            else {
-                "passed": self.last_result.passed,
-                "failed": self.last_result.failed,
-                "durationMs": self.last_result.duration_ms,
-                "failures": self.last_result.failures,
-            },
-            "lastError": self.last_error,
-            "availableTools": list(self.available_tools()),
-        }
+            ]
+        if include_last_result:
+            payload["lastResult"] = (
+                None
+                if self.last_result is None
+                else {
+                    "passed": self.last_result.passed,
+                    "failed": self.last_result.failed,
+                    "durationMs": self.last_result.duration_ms,
+                    "failures": self.last_result.failures,
+                }
+            )
+        return payload
