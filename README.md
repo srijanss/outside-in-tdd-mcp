@@ -225,3 +225,32 @@ bash expansion) — `shlex` correctly keeps a quoted marker expression like
 `"not ft"` as one token instead of shredding it on the space inside the
 quotes. The pytest adapter (`adapters/pytest-adapter/run.sh`) does exactly
 this; use it as the reference shape for a new adapter.
+
+## Getting Claude to actually use this instead of editing files directly
+
+Being connected (`/mcp` shows it) doesn't make Claude prefer these tools
+over its own Edit/Write tools — you have to ask. `.claude/commands/` has two
+ready-made slash commands (copy them into any consumer project that wants
+this workflow — see `.claude/commands/*.md` for the full prompt each one
+sends):
+
+- `/tdd-start <feature-name> <test-file>` — starts a feature and walks
+  through RED→IMPLEMENT→GREEN→REFACTOR (with drill-downs) using the
+  server's tools at each step. Quote the feature name if it has spaces:
+  `/tdd-start "checkout discount" tests/functional/test_checkout.py`.
+- `/tdd-start-skeleton <feature-name> <test-file>` — same, but RED uses
+  `write_test_skeleton` and pauses for you to fill in TODOs before
+  continuing.
+
+Both are just prompt templates (`$1`/`$2` filled in from what you type after
+the command) — nothing MCP-specific about the mechanism, they just save you
+retyping the boilerplate instructions every time. `init_feature`'s `testFile`
+has to be an actual file — `write_test` has no `filePath` argument at all
+(it's purely a phase checkpoint, same as `write_code`/`refactor_code`), so
+if `testFile` were left as a bare directory, Claude would be guessing where
+to put the new test with nothing to check its guess against. So both
+commands resolve `$1`/`$2` before calling `init_feature`: missing arguments
+get asked for outright, and a directory-shaped test target (e.g. `app/`
+instead of a specific file) makes Claude inspect how the project's other
+apps/modules already lay out their tests and propose a concrete path for
+you to confirm, rather than silently inventing one.
