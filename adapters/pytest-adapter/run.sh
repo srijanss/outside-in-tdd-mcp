@@ -70,13 +70,23 @@ def main() -> int:
     failed = summary.get("failed", 0)
     errors = summary.get("error", 0)
     if errors:
-        # Collection errors (bad -m expression, syntax error, missing path,
-        # ...) don't show up in "tests" — surface them as failures too,
-        # rather than silently reporting passed=0/failed=0.
+        # Per-test "error" outcomes (e.g. a fixture raising during setup or
+        # teardown) — collection ran fine, but a test errored before/after
+        # its body. These don't show up in "tests" as "failed", so surface
+        # them here rather than silently reporting passed=0/failed=0.
         failed += errors
         failures.append(
             {"name": "collection", "message": raw_output[-500:]}
         )
+    elif proc.returncode in (2, 3, 4):
+        # Collection interrupted entirely (ImportError, syntax error, bad
+        # path, bad -m expression, ...) before any test ran — distinct from
+        # the per-test errors above: summary has no "error" key at all
+        # here, so exit code (2=interrupted, 3=internal, 4=usage error) is
+        # the only remaining signal. Exit code 5 ("no tests collected") is
+        # excluded on purpose — an empty selection isn't a failure.
+        failed += 1
+        failures.append({"name": "collection", "message": raw_output[-500:]})
 
     result = {
         "passed": summary.get("passed", 0),
