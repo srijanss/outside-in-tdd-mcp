@@ -1,8 +1,13 @@
 # Outside-In TDD MCP Server — Project Spec
 
+> **Status:** this is the original design doc. The phases, tool list, and
+> adapter example below have been updated to match what's actually built —
+> for anything not covered here (drill-down rationale, the human verify
+> checkpoints, per-tool details), `README.md` is the up-to-date reference.
+
 ## Goal
 
-Build a **language-agnostic MCP server** that enforces Outside-In TDD (RED → GREEN → REFACTOR) when using Claude Code. The core has zero knowledge of any programming language or test framework — that knowledge lives in small, swappable **adapters**.
+Build a **language-agnostic MCP server** that enforces Outside-In TDD (RED → VERIFY_RED → IMPLEMENT → VERIFY_GREEN → REFACTOR) when using Claude Code. The core has zero knowledge of any programming language or test framework — that knowledge lives in small, swappable **adapters**.
 
 Use case: Currently building for Django (pytest), but designed so any future project (Rust, Go, JS, TS) can plug in without touching the core.
 
@@ -13,7 +18,7 @@ Use case: Currently building for Django (pytest), but designed so any future pro
 ```
 outside-in-tdd-mcp-base/              ← Built once, reused everywhere
 ├── server.py                         ← MCP protocol handler (stdio transport)
-├── state_machine.py                  ← Phase logic: RED/GREEN/REFACTOR + acceptance→unit drill-down
+├── state_machine.py                  ← Phase logic: RED/VERIFY_RED/IMPLEMENT/VERIFY_GREEN/REFACTOR + depth-based drill-down
 ├── adapter_contract.py               ← Defines the interface every adapter must satisfy
 ├── Dockerfile                        ← Zero language runtimes, just Python for the MCP server itself
 └── requirements-core.txt             ← Only MCP SDK + minimal deps
@@ -35,7 +40,7 @@ your-django-project/                  ← Example consumer project
 
 ## Core Design Decisions (Already Made)
 
-1. **Core tracks acceptance vs. unit test distinction.** The adapter doesn't know or care what kind of test it's running — it just runs whatever file/target path it's given and returns results. The state machine in `state_machine.py` tracks whether the current test file is an acceptance test or a unit test.
+1. **Core tracks depth, not an acceptance/unit label.** The adapter doesn't know or care what kind of test it's running — it just runs whatever file/target path it's given and returns results. A feature is a *stack* of test-target levels: `init_feature` pushes the base level, `drill_down` pushes any nested test target needed along the way (a unit test, a different app, anything), each running its own independent phase cycle. There's no "acceptance"/"unit" label anywhere — depth in the stack is the only signal, since a feature may fan out into any number of test files across any number of areas of the codebase.
 
 2. **Config is split into two files:**
    - `.mcp.json` — Claude Code's concern: how to launch the server (command, args, volume mounts)
@@ -88,10 +93,17 @@ This is the entire interface between the core and any language. Any adapter — 
 ### Phases
 
 ```
-RED       → Write/run a failing test
-GREEN     → Write code to make it pass
-REFACTOR  → Clean up code, tests must stay green
+RED           → Write/run a failing test
+VERIFY_RED    → Checkpoint: a human confirms the failing test is the right one
+IMPLEMENT     → Write code to make it pass
+VERIFY_GREEN  → Checkpoint: a human confirms the passing implementation looks right
+REFACTOR      → Clean up code, tests must stay green
 ```
+
+`VERIFY_RED` and `VERIFY_GREEN` aren't in the original 3-phase list above —
+see README.md for why they exist: they're single-tool phases (only
+`verify()`/`get_status()` are callable) so an agent can't self-approve past
+the two points where its judgment is easiest to get wrong unnoticed.
 
 ### Feature Lifecycle
 
@@ -101,154 +113,86 @@ init_feature(name, testFile)
 
 write_test(name, code)
   → Only allowed in RED
-  → Blocks with error if called in GREEN or REFACTOR
+  → Blocks with error otherwise
 
 run_tests()
   → Calls adapter, gets JSON result
-  → If RED and failures > 0: stay in RED
-  → If RED and failures == 0 and passed > 0: advance to GREEN
-  → If GREEN: advance to REFACTOR (assumes you're now ready to clean)
+  → If RED and failures > 0: advance to VERIFY_RED
+  → If RED and failures == 0 and passed > 0: advance to VERIFY_GREEN (nothing needed implementing)
+  → If IMPLEMENT and failures > 0: stay in IMPLEMENT
+  → If IMPLEMENT and failures == 0 and passed > 0: advance to VERIFY_GREEN
   → If REFACTOR and tests still pass: advance back to RED, increment cycle count
   → If REFACTOR and tests fail: something broke during refactor, stay in REFACTOR, surface error
 
+verify()
+  → Only allowed in VERIFY_RED or VERIFY_GREEN
+  → VERIFY_RED → IMPLEMENT; VERIFY_GREEN → REFACTOR
+  → No auto-approval path — a human (via the calling agent) must call this
+
 write_code(filePath, code)
-  → Only allowed in GREEN
-  → Blocks with error if called in RED or REFACTOR
+  → Only allowed in IMPLEMENT
+  → Blocks with error otherwise
 
 refactor_code(description)
   → Only allowed in REFACTOR
-  → Blocks with error if called in RED or GREEN
+  → Blocks with error otherwise
 
 get_status()
-  → Returns: current feature, phase, cycle count, last test results, available tools
+  → Returns: current feature, depth, phase, cycle count, last test results, available tools
 
 reset_feature()
-  → Clears current feature state, ready for init_feature() on a new feature
+  → Discards the current feature from any phase/depth, ready for init_feature() on a new one
+
+complete_feature()
+  → Only allowed at depth 1, in RED, after cycleCount >= 1
+  → Clears feature state and reports success (distinct from reset_feature's abandonment)
+
+drill_down(testFile)
+  → Only allowed in IMPLEMENT — pushes a nested test target with its own independent cycle
+
+return_to_parent()
+  → Only allowed in RED after the current (nested) level finishes a full cycle — pops back to the parent
+
+abandon_drill_down()
+  → Unconditionally pops the current nested level, any phase, any cycle count — for a drill-down that turned out unnecessary
 ```
 
 ### Tool Availability By Phase
 
 ```
-RED:      write_test, run_tests, get_status, init_feature
-GREEN:    write_code, run_tests, get_status
-REFACTOR: refactor_code, run_tests, get_status
+RED:           write_test, run_tests, get_status, init_feature
+VERIFY_RED:    verify, get_status
+IMPLEMENT:     write_code, run_tests, get_status
+VERIFY_GREEN:  verify, get_status
+REFACTOR:      refactor_code, run_tests, get_status
 ```
 
 ---
 
 ## MCP Tool Definitions (for server.py)
 
-```python
-TOOLS = [
-    {
-        "name": "init_feature",
-        "description": "Start a new TDD feature. Sets phase to RED.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "featureName": {"type": "string"},
-                "testFile": {"type": "string", "description": "Path relative to project root"}
-            },
-            "required": ["featureName", "testFile"]
-        }
-    },
-    {
-        "name": "write_test",
-        "description": "Write a failing test. Only available in RED phase.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "testName": {"type": "string"},
-                "code": {"type": "string"}
-            },
-            "required": ["testName", "code"]
-        }
-    },
-    {
-        "name": "write_code",
-        "description": "Write implementation code. Only available in GREEN phase.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "filePath": {"type": "string"},
-                "code": {"type": "string"}
-            },
-            "required": ["filePath", "code"]
-        }
-    },
-    {
-        "name": "run_tests",
-        "description": "Run the test suite via the configured adapter. Auto-advances phase based on results.",
-        "input_schema": {"type": "object", "properties": {}}
-    },
-    {
-        "name": "refactor_code",
-        "description": "Refactor code. Only available in REFACTOR phase.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "description": {"type": "string"}
-            },
-            "required": ["description"]
-        }
-    },
-    {
-        "name": "get_status",
-        "description": "Get current feature, phase, test results, and available tools.",
-        "input_schema": {"type": "object", "properties": {}}
-    },
-    {
-        "name": "reset_feature",
-        "description": "Reset current feature. Allows starting a new one.",
-        "input_schema": {"type": "object", "properties": {}}
-    }
-]
-```
+The full `TOOLS` list (with exact descriptions and input schemas) lives in
+`core/server.py` — duplicating it here just goes stale, as this section
+already did once. Current tool names: `init_feature`, `write_test`,
+`write_test_skeleton`, `write_code`, `verify`, `run_tests`,
+`refactor_code`, `get_status`, `reset_feature`, `complete_feature`,
+`drill_down`, `return_to_parent`, `abandon_drill_down`. See the "State
+Machine Specification" section above for what each does and when it's
+allowed.
 
 ---
 
 ## Example: pytest Adapter
 
-```bash
-#!/bin/bash
-# adapters/pytest-adapter/run.sh
-set -e
-
-TEST_TARGET=$1
-PROJECT_ROOT=$2
-
-cd "$PROJECT_ROOT"
-
-pytest "$TEST_TARGET" -v --tb=short --json-report --json-report-file=/tmp/tdd-report.json > /tmp/tdd-raw-output.txt 2>&1 || true
-
-python3 <<EOF
-import json
-
-with open('/tmp/tdd-report.json') as f:
-    report = json.load(f)
-
-with open('/tmp/tdd-raw-output.txt') as f:
-    raw_output = f.read()
-
-failures = []
-for test in report.get('tests', []):
-    if test['outcome'] == 'failed':
-        failures.append({
-            'name': test['nodeid'],
-            'message': str(test.get('call', {}).get('longrepr', ''))[:500]
-        })
-
-result = {
-    'passed': report['summary'].get('passed', 0),
-    'failed': report['summary'].get('failed', 0),
-    'duration_ms': int(report.get('duration', 0) * 1000),
-    'failures': failures,
-    'raw_output': raw_output[-3000:]  # last 3000 chars to avoid huge output
-}
-
-print(json.dumps(result))
-EOF
-```
+The real, current implementation is `adapters/pytest-adapter/run.sh` — it's
+grown real edge-case handling since this doc was first written (a
+collection-time error, like a bad import or syntax error, has to be
+distinguished from a per-test fixture setup/teardown error and from a
+benign "no tests collected" result — pytest and `pytest-json-report`
+signal these differently, and getting this wrong means a real RED failure
+gets silently reported as `passed=0, failed=0`), so it's no longer
+reproduced here. Read that file directly; the shape it must satisfy is
+unchanged — see "The Adapter Contract" above.
 
 **Requires:** `pip install pytest-json-report` in whatever environment runs this (Docker image or mounted venv).
 
@@ -329,9 +273,11 @@ sm = TDDStateMachine()
 sm.init_feature("test feature", "tests/test_x.py")
 assert sm.phase == "red"
 sm.record_test_result(passed=0, failed=1)
-assert sm.phase == "red"  # still red
+assert sm.phase == "verify_red"  # advanced — a human confirms before IMPLEMENT unlocks
+sm.verify()
+assert sm.phase == "implement"
 sm.record_test_result(passed=1, failed=0)
-assert sm.phase == "green"  # advanced
+assert sm.phase == "verify_green"  # advanced
 ```
 
 ### Step 2: Adapter contract + pytest adapter
@@ -402,9 +348,10 @@ outside-in-tdd-mcp/
 - [ ] `state_machine.py` has unit tests covering every phase transition, run standalone with pytest (meta, testing the tester)
 - [ ] `pytest-adapter/run.sh` runs standalone against a real test file, outputs valid contract JSON
 - [ ] `server.py` starts and responds to `get_tools` MCP call
-- [ ] Full cycle works manually: `init_feature` → `write_test` → `run_tests` (fails, stays RED) → `write_code` → `run_tests` (passes, advances GREEN) → `refactor_code` → `run_tests` (passes, advances back to RED)
+- [ ] Full cycle works manually: `init_feature` → `write_test` → `run_tests` (fails, advances to VERIFY_RED) → `verify` → `write_code` → `run_tests` (passes, advances to VERIFY_GREEN) → `verify` → `refactor_code` → `run_tests` (passes, advances back to RED)
 - [ ] Server correctly **blocks** `write_code` when called during RED phase
-- [ ] Server correctly **blocks** `write_test` when called during GREEN phase
+- [ ] Server correctly **blocks** `write_test` when called during IMPLEMENT phase
+- [ ] Server correctly **blocks** `verify` when called outside VERIFY_RED/VERIFY_GREEN (an agent can't self-approve past the checkpoint)
 - [ ] `.mcp.json` successfully launches the server from claudecode.nvim
 - [ ] `/mcp` in Claude Code shows `outside-in-tdd` as connected
 - [ ] Full real feature (payment email validation or similar) built end-to-end through Claude using only these MCP tools

@@ -247,11 +247,27 @@ class TDDServer:
     def _error(self, message: str) -> list[types.TextContent]:
         return self._text({"error": message})
 
+    def _try_load_config(self) -> tuple[dict[str, Any] | None, str | None]:
+        try:
+            return load_config(self.config_path), None
+        except (FileNotFoundError, ConfigError) as exc:
+            return None, str(exc)
+
     def call_tool(
         self, name: str, arguments: dict[str, Any]
     ) -> list[types.TextContent]:
         try:
             if name == "init_feature":
+                config, error = self._try_load_config()
+                if error:
+                    return self._error(error)
+                adapter_path = config["adapterPath"]
+                if not Path(adapter_path).exists():
+                    return self._error(
+                        f"Configured adapterPath '{adapter_path}' does not "
+                        "exist. Fix .tdd-config.json before starting a "
+                        "feature."
+                    )
                 self.sm.init_feature(arguments["featureName"], arguments["testFile"])
                 return self._text(self.sm.status())
 
@@ -390,13 +406,12 @@ class TDDServer:
         if self.sm.phase is None:
             return {"error": "No active feature. Call init_feature() first."}
 
-        try:
-            config = load_config(self.config_path)
-        except (FileNotFoundError, ConfigError) as exc:
-            return {"error": str(exc)}
+        config, error = self._try_load_config()
+        if error:
+            return {"error": error}
 
         adapter_path = config["adapterPath"]
-        test_target = self.sm.test_file or config.get("defaultTestDir", ".")
+        test_target = self.sm.test_file
 
         try:
             result = run_adapter(adapter_path, test_target, self.project_root)
