@@ -210,3 +210,39 @@ def test_regression_check_does_not_double_count_overlapping_tests(tmp_path):
     assert payload["cycleCount"] == 1
     assert payload["testResult"]["passed"] == 3  # not 5 (2 own + 3 whole, double-counted)
     assert payload["testResult"]["failed"] == 0
+
+
+def test_regression_check_attributes_failure_to_refactor_when_own_target_breaks(tmp_path):
+    # closing_base_refactor's combined run can fail because the cycle's own
+    # test broke, not because of a regression elsewhere. The second
+    # (own-target-only) adapter call must attribute that correctly: keep
+    # the standard "Refactor broke the tests." message and leave failure
+    # names unprefixed (no "REGRESSION:") rather than blaming the rest of
+    # the suite.
+    suite_dir = tmp_path / "suite"
+    suite_dir.mkdir()
+    (suite_dir / "test_a.py").write_text("def test_a1():\n    assert True\n")
+    (suite_dir / "test_b.py").write_text("def test_b1():\n    assert True\n")
+
+    adapter_path = str(PROJECT_ROOT / "adapters" / "pytest-adapter" / "run.sh")
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(
+        json.dumps({"adapterPath": adapter_path, "defaultTestDir": "."})
+    )
+    server = TDDServer(project_root=str(suite_dir), config_path=str(config_path))
+    call(server, "init_feature", featureName="f", testFile="test_a.py")
+
+    call(server, "run_tests")  # red -> verify_green (own target passes)
+    call(server, "verify")  # -> refactor
+
+    # Simulate the refactor breaking the cycle's own test.
+    (suite_dir / "test_a.py").write_text("def test_a1():\n    assert False\n")
+
+    payload = call(server, "run_tests")  # closes refactor -> regression check runs
+
+    assert payload["phase"] == "refactor"  # blocked: own target broke
+    assert payload["lastError"] == "Refactor broke the tests."
+    assert not any(
+        f["name"].startswith("REGRESSION:")
+        for f in payload["testResult"]["failures"]
+    )
