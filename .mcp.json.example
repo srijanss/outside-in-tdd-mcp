@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "outside-in-tdd": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-v",
+        "${CLAUDE_PROJECT_DIR:-.}:/app",
+        "-w",
+        "/app",
+        "outside-in-tdd-mcp:pytest"
+      ]
+    }
+  }
+}

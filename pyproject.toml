@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "outside-in-tdd-mcp"
+version = "0.1.0"
+description = "Language-agnostic MCP server enforcing Outside-In TDD phases"
+requires-python = ">=3.10"
+dependencies = ["mcp>=1.2.0,<2"]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-json-report"]
+
+[project.scripts]
+outside-in-tdd-mcp = "core.server:run"
+
+[tool.setuptools]
+packages = ["core"]
