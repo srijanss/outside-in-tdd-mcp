@@ -239,6 +239,14 @@ class TDDStateMachine:
                 f"phase (current phase: {level.phase.upper()})."
             )
 
+    def set_last_error(self, message: str) -> None:
+        """Override the current level's last_error — for a caller (server.py)
+        that has more context than record_test_result's generic per-phase
+        message, e.g. distinguishing "this refactor broke its own test" from
+        "an unrelated regression was found elsewhere"."""
+        self._require_feature()
+        self.stack[-1].last_error = message
+
     # -- run_tests: the only phase-advancing action -----------------------
 
     def record_test_result(

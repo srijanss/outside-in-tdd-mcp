@@ -1,4 +1,5 @@
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -134,3 +135,40 @@ def test_refactor_closing_cycle_also_checks_full_suite_for_regressions(tmp_path)
     assert payload["phase"] == "refactor"
     assert payload["cycleCount"] == 0
     assert payload["testResult"]["failed"] >= 1
+
+
+def test_regression_check_merges_passed_counts_and_reports_accurate_error(tmp_path):
+    adapter_path = str(PROJECT_ROOT / "adapters" / "pytest-adapter" / "run.sh")
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "adapterPath": adapter_path,
+                "defaultTestDir": "tests/fixtures/mixed_pass_and_fail.py",
+            }
+        )
+    )
+    server = TDDServer(project_root=str(PROJECT_ROOT), config_path=str(config_path))
+    call(server, "init_feature", featureName="f", testFile="tests/test_state_machine.py")
+
+    own_result = json.loads(
+        subprocess.run(
+            [adapter_path, "tests/test_state_machine.py", str(PROJECT_ROOT)],
+            capture_output=True,
+            text=True,
+        ).stdout
+    )
+
+    call(server, "run_tests")  # red -> verify_green (own target already passes)
+    call(server, "verify")  # -> refactor
+
+    payload = call(server, "run_tests")  # closes refactor -> triggers regression check
+
+    assert payload["phase"] == "refactor"  # blocked: regression found
+    # The regression fixture has 1 passing and 1 failing test — both must
+    # be counted, not just the failure.
+    assert payload["testResult"]["passed"] == own_result["passed"] + 1
+    assert payload["testResult"]["failed"] == 1
+    # A regression elsewhere didn't come from this refactor — the error
+    # message must not blame the refactor for it.
+    assert "Refactor broke the tests" not in (payload["lastError"] or "")

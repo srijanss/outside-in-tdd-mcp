@@ -424,6 +424,7 @@ class TDDServer:
         # can't slip through unnoticed. Nested drill-down levels skip this;
         # only the outer feature's cycle gates completion.
         default_test_dir = config.get("defaultTestDir")
+        regression = None
         if (
             self.sm.phase == "refactor"
             and self.sm.depth == 1
@@ -436,6 +437,7 @@ class TDDServer:
                 )
             except AdapterError as exc:
                 return {"error": f"Regression check failed to run: {exc}"}
+            result.passed += regression.passed
             if regression.failed > 0:
                 result.failed += regression.failed
                 result.failures = result.failures + [
@@ -450,6 +452,16 @@ class TDDServer:
             failures=result.failures,
             raw_output=result.raw_output,
         )
+
+        if regression is not None and regression.failed > 0:
+            # record_test_result's generic REFACTOR-failure message ("Refactor
+            # broke the tests.") is wrong here — this cycle's own test passed;
+            # the failure came from the separate regression check.
+            self.sm.set_last_error(
+                "Regression check found pre-existing failures elsewhere "
+                "(not caused by this refactor) — see the REGRESSION: "
+                "entries in failures."
+            )
 
         return {
             "testResult": {
