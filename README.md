@@ -20,6 +20,128 @@ the right reason, then write the code that makes it pass) — the same shape as
 phase, since `write_code` can't be GREEN-only when GREEN is only reachable by
 already-passing tests.
 
+## Architecture
+
+This server is a **gatekeeper**, not a test runner. It holds a phase state
+machine in memory and refuses to let Claude call certain tools unless the
+phase is right — it never writes code or interprets test output itself. The
+actual test-running is delegated to a small external script (an "adapter")
+that knows nothing about TDD, phases, or MCP; it just runs a test command and
+prints JSON. The split exists so that **swapping languages means writing a
+new adapter script, not touching the server** — today it's pytest, tomorrow
+it could be `cargo test` or `vitest`, with zero changes to `core/`.
+
+**Why the phase-gating matters.** Without it, an agent doing "TDD" can
+quietly skip RED — writing the implementation and a passing test in the same
+breath, never observing a real failure, which defeats the point (a test that
+never went red might be asserting nothing). Each `write_*` tool raises a
+`PhaseError` if called out of turn, surfaced back to Claude as a normal tool
+result rather than a crash, so Claude sees "blocked: only allowed in
+IMPLEMENT phase" and self-corrects.
+
+**Why `IMPLEMENT` exists.** It's not in the original spec's phase list. The
+original design gated `write_code` to GREEN-only, but GREEN was only
+reachable once tests already passed — a chicken-and-egg problem: you can't
+write the code that makes tests pass if you're not allowed to write code
+until they pass. `IMPLEMENT` sits between RED and GREEN to close that gap: a
+failing test in RED moves you into IMPLEMENT, where `write_code` unlocks, and
+only once tests pass there do you land in GREEN. GREEN is then a one-tool
+checkpoint — calling `run_tests` again unconditionally advances to REFACTOR,
+trusting you're ready to clean up.
+
+**A feature is a stack of test targets, not one flat file.** A functional
+test rarely gets to GREEN in one leap — it usually needs several unit tests
+underneath it, possibly across several apps (`cart/`, `orders/`, ...).
+`init_feature` pushes the base level (typically the functional/acceptance
+test). `drill_down(testFile)` — only callable in IMPLEMENT — pushes any
+other test target on top; it runs its own fully independent
+RED→IMPLEMENT→GREEN→REFACTOR cycle, gated exactly like the base level.
+`return_to_parent()` pops back once that nested level finishes a full cycle
+(same "RED phase, `cycleCount >= 1`" gate `complete_feature` uses), resuming
+the level below exactly where it left off — no phase change, since it was
+already sitting in IMPLEMENT waiting. You can drill down as many times, and
+as deep, as the feature actually needs; `status()`'s `stack` field shows the
+whole chain. There's deliberately no "acceptance"/"unit" label anywhere —
+depth alone tells you whether you're at the outer functional test or nested
+inside a detour, since a real feature may fan out into any number of test
+files across any number of areas of the codebase, not just a fixed two-level
+split. `complete_feature` now additionally requires depth 1 — you have to
+`return_to_parent` out of every drill-down before the whole feature can be
+marked done.
+
+**`return_to_parent` vs `abandon_drill_down`.** Same completed/abandoned
+split as `complete_feature`/`reset_feature`, scoped to one level instead of
+the whole feature. `return_to_parent` only pops once the nested level
+finishes a full cycle (RED, `cycleCount >= 1`) — it means "this drill-down
+did its job." `abandon_drill_down` pops unconditionally, from any phase,
+with zero cycles required — it means "this drill-down turned out to be
+unnecessary," e.g. you drilled into a test file and realized mid-IMPLEMENT
+that it wasn't actually needed for the parent to pass. Both resume the
+parent level exactly where it was; neither is allowed at depth 1 (the base
+level) — `reset_feature` is the equivalent there.
+
+**`write_test` vs `write_test_skeleton`.** Identical enforcement — both are
+gated to RED only — the only difference is the name, which exists purely to
+carry intent. Note that neither tool actually writes a file or stores any
+code: `write_test(testName, code)` and `write_test_skeleton(testName, code)`
+both just check the phase and discard their arguments (`state_machine.py`);
+the real file write happens through Claude's own edit tools outside the MCP
+protocol entirely. `write_test_skeleton` is opt-in — use it only when
+explicitly asked for a skeleton-first workflow (stub test functions with
+TODO comments describing the cases to cover, pause for a human to fill in
+the TODOs with real detail, then a later `write_test`/`write_test_skeleton`
+call fills in the assertions) — otherwise Claude should just call
+`write_test` directly, same as before this tool existed.
+
+**`reset_feature` vs `complete_feature`.** These sound similar but signal
+opposite outcomes. `reset_feature` is phase-unguarded — callable from any
+phase, or with no feature active — and exists purely to abandon a feature
+(wrong approach, stuck in a broken REFACTOR, whatever). `complete_feature`
+only succeeds in RED with `cycleCount >= 1` (i.e. at least one full
+RED→IMPLEMENT→GREEN→REFACTOR loop has actually finished), and its response
+says so explicitly ("Feature 'x' completed after N cycle(s)."). Both clear
+state identically underneath; the difference is entirely in what got
+verified before clearing and what the response tells Claude happened.
+
+**Why the file responsibilities are split this way:**
+
+- `core/state_machine.py` is pure Python with zero I/O and zero MCP
+  knowledge — just phase, cycle count, last result, and "you may only call X
+  in phase Y." That makes it trivially unit-testable without mocking
+  anything (see `tests/test_state_machine.py`) and reusable outside an MCP
+  context entirely.
+- `core/adapter_contract.py` is the seam between core and language. It shells
+  out to whatever adapter path is configured, with a timeout, and validates
+  the JSON contract (`passed`, `failed`, `duration_ms`, `failures`,
+  `raw_output`) coming back — raising `AdapterError` rather than crashing the
+  server if the adapter misbehaves.
+- `adapters/pytest-adapter/run.sh` is the only pytest-specific code in the
+  whole project. To support a new language, clone this file's shape (same
+  CLI contract, same JSON shape out) with entirely different guts inside.
+- `core/server.py` is the MCP glue: registers the 12 tools, dispatches each
+  `call_tool` into a `TDDStateMachine` method, and for `run_tests`
+  specifically also calls the adapter and feeds the result back into the
+  state machine. Every response includes the full status (phase, cycle
+  count, available tools) so Claude always knows what it's allowed to do
+  next without a separate round-trip.
+- `.tdd-config.json` (per-consumer-project, not tracked here — only the
+  `.example` is) and `.mcp.json` are deliberately two separate files.
+  `.tdd-config.json` is the *server's* concern (which adapter, where the
+  tests live); `.mcp.json` is *Claude Code's* concern (how to launch the
+  process). Keeping them separate means changing test frameworks doesn't
+  touch how Claude Code invokes the server, and vice versa.
+- `pyproject.toml` packages `core/` as an installable package with the
+  `outside-in-tdd-mcp` console-script entry point. This exists because
+  `server.py` uses package-relative imports (`from core.adapter_contract
+  import ...`), which only resolve if `core` is either installed or the repo
+  root is on `sys.path` — a bare `python3 core/server.py` doesn't give you
+  that. Packaging it properly means the same install works locally
+  (`pip install -e .` then `outside-in-tdd-mcp`) or inside Docker.
+- `Dockerfile` is "Option A" from `SPEC.md`: one self-contained image with
+  the language runtime baked in (pytest here), simplest to start with. It
+  installs the `core` package via `pyproject.toml` and sets
+  `ENTRYPOINT ["outside-in-tdd-mcp"]`.
+
 ## Layout
 
 ```
@@ -53,10 +175,34 @@ docker build -t outside-in-tdd-mcp:pytest .
 
 ## Using in a consumer project
 
-1. Copy `.tdd-config.json.example` to `.tdd-config.json` in your project root.
-2. Copy `.mcp.json.example` to `.mcp.json` in your project root.
-3. Open the project in Claude Code / claudecode.nvim — `/mcp` should show
-   `outside-in-tdd` as connected.
+1. Build the image once (from this repo): `docker build -t outside-in-tdd-mcp:pytest .`
+2. Copy `.tdd-config.json.example` to `.tdd-config.json` in your project root:
+   ```json
+   {
+     "adapter": "pytest-adapter",
+     "adapterPath": "/adapters/pytest-adapter/run.sh",
+     "defaultTestDir": "tests/"
+   }
+   ```
+3. Copy `.mcp.json.example` to `.mcp.json` in your project root:
+   ```json
+   {
+     "mcpServers": {
+       "outside-in-tdd": {
+         "command": "docker",
+         "args": ["run", "-i", "--rm", "-v", "${CLAUDE_PROJECT_DIR:-.}:/app", "-w", "/app", "outside-in-tdd-mcp:pytest"]
+       }
+     }
+   }
+   ```
+   `-v ${CLAUDE_PROJECT_DIR:-.}:/app` is what lets the containerized adapter
+   reach the real project's test files and source, mounted at `/app` (which
+   matches `adapterPath` above — the adapter script itself lives inside the
+   image, not the mount).
+4. Open the project in Claude Code / claudecode.nvim — `/mcp` should show
+   `outside-in-tdd` as connected, with all 12 tools listed. Claude then calls
+   `init_feature` to start a feature, and the phase gating takes over from
+   there.
 
 ## Adding a new adapter
 
@@ -69,3 +215,13 @@ Write an executable at a known path that:
 
 Then point `.tdd-config.json`'s `adapterPath` at it. Nothing in `core/` needs
 to change.
+
+**`<test_target>` may be more than one bare path.** `init_feature`/`drill_down`
+pass `testFile` straight through as `<test_target>`, and Claude may reasonably
+send several space-separated targets or a full test-runner argument
+expression (e.g. `cart/ order/ -m "not ft"`). Split it with real shell-word
+parsing (Python's `shlex.split()`, not naive `str.split(" ")` or an unquoted
+bash expansion) — `shlex` correctly keeps a quoted marker expression like
+`"not ft"` as one token instead of shredding it on the space inside the
+quotes. The pytest adapter (`adapters/pytest-adapter/run.sh`) does exactly
+this; use it as the reference shape for a new adapter.

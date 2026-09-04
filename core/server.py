@@ -36,7 +36,13 @@ TOOLS = [
                 "featureName": {"type": "string"},
                 "testFile": {
                     "type": "string",
-                    "description": "Path relative to project root",
+                    "description": (
+                        "Test target(s), relative to project root. Passed "
+                        "through to the configured adapter as-is — for the "
+                        "pytest adapter this can be a single path, several "
+                        "space-separated paths, or a full pytest argument "
+                        'expression, e.g. \'cart/ order/ -m "not ft"\'.'
+                    ),
                 },
             },
             "required": ["featureName", "testFile"],
@@ -45,6 +51,27 @@ TOOLS = [
     types.Tool(
         name="write_test",
         description="Write a failing test. Only available in RED phase.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "testName": {"type": "string"},
+                "code": {"type": "string"},
+            },
+            "required": ["testName", "code"],
+        },
+    ),
+    types.Tool(
+        name="write_test_skeleton",
+        description=(
+            "Optional alternative to write_test: use only when explicitly "
+            "asked to write a TODO-annotated test skeleton instead of a "
+            "finished test — e.g. stub test functions with TODO comments "
+            "describing the cases to cover, leaving the assertions for a "
+            "later write_test/write_test_skeleton call to fill in (often "
+            "after a human adds detail to the TODOs). Same RED-only gate "
+            "as write_test; otherwise identical. Don't use this unless the "
+            "skeleton-first workflow was asked for — default to write_test."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
@@ -90,7 +117,61 @@ TOOLS = [
     ),
     types.Tool(
         name="reset_feature",
-        description="Reset current feature. Allows starting a new one.",
+        description=(
+            "Discard the current feature from any phase and clear state. "
+            "Use this to abandon a feature (e.g. wrong approach, stuck in "
+            "REFACTOR). For finishing a feature that's actually done, use "
+            "complete_feature instead."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    types.Tool(
+        name="complete_feature",
+        description=(
+            "Mark the current feature complete. Only allowed at the base "
+            "level (depth 1 — return_to_parent out of any drill-downs "
+            "first), in RED phase, after at least one full "
+            "RED->IMPLEMENT->GREEN->REFACTOR cycle. Clears feature state, "
+            "same as reset_feature, but signals success rather than "
+            "abandonment."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    types.Tool(
+        name="drill_down",
+        description=(
+            "Push a nested test target on top of the current one — a unit "
+            "test, a different app's tests, any test file you need along "
+            "the way. Only allowed in IMPLEMENT phase. The nested level "
+            "runs its own independent RED->IMPLEMENT->GREEN->REFACTOR "
+            "cycle; call return_to_parent when it's done."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {"testFile": {"type": "string"}},
+            "required": ["testFile"],
+        },
+    ),
+    types.Tool(
+        name="return_to_parent",
+        description=(
+            "Pop the current drill-down level and resume the one beneath "
+            "it. Only allowed in RED phase, after at least one full cycle "
+            "has finished at the current (nested) level. For popping a "
+            "drill-down that turned out to be unnecessary before it's "
+            "finished, use abandon_drill_down instead."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    types.Tool(
+        name="abandon_drill_down",
+        description=(
+            "Unconditionally pop the current drill-down level — no phase "
+            "or cycle requirement — and resume the one beneath it. Use "
+            "this when a drilled-down test turns out not to be needed. "
+            "Not allowed at the base level (depth 1); use reset_feature "
+            "to discard the whole feature instead."
+        ),
         inputSchema={"type": "object", "properties": {}},
     ),
 ]
@@ -140,6 +221,21 @@ class TDDServer:
                     }
                 )
 
+            if name == "write_test_skeleton":
+                self.sm.write_test_skeleton(arguments["testName"], arguments["code"])
+                return self._text(
+                    {
+                        "ok": True,
+                        "message": (
+                            f"Skeleton for '{arguments['testName']}' recorded. "
+                            "Write it to the test file with TODO comments, "
+                            "then fill it in (write_test or "
+                            "write_test_skeleton again) before run_tests()."
+                        ),
+                        **self.sm.status(),
+                    }
+                )
+
             if name == "write_code":
                 self.sm.write_code(arguments["filePath"], arguments["code"])
                 return self._text(
@@ -175,6 +271,62 @@ class TDDServer:
             if name == "reset_feature":
                 self.sm.reset_feature()
                 return self._text({"ok": True, **self.sm.status()})
+
+            if name == "complete_feature":
+                summary = self.sm.complete_feature()
+                return self._text(
+                    {
+                        "ok": True,
+                        "message": (
+                            f"Feature '{summary['featureName']}' completed "
+                            f"after {summary['cyclesCompleted']} cycle(s)."
+                        ),
+                        **self.sm.status(),
+                    }
+                )
+
+            if name == "drill_down":
+                self.sm.drill_down(arguments["testFile"])
+                return self._text(
+                    {
+                        "ok": True,
+                        "message": (
+                            f"Drilled into '{arguments['testFile']}' "
+                            f"(depth {self.sm.depth}). Write a failing test "
+                            "there, then call run_tests()."
+                        ),
+                        **self.sm.status(),
+                    }
+                )
+
+            if name == "return_to_parent":
+                summary = self.sm.return_to_parent()
+                return self._text(
+                    {
+                        "ok": True,
+                        "message": (
+                            f"Returned from '{summary['testFile']}' after "
+                            f"{summary['cyclesCompleted']} cycle(s). "
+                            f"Back at depth {self.sm.depth}."
+                        ),
+                        **self.sm.status(),
+                    }
+                )
+
+            if name == "abandon_drill_down":
+                summary = self.sm.abandon_drill_down()
+                return self._text(
+                    {
+                        "ok": True,
+                        "message": (
+                            f"Abandoned drill-down into '{summary['testFile']}' "
+                            f"(was {summary['phase'].upper()}, "
+                            f"{summary['cycleCount']} cycle(s) completed). "
+                            f"Back at depth {self.sm.depth}."
+                        ),
+                        **self.sm.status(),
+                    }
+                )
 
             return self._error(f"Unknown tool: {name}")
 
