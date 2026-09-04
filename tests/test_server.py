@@ -172,3 +172,41 @@ def test_regression_check_merges_passed_counts_and_reports_accurate_error(tmp_pa
     # A regression elsewhere didn't come from this refactor — the error
     # message must not blame the refactor for it.
     assert "Refactor broke the tests" not in (payload["lastError"] or "")
+
+
+def test_regression_check_does_not_double_count_overlapping_tests(tmp_path):
+    # defaultTestDir overlapping test_target (the common, realistic case)
+    # must not sum two separate adapter runs — that double-counts the
+    # overlap. Uses an isolated tmp_path suite (never the live tests/ dir)
+    # so this doesn't recursively invoke the currently-running test suite.
+    suite_dir = tmp_path / "suite"
+    suite_dir.mkdir()
+    (suite_dir / "test_a.py").write_text(
+        "def test_a1():\n    assert True\n\n\ndef test_a2():\n    assert True\n"
+    )
+    (suite_dir / "test_b.py").write_text("def test_b1():\n    assert True\n")
+
+    adapter_path = str(PROJECT_ROOT / "adapters" / "pytest-adapter" / "run.sh")
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(
+        json.dumps({"adapterPath": adapter_path, "defaultTestDir": "."})
+    )
+    server = TDDServer(project_root=str(suite_dir), config_path=str(config_path))
+    call(server, "init_feature", featureName="f", testFile="test_a.py")
+
+    whole_suite = json.loads(
+        subprocess.run(
+            [adapter_path, ".", str(suite_dir)], capture_output=True, text=True
+        ).stdout
+    )
+    assert whole_suite["passed"] == 3  # sanity: 2 in test_a.py + 1 in test_b.py
+
+    call(server, "run_tests")  # red -> verify_green (own target already passes)
+    call(server, "verify")  # -> refactor
+
+    payload = call(server, "run_tests")  # closes refactor -> regression check runs
+
+    assert payload["phase"] == "red"  # nothing actually broken -> cycle closes
+    assert payload["cycleCount"] == 1
+    assert payload["testResult"]["passed"] == 3  # not 5 (2 own + 3 whole, double-counted)
+    assert payload["testResult"]["failed"] == 0

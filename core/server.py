@@ -412,37 +412,46 @@ class TDDServer:
 
         adapter_path = config["adapterPath"]
         test_target = self.sm.test_file
+        default_test_dir = config.get("defaultTestDir")
+
+        # Closing a base-level REFACTOR cycle is what unlocks
+        # complete_feature() — check the whole suite (not just this cycle's
+        # target), so a regression elsewhere can't slip through unnoticed.
+        # Nested drill-down levels skip this; only the outer feature's
+        # cycle gates completion. test_target and defaultTestDir are run
+        # together in one adapter call (rather than two separate calls
+        # summed) since defaultTestDir almost always already contains
+        # test_target — summing two runs would double-count the overlap,
+        # and running it as a single pytest invocation lets pytest's own
+        # collection dedupe overlapping paths for free.
+        closing_base_refactor = (
+            self.sm.phase == "refactor" and self.sm.depth == 1 and default_test_dir
+        )
+        run_target = (
+            f"{test_target} {default_test_dir}"
+            if closing_base_refactor
+            else test_target
+        )
 
         try:
-            result = run_adapter(adapter_path, test_target, self.project_root)
+            result = run_adapter(adapter_path, run_target, self.project_root)
         except AdapterError as exc:
             return {"error": f"Adapter failed: {exc}"}
 
-        # Closing a base-level REFACTOR cycle is what unlocks
-        # complete_feature() — run the whole suite (not just this cycle's
-        # target) through the adapter first, so a regression elsewhere
-        # can't slip through unnoticed. Nested drill-down levels skip this;
-        # only the outer feature's cycle gates completion.
-        default_test_dir = config.get("defaultTestDir")
-        regression = None
-        if (
-            self.sm.phase == "refactor"
-            and self.sm.depth == 1
-            and result.failed == 0
-            and default_test_dir
-        ):
+        own_target_broke = None
+        if closing_base_refactor and result.failed > 0:
+            # Something in the combined run failed — find out whether it's
+            # this cycle's own test or a pre-existing regression elsewhere,
+            # only now that we actually need to know (rare path).
             try:
-                regression = run_adapter(
-                    adapter_path, default_test_dir, self.project_root
-                )
+                own_result = run_adapter(adapter_path, test_target, self.project_root)
             except AdapterError as exc:
-                return {"error": f"Regression check failed to run: {exc}"}
-            result.passed += regression.passed
-            if regression.failed > 0:
-                result.failed += regression.failed
-                result.failures = result.failures + [
+                return {"error": f"Adapter failed: {exc}"}
+            own_target_broke = own_result.failed > 0
+            if not own_target_broke:
+                result.failures = [
                     {"name": f"REGRESSION: {f['name']}", "message": f["message"]}
-                    for f in regression.failures
+                    for f in result.failures
                 ]
 
         self.sm.record_test_result(
@@ -453,10 +462,10 @@ class TDDServer:
             raw_output=result.raw_output,
         )
 
-        if regression is not None and regression.failed > 0:
+        if own_target_broke is False:
             # record_test_result's generic REFACTOR-failure message ("Refactor
             # broke the tests.") is wrong here — this cycle's own test passed;
-            # the failure came from the separate regression check.
+            # the failure came from elsewhere in the suite.
             self.sm.set_last_error(
                 "Regression check found pre-existing failures elsewhere "
                 "(not caused by this refactor) — see the REGRESSION: "
