@@ -52,10 +52,11 @@ tools are phase checkpoints, not file writers):
    cycle (back to RED, cycle count +1).
 
 Repeat RED->VERIFY_RED->IMPLEMENT->VERIFY_GREEN->REFACTOR (and drill down as
-needed) until the base-level feature test genuinely passes, then call
-`complete_feature()`. Call `get_status()` any time you're unsure what's
-currently allowed — every tool response already includes it. Never skip
-straight to writing passing code without a real RED failure first.
+needed) until the base-level feature test genuinely passes. Then, before
+calling `complete_feature()`, read `.claude/docs/tdd-regression-check.md`
+and follow it. Call `get_status()` any time you're unsure what's currently
+allowed — every tool response already includes it. Never skip straight to
+writing passing code without a real RED failure first.
 
 ## After the feature completes
 

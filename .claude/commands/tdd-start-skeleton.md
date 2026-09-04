@@ -58,9 +58,10 @@ VERIFY_RED:
 4. REFACTOR: `refactor_code(description)`, then `run_tests()` to close the
    cycle (back to RED, cycle count +1).
 
-Repeat until the base-level feature test genuinely passes, then call
-`complete_feature()`. Call `get_status()` any time you're unsure what's
-currently allowed.
+Repeat until the base-level feature test genuinely passes. Then, before
+calling `complete_feature()`, read `.claude/docs/tdd-regression-check.md`
+and follow it. Call `get_status()` any time you're unsure what's currently
+allowed.
 
 ## After the feature completes
 
