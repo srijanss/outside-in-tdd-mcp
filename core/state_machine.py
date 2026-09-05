@@ -89,6 +89,12 @@ class TDDStateMachine:
     # -- lifecycle -----------------------------------------------------
 
     def init_feature(self, name: str, test_file: str) -> None:
+        if self.stack:
+            raise PhaseError(
+                f"A feature ('{self.feature_name}') is already active — "
+                "call complete_feature() or reset_feature() before "
+                "starting a new one."
+            )
         self.feature_name = name
         self.stack = [_Level(test_file=test_file)]
 
@@ -287,9 +293,15 @@ class TDDStateMachine:
             if failed > 0:
                 level.last_error = "Refactor broke the tests."
                 # stay REFACTOR
-            else:
+            elif passed > 0:
                 level.phase = "red"
                 level.cycle_count += 1
+            else:
+                level.last_error = (
+                    "No tests ran during the refactor check — the cycle "
+                    "isn't closed. Fix the test target and rerun."
+                )
+                # stay REFACTOR
 
         return self.phase
 

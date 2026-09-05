@@ -44,10 +44,24 @@ class AdapterResult:
                     "Adapter output 'failures' entries must be objects with "
                     f"'name'/'message' fields, got {entry!r}"
                 )
+        passed = int(data["passed"])
+        failed = int(data["failed"])
+        duration_ms = int(data.get("duration_ms", 0))
+        for field_name, value in (
+            ("passed", passed),
+            ("failed", failed),
+            ("duration_ms", duration_ms),
+        ):
+            if value < 0:
+                raise AdapterError(
+                    f"Adapter output field '{field_name}' must be "
+                    f"non-negative, got {value}"
+                )
+
         return AdapterResult(
-            passed=int(data["passed"]),
-            failed=int(data["failed"]),
-            duration_ms=int(data.get("duration_ms", 0)),
+            passed=passed,
+            failed=failed,
+            duration_ms=duration_ms,
             failures=failures,
             raw_output=str(data.get("raw_output", "")),
         )

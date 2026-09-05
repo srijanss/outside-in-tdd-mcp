@@ -36,6 +36,15 @@ def to_red_after_one_cycle(sm):
     return sm
 
 
+def test_init_feature_blocked_when_feature_already_active():
+    sm = make_sm()
+    with pytest.raises(PhaseError):
+        sm.init_feature("other feature", "tests/test_y.py")
+    # original feature/state untouched
+    assert sm.feature_name == "feature"
+    assert sm.test_file == "tests/test_x.py"
+
+
 def test_init_feature_starts_in_red():
     sm = make_sm()
     assert sm.phase == "red"
@@ -106,6 +115,15 @@ def test_refactor_stays_and_surfaces_error_on_failure():
     sm = make_sm()
     to_refactor(sm)
     sm.record_test_result(passed=0, failed=1)  # refactor, broke something
+    assert sm.phase == "refactor"
+    assert sm.cycle_count == 0
+    assert sm.last_error is not None
+
+
+def test_refactor_stays_and_surfaces_error_on_zero_tests_run():
+    sm = make_sm()
+    to_refactor(sm)
+    sm.record_test_result(passed=0, failed=0)  # refactor, no tests collected
     assert sm.phase == "refactor"
     assert sm.cycle_count == 0
     assert sm.last_error is not None

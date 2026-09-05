@@ -249,6 +249,37 @@ def test_regression_check_does_not_double_count_overlapping_tests(tmp_path):
     assert payload["testResult"]["failed"] == 0
 
 
+def test_regression_check_handles_default_test_dir_with_space(tmp_path):
+    # defaultTestDir containing a space must not get mangled when combined
+    # with test_target into one adapter argument — the adapter shlex-splits
+    # that argument, so an unquoted "dir with space" would be parsed as
+    # three separate (nonexistent) targets instead of one directory.
+    suite_dir = tmp_path / "suite"
+    suite_dir.mkdir()
+    (suite_dir / "test_a.py").write_text("def test_a1():\n    assert True\n")
+    spaced_dir = suite_dir / "dir with space"
+    spaced_dir.mkdir()
+    (spaced_dir / "test_b.py").write_text("def test_b1():\n    assert True\n")
+
+    adapter_path = str(PROJECT_ROOT / "adapters" / "pytest-adapter" / "run.sh")
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(
+        json.dumps({"adapterPath": adapter_path, "defaultTestDir": "dir with space"})
+    )
+    server = TDDServer(project_root=str(suite_dir), config_path=str(config_path))
+    call(server, "init_feature", featureName="f", testFile="test_a.py")
+
+    call(server, "run_tests")  # red -> verify_green (own target already passes)
+    call(server, "verify")  # -> refactor
+
+    payload = call(server, "run_tests")  # closes refactor -> regression check runs
+
+    assert payload["phase"] == "red"  # nothing actually broken -> cycle closes
+    assert payload["cycleCount"] == 1
+    assert payload["testResult"]["passed"] == 2  # test_a.py + test_b.py
+    assert payload["testResult"]["failed"] == 0
+
+
 def test_regression_check_attributes_failure_to_refactor_when_own_target_breaks(tmp_path):
     # closing_base_refactor's combined run can fail because the cycle's own
     # test broke, not because of a regression elsewhere. The second
@@ -283,6 +314,44 @@ def test_regression_check_attributes_failure_to_refactor_when_own_target_breaks(
         f["name"].startswith("REGRESSION:")
         for f in payload["testResult"]["failures"]
     )
+
+
+def test_regression_check_labels_extra_regressions_when_own_target_also_breaks(tmp_path):
+    # If BOTH the cycle's own test and something else in the suite are
+    # broken at once, the response must distinguish the two: own-target
+    # failures stay unprefixed, but the unrelated ones still need their
+    # REGRESSION: label — otherwise fixing the own test looks like it
+    # would fix everything.
+    suite_dir = tmp_path / "suite"
+    suite_dir.mkdir()
+    (suite_dir / "test_a.py").write_text("def test_a1():\n    assert True\n")
+    (suite_dir / "test_b.py").write_text("def test_b1():\n    assert True\n")
+
+    adapter_path = str(PROJECT_ROOT / "adapters" / "pytest-adapter" / "run.sh")
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(
+        json.dumps({"adapterPath": adapter_path, "defaultTestDir": "."})
+    )
+    server = TDDServer(project_root=str(suite_dir), config_path=str(config_path))
+    call(server, "init_feature", featureName="f", testFile="test_a.py")
+
+    call(server, "run_tests")  # red -> verify_green (own target passes)
+    call(server, "verify")  # -> refactor
+
+    # Break both the cycle's own test and an unrelated one.
+    (suite_dir / "test_a.py").write_text("def test_a1():\n    assert False\n")
+    (suite_dir / "test_b.py").write_text("def test_b1():\n    assert False\n")
+
+    payload = call(server, "run_tests")  # closes refactor -> regression check runs
+
+    assert payload["phase"] == "refactor"  # blocked: own target broke
+    failures = payload["testResult"]["failures"]
+    own_failures = [f for f in failures if not f["name"].startswith("REGRESSION:")]
+    regression_failures = [f for f in failures if f["name"].startswith("REGRESSION:")]
+    assert any("test_a.py" in f["name"] for f in own_failures)
+    assert any("test_b.py" in f["name"] for f in regression_failures)
+    assert "Refactor broke the tests" in payload["lastError"]
+    assert "pre-existing failures elsewhere" in payload["lastError"]
 
 
 def test_regression_check_returns_error_when_own_target_recheck_adapter_fails(tmp_path):

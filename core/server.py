@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -402,7 +403,7 @@ class TDDServer:
             self.sm.phase == "refactor" and self.sm.depth == 1 and default_test_dir
         )
         run_target = (
-            f"{test_target} {default_test_dir}"
+            f"{test_target} {shlex.quote(default_test_dir)}"
             if closing_base_refactor
             else test_target
         )
@@ -413,6 +414,7 @@ class TDDServer:
             return {"error": f"Adapter failed: {exc}"}
 
         own_target_broke = None
+        has_extra_regressions = False
         if closing_base_refactor and result.failed > 0:
             # Something in the combined run failed — find out whether it's
             # this cycle's own test or a pre-existing regression elsewhere,
@@ -422,9 +424,19 @@ class TDDServer:
             except AdapterError as exc:
                 return {"error": f"Adapter failed: {exc}"}
             own_target_broke = own_result.failed > 0
-            if not own_target_broke:
+            has_extra_regressions = result.failed > own_result.failed
+            if not own_target_broke or has_extra_regressions:
+                # Either none of the combined failures are the own target's
+                # (own_target_broke is False), or the own target broke *and*
+                # something else also failed — label every failure that
+                # isn't one of the own target's as a regression, in both
+                # cases, instead of only when the own target is entirely
+                # clean.
+                own_failure_names = {f["name"] for f in own_result.failures}
                 result.failures = [
-                    {"name": f"REGRESSION: {f['name']}", "message": f["message"]}
+                    f
+                    if own_target_broke and f["name"] in own_failure_names
+                    else {"name": f"REGRESSION: {f['name']}", "message": f["message"]}
                     for f in result.failures
                 ]
 
@@ -446,6 +458,15 @@ class TDDServer:
                 "Regression check found pre-existing failures elsewhere "
                 "(not caused by this refactor) — see the REGRESSION: "
                 "entries in failures."
+            )
+        elif own_target_broke and has_extra_regressions:
+            # Both problems are real here — say so, rather than letting the
+            # generic "Refactor broke the tests." message imply that fixing
+            # the own test is all that's needed.
+            self.sm.set_last_error(
+                "Refactor broke the tests, and the regression check also "
+                "found pre-existing failures elsewhere (not caused by this "
+                "refactor) — see the REGRESSION: entries in failures."
             )
 
         return {
