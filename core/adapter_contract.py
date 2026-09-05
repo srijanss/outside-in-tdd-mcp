@@ -36,7 +36,10 @@ class AdapterResult:
                 raise AdapterError(f"Adapter output missing required field '{key}'")
         failures = list(data.get("failures", []))
         for entry in failures:
-            if not isinstance(entry, dict):
+            has_required_fields = (
+                isinstance(entry, dict) and "name" in entry and "message" in entry
+            )
+            if not has_required_fields:
                 raise AdapterError(
                     "Adapter output 'failures' entries must be objects with "
                     f"'name'/'message' fields, got {entry!r}"

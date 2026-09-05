@@ -330,6 +330,57 @@ else:
     assert "Adapter failed" in payload["error"]
 
 
+def test_regression_check_returns_clean_error_for_malformed_failure_entry_during_relabeling(
+    tmp_path,
+):
+    # closing_base_refactor's relabeling step does f["name"]/f["message"] on
+    # each combined-run failure once the own-target-only recheck comes back
+    # clean (see the REGRESSION: prefixing above). AdapterResult.from_json
+    # only checks that failure entries are dicts, not that they carry
+    # "name"/"message" keys, so a conforming-but-key-missing dict must
+    # surface as a clean AdapterError here too, not an uncaught KeyError.
+    counter_file = tmp_path / "count.txt"
+    fake_adapter = tmp_path / "fake_adapter.py"
+    fake_adapter.write_text(
+        f'''#!/usr/bin/env python3
+import json
+import pathlib
+
+counter_file = pathlib.Path({str(counter_file)!r})
+count = int(counter_file.read_text()) if counter_file.exists() else 0
+count += 1
+counter_file.write_text(str(count))
+
+if count == 2:
+    # Combined run: one failure, but missing the "name"/"message" keys
+    # the relabeling step assumes are present.
+    print(json.dumps({{"passed": 0, "failed": 1, "failures": [{{"foo": "bar"}}]}}))
+elif count == 3:
+    # Own-target-only recheck: clean, so the failure above gets relabeled
+    # as a REGRESSION rather than attributed to this refactor.
+    print(json.dumps({{"passed": 1, "failed": 0, "failures": []}}))
+else:
+    print(json.dumps({{"passed": 1, "failed": 0, "failures": []}}))
+'''
+    )
+    fake_adapter.chmod(0o755)
+
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(
+        json.dumps({"adapterPath": str(fake_adapter), "defaultTestDir": "whole/"})
+    )
+    server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
+    call(server, "init_feature", featureName="f", testFile="own_test.py")
+
+    call(server, "run_tests")  # count=1: red -> verify_green (own target passes)
+    call(server, "verify")  # -> refactor
+
+    payload = call(server, "run_tests")  # count=2 combined fails, count=3 own-only clean
+
+    assert "error" in payload
+    assert "Adapter failed" in payload["error"]
+
+
 def test_run_tests_caps_failure_count_and_message_length(tmp_path):
     # A big regression check (or any adapter that doesn't cap its own
     # output) shouldn't be free to return an unbounded failures payload —
@@ -376,6 +427,31 @@ def test_run_tests_returns_clean_error_for_malformed_failure_entries(tmp_path):
 import json
 
 print(json.dumps({"passed": 0, "failed": 1, "failures": ["not a dict"]}))
+'''
+    )
+    fake_adapter.chmod(0o755)
+
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
+    server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
+    call(server, "init_feature", featureName="f", testFile="own_test.py")
+
+    payload = call(server, "run_tests")
+
+    assert "error" in payload
+    assert "Adapter failed" in payload["error"]
+
+
+def test_run_tests_returns_clean_error_for_failure_entry_missing_message_key(tmp_path):
+    # A dict entry with "name" but no "message" is still malformed per the
+    # adapter contract — must be rejected the same as a non-dict entry, not
+    # let through to crash later on a missing "message" key.
+    fake_adapter = tmp_path / "fake_adapter.py"
+    fake_adapter.write_text(
+        '''#!/usr/bin/env python3
+import json
+
+print(json.dumps({"passed": 0, "failed": 1, "failures": [{"name": "t"}]}))
 '''
     )
     fake_adapter.chmod(0o755)
