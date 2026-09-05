@@ -14,14 +14,16 @@ answer "nothing" / "skip" — treat that the same as picking none.
 
 For each picked category, review only the files in scope and produce
 concrete findings:
-- **Missing tests/edge cases** — specific untested scenarios (invalid
-  input, boundary values, drill-down/nested or repeated calls), concrete
-  enough to write a test from directly.
+- **Missing tests/edge cases** and **Bugs** — spawn the `review-finder`
+  agent (Haiku — cheap, unverified first pass) scoped to exactly the files
+  in scope, once per category or combined in one call. Its output is
+  candidates only; verify each one yourself (read the actual code/line)
+  before reporting it as a finding — drop anything that doesn't hold up.
+  Fall back to the `code-review` skill or a manual read if the agent is
+  unavailable.
 - **Security issues or leaks** — use the `security-review` skill if
   available; otherwise check manually (injection, secret/credential
   leakage, unsafe subprocess or file-path handling).
-- **Bugs** — use the `code-review` skill if available; otherwise review
-  manually for correctness.
 - **Performance issues** — concrete inefficiencies (redundant I/O or
   subprocess calls, avoidable O(n²) work).
 
