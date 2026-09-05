@@ -113,36 +113,36 @@ def test_refactor_stays_and_surfaces_error_on_failure():
 
 def test_write_test_only_allowed_in_red():
     sm = make_sm()
-    sm.write_test("test_x", "code")  # ok in red
+    sm.write_test("test_x")  # ok in red
     to_implement(sm)
     with pytest.raises(PhaseError):
-        sm.write_test("test_x", "code")
+        sm.write_test("test_x")
 
 
 def test_write_test_skeleton_only_allowed_in_red():
     sm = make_sm()
-    sm.write_test_skeleton("test_x", "# TODO: cover the happy path")  # ok in red
+    sm.write_test_skeleton("test_x")  # ok in red
     to_implement(sm)
     with pytest.raises(PhaseError):
-        sm.write_test_skeleton("test_x", "code")
+        sm.write_test_skeleton("test_x")
 
 
 def test_write_code_only_allowed_in_implement():
     sm = make_sm()
     with pytest.raises(PhaseError):
-        sm.write_code("f.py", "code")  # blocked in red
+        sm.write_code("f.py")  # blocked in red
     to_implement(sm)
-    sm.write_code("f.py", "code")  # ok
+    sm.write_code("f.py")  # ok
 
 
 def test_write_code_blocked_in_verify_green_and_refactor():
     sm = make_sm()
     sm.record_test_result(passed=1, failed=0)  # -> verify_green
     with pytest.raises(PhaseError):
-        sm.write_code("f.py", "code")
+        sm.write_code("f.py")
     sm.verify()  # -> refactor
     with pytest.raises(PhaseError):
-        sm.write_code("f.py", "code")
+        sm.write_code("f.py")
 
 
 def test_refactor_code_only_allowed_in_refactor():
@@ -156,7 +156,7 @@ def test_refactor_code_only_allowed_in_refactor():
 def test_no_active_feature_raises():
     sm = TDDStateMachine()
     with pytest.raises(NoActiveFeatureError):
-        sm.write_test("x", "y")
+        sm.write_test("x")
     with pytest.raises(NoActiveFeatureError):
         sm.record_test_result(passed=1, failed=0)
     with pytest.raises(NoActiveFeatureError):
@@ -187,12 +187,12 @@ def test_drill_down_nested_level_runs_independent_cycle():
     sm = make_sm()
     to_implement(sm)
     sm.drill_down("cart/tests.py")
-    sm.write_test("test_cart", "...")  # allowed: nested level is in red
+    sm.write_test("test_cart")  # allowed: nested level is in red
     sm.record_test_result(passed=0, failed=1)  # nested red -> verify_red
     sm.verify()  # nested verify_red -> implement
     assert sm.depth == 2
     assert sm.phase == "implement"
-    sm.write_code("cart/models.py", "...")  # nested level's own implement
+    sm.write_code("cart/models.py")  # nested level's own implement
     # outer level's write_code should NOT be reachable — only nested is active
     with pytest.raises(PhaseError):
         sm.refactor_code("desc")  # nested is implement, not refactor
@@ -227,7 +227,7 @@ def test_return_to_parent_pops_and_resumes_parent_implement():
     assert sm.depth == 1
     assert sm.phase == "implement"  # resumed exactly where the parent was
     assert sm.test_file == "tests/test_x.py"
-    sm.write_code("f.py", "code")  # parent's implement still works
+    sm.write_code("f.py")  # parent's implement still works
 
 
 def test_abandon_drill_down_blocked_at_base_level():

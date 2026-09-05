@@ -44,14 +44,51 @@ def test_missing_required_argument_returns_clear_error(tmp_path):
 def test_phase_error_returns_clear_error_without_raising(tmp_path):
     server = make_server(tmp_path)
     call(server, "init_feature", featureName="f", testFile="tests/test_x.py")
-    payload = call(server, "write_code", filePath="f.py", code="...")
+    payload = call(server, "write_code", filePath="f.py")
     assert "only allowed in IMPLEMENT phase" in payload["error"]
 
 
 def test_no_active_feature_returns_clear_error_without_raising(tmp_path):
     server = make_server(tmp_path)
-    payload = call(server, "write_test", testName="t", code="...")
+    payload = call(server, "write_test", testName="t")
     assert payload["error"] == "No active feature. Call init_feature() first."
+
+
+def test_phase_gate_only_tools_return_minimal_ack(tmp_path):
+    # write_test/write_test_skeleton/write_code/refactor_code never mutate
+    # phase/depth/testFile/cycleCount — echoing the full status back on
+    # every one of these (the most frequently-called tools in the
+    # workflow) would just resend state the caller already has.
+    fake_adapter = tmp_path / "fake_adapter.py"
+    fake_adapter.write_text(
+        '''#!/usr/bin/env python3
+import json, pathlib, sys
+counter_file = pathlib.Path(__file__).parent / "count.txt"
+count = int(counter_file.read_text()) if counter_file.exists() else 0
+count += 1
+counter_file.write_text(str(count))
+if count == 1:
+    print(json.dumps({"passed": 0, "failed": 1, "failures": []}))
+else:
+    print(json.dumps({"passed": 1, "failed": 0, "failures": []}))
+'''
+    )
+    fake_adapter.chmod(0o755)
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
+    server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
+
+    call(server, "init_feature", featureName="f", testFile="t.py")
+    assert call(server, "write_test", testName="t") == {"ok": True}
+    assert call(server, "write_test_skeleton", testName="t") == {"ok": True}
+
+    call(server, "run_tests")  # failed=1 -> verify_red
+    call(server, "verify")  # -> implement
+    assert call(server, "write_code", filePath="f.py") == {"ok": True}
+
+    call(server, "run_tests")  # passed=1 -> verify_green
+    call(server, "verify")  # -> refactor
+    assert call(server, "refactor_code", description="tidy up") == {"ok": True}
 
 
 def test_init_feature_returns_status_via_call_tool(tmp_path):
@@ -291,3 +328,38 @@ else:
 
     assert "error" in payload
     assert "Adapter failed" in payload["error"]
+
+
+def test_run_tests_caps_failure_count_and_message_length(tmp_path):
+    # A big regression check (or any adapter that doesn't cap its own
+    # output) shouldn't be free to return an unbounded failures payload —
+    # that cost isn't paid once, it's re-sent on every later get_status()
+    # too, since last_result stores whatever run_tests() records.
+    fake_adapter = tmp_path / "fake_adapter.py"
+    fake_adapter.write_text(
+        '''#!/usr/bin/env python3
+import json
+
+failures = [
+    {"name": f"t{i}", "message": "x" * 2000} for i in range(30)
+]
+print(json.dumps({"passed": 0, "failed": len(failures), "failures": failures}))
+'''
+    )
+    fake_adapter.chmod(0o755)
+
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
+    server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
+    call(server, "init_feature", featureName="f", testFile="own_test.py")
+
+    payload = call(server, "run_tests")
+    failures = payload["testResult"]["failures"]
+
+    assert len(failures) == 21  # 20 real + 1 "omitted" marker
+    assert all(len(f["message"]) <= 500 for f in failures)
+    assert "omitted" in failures[-1]["message"]
+
+    # The cap must stick in state too, not just this one response.
+    status_payload = call(server, "get_status")
+    assert len(status_payload["lastResult"]["failures"]) == 21

@@ -37,10 +37,10 @@ Work through the phases using the server's tools at each step, actually
 writing the corresponding file changes yourself alongside each call (the
 tools are phase checkpoints, not file writers):
 
-1. RED: `write_test(testName, code)`, write the failing test to disk, then
+1. RED: `write_test(testName)`, write the failing test to disk, then
    `run_tests()`. This should move the phase to VERIFY_RED.
 2. VERIFY_RED: follow "How to verify" above before calling `verify()`.
-3. IMPLEMENT: `write_code(filePath, code)`, write the implementation, then
+3. IMPLEMENT: `write_code(filePath)`, write the implementation, then
    `run_tests()` until it passes. If a piece needs its own test first (a
    different app, a unit test, anything), use `drill_down(testFile)` instead
    of switching test files informally — it runs its own independent

@@ -111,7 +111,7 @@ the two points where its judgment is easiest to get wrong unnoticed.
 init_feature(name, testFile)
   → Phase: RED
 
-write_test(name, code)
+write_test(name)
   → Only allowed in RED
   → Blocks with error otherwise
 
@@ -129,7 +129,7 @@ verify()
   → VERIFY_RED → IMPLEMENT; VERIFY_GREEN → REFACTOR
   → No auto-approval path — a human (via the calling agent) must call this
 
-write_code(filePath, code)
+write_code(filePath)
   → Only allowed in IMPLEMENT
   → Blocks with error otherwise
 

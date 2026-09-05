@@ -47,42 +47,40 @@ TOOLS = [
     ),
     types.Tool(
         name="write_test",
-        description="Write a failing test. Only available in RED phase.",
+        description=(
+            "Declare a failing test written to disk (via your own file "
+            "tools). Only available in RED phase."
+        ),
         inputSchema={
             "type": "object",
-            "properties": {
-                "testName": {"type": "string"},
-                "code": {"type": "string"},
-            },
-            "required": ["testName", "code"],
+            "properties": {"testName": {"type": "string"}},
+            "required": ["testName"],
         },
     ),
     types.Tool(
         name="write_test_skeleton",
         description=(
-            "Write a TODO-annotated test stub instead of a finished test. "
-            "RED phase only. Use only if the skeleton-first workflow was "
-            "explicitly requested — otherwise use write_test."
+            "Declare a TODO-annotated test stub written to disk instead of "
+            "a finished test. RED phase only. Use only if the "
+            "skeleton-first workflow was explicitly requested — otherwise "
+            "use write_test."
         ),
         inputSchema={
             "type": "object",
-            "properties": {
-                "testName": {"type": "string"},
-                "code": {"type": "string"},
-            },
-            "required": ["testName", "code"],
+            "properties": {"testName": {"type": "string"}},
+            "required": ["testName"],
         },
     ),
     types.Tool(
         name="write_code",
-        description="Write implementation code. Only available in IMPLEMENT phase.",
+        description=(
+            "Declare implementation code written to disk (via your own "
+            "file tools). Only available in IMPLEMENT phase."
+        ),
         inputSchema={
             "type": "object",
-            "properties": {
-                "filePath": {"type": "string"},
-                "code": {"type": "string"},
-            },
-            "required": ["filePath", "code"],
+            "properties": {"filePath": {"type": "string"}},
+            "required": ["filePath"],
         },
     ),
     types.Tool(
@@ -103,7 +101,10 @@ TOOLS = [
     ),
     types.Tool(
         name="refactor_code",
-        description="Refactor code. Only available in REFACTOR phase.",
+        description=(
+            "Declare a refactor made on disk (via your own file tools), "
+            "tests still green. Only available in REFACTOR phase."
+        ),
         inputSchema={
             "type": "object",
             "properties": {"description": {"type": "string"}},
@@ -166,6 +167,31 @@ TOOLS = [
 ]
 
 
+# Caps on what a run_tests() response (and the last_result it gets stored
+# as, which get_status() keeps re-sending until the next run_tests()) can
+# carry — defensive against an adapter that doesn't cap its own output, and
+# against a large regression check surfacing dozens of failures at once.
+MAX_FAILURES_RETURNED = 20
+MAX_FAILURE_MESSAGE_CHARS = 500
+
+
+def _cap_failures(failures: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    capped = [
+        {**f, "message": str(f.get("message", ""))[:MAX_FAILURE_MESSAGE_CHARS]}
+        for f in failures[:MAX_FAILURES_RETURNED]
+    ]
+    omitted = len(failures) - len(capped)
+    if omitted > 0:
+        capped.append(
+            {
+                "name": "...",
+                "message": f"{omitted} more failure(s) omitted — rerun a "
+                "narrower test_target to see them.",
+            }
+        )
+    return capped
+
+
 class ConfigError(Exception):
     """Raised when .tdd-config.json is missing, malformed, or incomplete."""
 
@@ -220,7 +246,11 @@ class TDDServer:
         self.sm = TDDStateMachine()
 
     def _text(self, payload: dict[str, Any]) -> list[types.TextContent]:
-        return [types.TextContent(type="text", text=json.dumps(payload, indent=2))]
+        return [
+            types.TextContent(
+                type="text", text=json.dumps(payload, separators=(",", ":"))
+            )
+        ]
 
     def _error(self, message: str) -> list[types.TextContent]:
         return self._text({"error": message})
@@ -250,58 +280,20 @@ class TDDServer:
                 return self._text(self.sm.status(include_last_result=False))
 
             if name == "write_test":
-                self.sm.write_test(arguments["testName"], arguments["code"])
-                return self._text(
-                    {
-                        "ok": True,
-                        "message": (
-                            f"Test '{arguments['testName']}' recorded. "
-                            "Write it to the test file, then call run_tests()."
-                        ),
-                        **self.sm.status(include_last_result=False),
-                    }
-                )
+                self.sm.write_test(arguments["testName"])
+                return self._text({"ok": True})
 
             if name == "write_test_skeleton":
-                self.sm.write_test_skeleton(arguments["testName"], arguments["code"])
-                return self._text(
-                    {
-                        "ok": True,
-                        "message": (
-                            f"Skeleton for '{arguments['testName']}' recorded. "
-                            "Write it to the test file with TODO comments, "
-                            "then fill it in (write_test or "
-                            "write_test_skeleton again) before run_tests()."
-                        ),
-                        **self.sm.status(include_last_result=False),
-                    }
-                )
+                self.sm.write_test_skeleton(arguments["testName"])
+                return self._text({"ok": True})
 
             if name == "write_code":
-                self.sm.write_code(arguments["filePath"], arguments["code"])
-                return self._text(
-                    {
-                        "ok": True,
-                        "message": (
-                            f"Code change for '{arguments['filePath']}' recorded. "
-                            "Write it to disk, then call run_tests()."
-                        ),
-                        **self.sm.status(include_last_result=False),
-                    }
-                )
+                self.sm.write_code(arguments["filePath"])
+                return self._text({"ok": True})
 
             if name == "refactor_code":
                 self.sm.refactor_code(arguments["description"])
-                return self._text(
-                    {
-                        "ok": True,
-                        "message": (
-                            f"Refactor recorded: {arguments['description']}. "
-                            "Call run_tests() to confirm nothing broke."
-                        ),
-                        **self.sm.status(include_last_result=False),
-                    }
-                )
+                return self._text({"ok": True})
 
             if name == "verify":
                 self.sm.verify()
@@ -436,11 +428,13 @@ class TDDServer:
                     for f in result.failures
                 ]
 
+        capped_failures = _cap_failures(result.failures)
+
         self.sm.record_test_result(
             passed=result.passed,
             failed=result.failed,
             duration_ms=result.duration_ms,
-            failures=result.failures,
+            failures=capped_failures,
             raw_output=result.raw_output,
         )
 
@@ -459,7 +453,7 @@ class TDDServer:
                 "passed": result.passed,
                 "failed": result.failed,
                 "durationMs": result.duration_ms,
-                "failures": result.failures,
+                "failures": capped_failures,
             },
             **self.sm.status(),
         }

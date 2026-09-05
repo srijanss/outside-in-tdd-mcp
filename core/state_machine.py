@@ -204,10 +204,10 @@ class TDDStateMachine:
 
     # -- gated actions ---------------------------------------------------
 
-    def write_test(self, test_name: str, code: str) -> None:
+    def write_test(self, test_name: str) -> None:
         self._require_phase("red", "write_test")
 
-    def write_test_skeleton(self, test_name: str, code: str) -> None:
+    def write_test_skeleton(self, test_name: str) -> None:
         """Same RED-only gate as write_test — a distinctly-named tool for
         writing TODO-annotated stubs instead of finished assertions.
         Optional: use it only when the workflow calls for pausing on a
@@ -217,7 +217,7 @@ class TDDStateMachine:
         content tracking."""
         self._require_phase("red", "write_test_skeleton")
 
-    def write_code(self, file_path: str, code: str) -> None:
+    def write_code(self, file_path: str) -> None:
         self._require_phase("implement", "write_code")
 
     def refactor_code(self, description: str) -> None:

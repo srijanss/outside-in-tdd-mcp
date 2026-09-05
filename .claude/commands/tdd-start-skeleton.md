@@ -25,7 +25,7 @@ Once both are settled, using the outside-in-tdd MCP server's tools (not your
 own file-editing tools in place of them), start the feature with
 `init_feature(featureName, testFile)` using the confirmed name and file.
 
-For the RED phase, use `write_test_skeleton(testName, code)` instead of
+For the RED phase, use `write_test_skeleton(testName)` instead of
 `write_test` — stub the test function(s) with TODO comments describing the
 cases to cover, but don't fill in real assertions yet. Write that skeleton
 to disk, then stop and hand back to me: I'll fill in the TODOs with the
@@ -47,7 +47,7 @@ From there, work through the rest of the cycle the same way as usual. Once
 VERIFY_RED:
 
 1. VERIFY_RED: follow "How to verify" above before calling `verify()`.
-2. IMPLEMENT: `write_code(filePath, code)`, write the implementation, then
+2. IMPLEMENT: `write_code(filePath)`, write the implementation, then
    `run_tests()` until it passes. If a piece needs its own test first (a
    different app, a unit test, anything), use `drill_down(testFile)` instead
    of switching test files informally — it runs its own independent

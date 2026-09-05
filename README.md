@@ -91,16 +91,29 @@ level) — `reset_feature` is the equivalent there.
 
 **`write_test` vs `write_test_skeleton`.** Identical enforcement — both are
 gated to RED only — the only difference is the name, which exists purely to
-carry intent. Note that neither tool actually writes a file or stores any
-code: `write_test(testName, code)` and `write_test_skeleton(testName, code)`
-both just check the phase and discard their arguments (`state_machine.py`);
-the real file write happens through Claude's own edit tools outside the MCP
-protocol entirely. `write_test_skeleton` is opt-in — use it only when
+carry intent. Note that neither tool actually writes a file or takes test
+code as an argument: `write_test(testName)` and `write_test_skeleton(testName)`
+both just check the phase (`state_machine.py`); the real file write happens
+through Claude's own edit tools outside the MCP protocol entirely — passing
+the test body through the MCP call too would just double the tokens spent
+on it for no benefit, since nothing here stores or reads it back.
+`write_test_skeleton` is opt-in — use it only when
 explicitly asked for a skeleton-first workflow (stub test functions with
 TODO comments describing the cases to cover, pause for a human to fill in
 the TODOs with real detail, then a later `write_test`/`write_test_skeleton`
 call fills in the assertions) — otherwise Claude should just call
 `write_test` directly, same as before this tool existed.
+
+**Success responses are minimal by design.** `write_test`,
+`write_test_skeleton`, `write_code`, and `refactor_code` never mutate
+`phase`/`depth`/`testFile`/`cycleCount` — they're pure phase-gate checks — so
+on success they return just `{"ok": true}` rather than echoing the full
+status back (the caller already has it; nothing changed). Tools that *do*
+change state (`init_feature`, `verify`, `run_tests`, `drill_down`,
+`return_to_parent`, `abandon_drill_down`, `reset_feature`,
+`complete_feature`) still return the full status so the caller can see what
+changed. A failed phase check still returns `{"error": "..."}` from any
+tool, same as always.
 
 **`reset_feature` vs `complete_feature`.** These sound similar but signal
 opposite outcomes. `reset_feature` is phase-unguarded — callable from any
@@ -225,6 +238,13 @@ Write an executable at a known path that:
 
 Then point `.tdd-config.json`'s `adapterPath` at it. Nothing in `core/` needs
 to change.
+
+Whatever `failures` an adapter returns, `server.py`'s `run_tests` handler caps
+it before it reaches the response or gets stored as `last_result`: at most
+20 entries (a 21st summarizing how many were omitted) and 500 characters per
+`message`. This is a floor, not a substitute for an adapter capping its own
+output — it exists so one large regression check can't balloon a response,
+and can't keep re-sending that same balloon on every later `get_status()`.
 
 **`<test_target>` may be more than one bare path.** `init_feature`/`drill_down`
 pass `testFile` straight through as `<test_target>`, and Claude may reasonably
