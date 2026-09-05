@@ -1,5 +1,5 @@
 ---
-description: Start a new Outside-In TDD feature via the outside-in-tdd MCP server, advancing through VERIFY_RED/VERIFY_GREEN without a human checkpoint
+description: Start a new Outside-In TDD feature via the outside-in-tdd MCP server, with a mandatory human checkpoint at every VERIFY_RED/VERIFY_GREEN before verify() is called
 argument-hint: <feature-name> <test-file>
 ---
 
@@ -25,14 +25,14 @@ Once both are settled, using the outside-in-tdd MCP server's tools (not your
 own file-editing tools in place of them), start the feature with
 `init_feature(featureName, testFile)` using the confirmed name and file.
 
-## VERIFY_RED / VERIFY_GREEN
+## How to verify (VERIFY_RED / VERIFY_GREEN) — mandatory checkpoint
 
-Whenever the phase is VERIFY_RED or VERIFY_GREEN, call `verify()` directly
-to advance — no human checkpoint is required in this command. Still show
-what's being verified (the failing test + output at VERIFY_RED, or the
-implementation + passing output at VERIFY_GREEN) as part of your normal
-narration before moving on. Use `/tdd-start-verify` instead if you want me
-to explicitly confirm each checkpoint before `verify()` is called.
+Whenever the phase is VERIFY_RED or VERIFY_GREEN, read
+`.claude/docs/tdd-verify-protocol.md` and follow it before calling
+`verify()`. This checkpoint is not optional in this command — never call
+`verify()` on your own initiative here; always get my explicit go-ahead
+first. (Use `/tdd-start` instead if you don't want this checkpoint enforced
+at every step.)
 
 ## The cycle
 
@@ -42,7 +42,7 @@ tools are phase checkpoints, not file writers):
 
 1. RED: `write_test(testName)`, write the failing test to disk, then
    `run_tests()`. This should move the phase to VERIFY_RED.
-2. VERIFY_RED: call `verify()` per "VERIFY_RED / VERIFY_GREEN" above.
+2. VERIFY_RED: follow "How to verify" above before calling `verify()`.
 3. IMPLEMENT: `write_code(filePath)`, write the implementation, then
    `run_tests()` until it passes. If a piece needs its own test first (a
    different app, a unit test, anything), use `drill_down(testFile)` instead
@@ -50,7 +50,7 @@ tools are phase checkpoints, not file writers):
    RED->VERIFY_RED->IMPLEMENT->VERIFY_GREEN->REFACTOR cycle, including its
    own verify checkpoints. Call `return_to_parent()` once that's done, or
    `abandon_drill_down()` if it turns out unnecessary.
-4. VERIFY_GREEN: call `verify()` per "VERIFY_RED / VERIFY_GREEN" above.
+4. VERIFY_GREEN: follow "How to verify" above before calling `verify()`.
 5. REFACTOR: `refactor_code(description)`, then `run_tests()` to close the
    cycle (back to RED, cycle count +1).
 
@@ -66,4 +66,5 @@ writing passing code without a real RED failure first.
 Once `complete_feature()` succeeds, briefly summarize what was built, then
 read `.claude/docs/tdd-review-checklist.md` and follow it, scoped to the
 files/tests touched this cycle (not the whole repo). A chosen finding
-becomes the next `/tdd-start` feature (test target resolved as above).
+becomes the next `/tdd-start-verify` feature (test target resolved as
+above).
