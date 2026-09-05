@@ -363,3 +363,55 @@ print(json.dumps({"passed": 0, "failed": len(failures), "failures": failures}))
     # The cap must stick in state too, not just this one response.
     status_payload = call(server, "get_status")
     assert len(status_payload["lastResult"]["failures"]) == 21
+
+
+def test_run_tests_returns_clean_error_for_malformed_failure_entries(tmp_path):
+    # An adapter's failures entries aren't required by adapter_contract.py
+    # to be dicts today — a non-dict entry must surface as a clean
+    # AdapterError, not crash run_tests() with an uncaught TypeError from
+    # _cap_failures's {**f, ...} unpacking.
+    fake_adapter = tmp_path / "fake_adapter.py"
+    fake_adapter.write_text(
+        '''#!/usr/bin/env python3
+import json
+
+print(json.dumps({"passed": 0, "failed": 1, "failures": ["not a dict"]}))
+'''
+    )
+    fake_adapter.chmod(0o755)
+
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
+    server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
+    call(server, "init_feature", featureName="f", testFile="own_test.py")
+
+    payload = call(server, "run_tests")
+
+    assert "error" in payload
+    assert "Adapter failed" in payload["error"]
+
+
+def test_run_tests_does_not_add_omitted_marker_at_exact_cap_boundary(tmp_path):
+    # Exactly MAX_FAILURES_RETURNED (20) failures must come back untouched —
+    # no synthetic "omitted" entry appended when nothing was actually cut.
+    fake_adapter = tmp_path / "fake_adapter.py"
+    fake_adapter.write_text(
+        '''#!/usr/bin/env python3
+import json
+
+failures = [{"name": f"t{i}", "message": "boom"} for i in range(20)]
+print(json.dumps({"passed": 0, "failed": len(failures), "failures": failures}))
+'''
+    )
+    fake_adapter.chmod(0o755)
+
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
+    server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
+    call(server, "init_feature", featureName="f", testFile="own_test.py")
+
+    payload = call(server, "run_tests")
+    failures = payload["testResult"]["failures"]
+
+    assert len(failures) == 20
+    assert all(f["name"] != "..." for f in failures)

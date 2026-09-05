@@ -34,11 +34,18 @@ class AdapterResult:
         for key in ("passed", "failed"):
             if key not in data:
                 raise AdapterError(f"Adapter output missing required field '{key}'")
+        failures = list(data.get("failures", []))
+        for entry in failures:
+            if not isinstance(entry, dict):
+                raise AdapterError(
+                    "Adapter output 'failures' entries must be objects with "
+                    f"'name'/'message' fields, got {entry!r}"
+                )
         return AdapterResult(
             passed=int(data["passed"]),
             failed=int(data["failed"]),
             duration_ms=int(data.get("duration_ms", 0)),
-            failures=list(data.get("failures", [])),
+            failures=failures,
             raw_output=str(data.get("raw_output", "")),
         )
 
