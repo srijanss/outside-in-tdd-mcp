@@ -11,6 +11,7 @@ import asyncio
 import json
 import os
 import shlex
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -245,6 +246,29 @@ class TDDServer:
         self.project_root = project_root
         self.config_path = config_path
         self.sm = TDDStateMachine()
+        self.session_log_path = os.environ.get(
+            "TDD_SESSION_LOG_PATH", str(Path(project_root) / ".tdd-session.log")
+        )
+
+    def _log_event(self, event: str, **fields: Any) -> None:
+        entry = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "event": event,
+            "featureName": self.sm.feature_name,
+            "depth": self.sm.depth,
+            "testFile": self.sm.test_file,
+            "phase": self.sm.phase,
+            **fields,
+        }
+        try:
+            line = json.dumps(entry) + "\n"
+        except TypeError:
+            return  # a non-serializable field must never block the TDD cycle
+        try:
+            with open(self.session_log_path, "a") as f:
+                f.write(line)
+        except OSError:
+            pass  # session logging is best-effort; never block the TDD cycle
 
     def _text(self, payload: dict[str, Any]) -> list[types.TextContent]:
         return [
@@ -278,26 +302,36 @@ class TDDServer:
                         "feature."
                     )
                 self.sm.init_feature(arguments["featureName"], arguments["testFile"])
+                self._log_event("init_feature")
                 return self._text(self.sm.status(include_last_result=False))
 
             if name == "write_test":
                 self.sm.write_test(arguments["testName"])
+                self._log_event("write_test", testName=arguments["testName"])
                 return self._text({"ok": True})
 
             if name == "write_test_skeleton":
                 self.sm.write_test_skeleton(arguments["testName"])
+                self._log_event(
+                    "write_test_skeleton", testName=arguments["testName"]
+                )
                 return self._text({"ok": True})
 
             if name == "write_code":
                 self.sm.write_code(arguments["filePath"])
+                self._log_event("write_code", filePath=arguments["filePath"])
                 return self._text({"ok": True})
 
             if name == "refactor_code":
                 self.sm.refactor_code(arguments["description"])
+                self._log_event(
+                    "refactor_code", description=arguments["description"]
+                )
                 return self._text({"ok": True})
 
             if name == "verify":
                 self.sm.verify()
+                self._log_event("verify")
                 return self._text(
                     {"ok": True, **self.sm.status(include_last_result=False)}
                 )
@@ -309,13 +343,26 @@ class TDDServer:
                 return self._text(self.sm.status(include_stack=True))
 
             if name == "reset_feature":
+                prior_feature = self.sm.feature_name
+                prior_test_file = self.sm.test_file
                 self.sm.reset_feature()
+                self._log_event(
+                    "reset_feature",
+                    featureName=prior_feature,
+                    testFile=prior_test_file,
+                )
                 return self._text(
                     {"ok": True, **self.sm.status(include_last_result=False)}
                 )
 
             if name == "complete_feature":
                 summary = self.sm.complete_feature()
+                self._log_event(
+                    "complete_feature",
+                    featureName=summary["featureName"],
+                    testFile=summary["testFile"],
+                    cyclesCompleted=summary["cyclesCompleted"],
+                )
                 return self._text(
                     {
                         "ok": True,
@@ -329,6 +376,7 @@ class TDDServer:
 
             if name == "drill_down":
                 self.sm.drill_down(arguments["testFile"])
+                self._log_event("drill_down", testFile=arguments["testFile"])
                 return self._text(
                     {
                         "ok": True,
@@ -343,6 +391,11 @@ class TDDServer:
 
             if name == "return_to_parent":
                 summary = self.sm.return_to_parent()
+                self._log_event(
+                    "return_to_parent",
+                    testFile=summary["testFile"],
+                    cyclesCompleted=summary["cyclesCompleted"],
+                )
                 return self._text(
                     {
                         "ok": True,
@@ -357,6 +410,11 @@ class TDDServer:
 
             if name == "abandon_drill_down":
                 summary = self.sm.abandon_drill_down()
+                self._log_event(
+                    "abandon_drill_down",
+                    testFile=summary["testFile"],
+                    cyclesCompleted=summary["cycleCount"],
+                )
                 return self._text(
                     {
                         "ok": True,
@@ -448,6 +506,12 @@ class TDDServer:
             duration_ms=result.duration_ms,
             failures=capped_failures,
             raw_output=result.raw_output,
+        )
+        self._log_event(
+            "run_tests",
+            passed=result.passed,
+            failed=result.failed,
+            durationMs=result.duration_ms,
         )
 
         if own_target_broke is False:

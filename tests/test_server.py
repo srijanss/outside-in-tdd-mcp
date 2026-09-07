@@ -99,6 +99,185 @@ def test_init_feature_returns_status_via_call_tool(tmp_path):
     assert payload["phase"] == "red"
 
 
+def test_init_feature_appends_session_log_entry(tmp_path):
+    server = make_server(tmp_path)
+    call(server, "init_feature", featureName="f", testFile="tests/test_x.py")
+
+    log_path = tmp_path / ".tdd-session.log"
+    assert log_path.exists()
+    entry = json.loads(log_path.read_text().strip().splitlines()[-1])
+    assert entry["event"] == "init_feature"
+    assert entry["featureName"] == "f"
+    assert entry["testFile"] == "tests/test_x.py"
+    assert entry["phase"] == "red"
+    assert "ts" in entry
+
+
+def test_session_log_records_lifecycle_events(tmp_path):
+    fake_adapter = tmp_path / "fake_adapter.py"
+    fake_adapter.write_text(
+        '''#!/usr/bin/env python3
+import json, pathlib, sys
+counter_file = pathlib.Path(__file__).parent / "count.txt"
+count = int(counter_file.read_text()) if counter_file.exists() else 0
+count += 1
+counter_file.write_text(str(count))
+if count == 1:
+    print(json.dumps({"passed": 0, "failed": 1, "failures": []}))
+else:
+    print(json.dumps({"passed": 1, "failed": 0, "failures": []}))
+'''
+    )
+    fake_adapter.chmod(0o755)
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
+    server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
+
+    call(server, "init_feature", featureName="f", testFile="t.py")
+    call(server, "write_test", testName="t")
+    call(server, "run_tests")  # failed=1 -> verify_red
+    call(server, "verify")  # -> implement
+    call(server, "write_code", filePath="f.py")
+
+    call(server, "drill_down", testFile="subA.py")
+    call(server, "abandon_drill_down")  # unneeded, back to implement
+
+    call(server, "drill_down", testFile="subB.py")
+    call(server, "write_test", testName="sub")
+    call(server, "run_tests")  # passed=1, nested red -> verify_green (skip)
+    call(server, "verify")  # -> refactor (nested)
+    call(server, "refactor_code", description="nested tidy up")
+    call(server, "run_tests")  # passed=1 -> nested back to red, cycle 1
+    call(server, "return_to_parent")  # -> back to implement at base
+
+    call(server, "run_tests")  # passed=1 -> verify_green
+    call(server, "verify")  # -> refactor
+    call(server, "refactor_code", description="tidy up")
+    call(server, "run_tests")  # passed=1 -> red, cycle 1
+    call(server, "complete_feature")
+
+    call(server, "init_feature", featureName="g", testFile="g.py")
+    call(server, "reset_feature")
+
+    log_path = tmp_path / ".tdd-session.log"
+    entries = [json.loads(line) for line in log_path.read_text().splitlines()]
+    events = [e["event"] for e in entries]
+    assert events == [
+        "init_feature",
+        "write_test",
+        "run_tests",
+        "verify",
+        "write_code",
+        "drill_down",
+        "abandon_drill_down",
+        "drill_down",
+        "write_test",
+        "run_tests",
+        "verify",
+        "refactor_code",
+        "run_tests",
+        "return_to_parent",
+        "run_tests",
+        "verify",
+        "refactor_code",
+        "run_tests",
+        "complete_feature",
+        "init_feature",
+        "reset_feature",
+    ]
+
+    complete_entry = entries[events.index("complete_feature")]
+    assert complete_entry["featureName"] == "f"
+    assert complete_entry["testFile"] == "t.py"
+    assert complete_entry["cyclesCompleted"] == 1
+    # phase/depth reflect the state machine's post-completion state (fully
+    # cleared), not the completed feature's last phase — that's always
+    # RED/depth-1 by complete_feature()'s own gate, so it carries no
+    # information worth logging.
+    assert complete_entry["phase"] is None
+    assert complete_entry["depth"] == 0
+
+    reset_entry = entries[-1]
+    assert reset_entry["featureName"] == "g"
+    assert reset_entry["testFile"] == "g.py"
+    assert reset_entry["phase"] is None
+    assert reset_entry["depth"] == 0
+
+    # Cycle-count fields must be named consistently across level-scoped
+    # completion events (return_to_parent, complete_feature) and the
+    # unconditional abandon_drill_down, so log consumers don't have to
+    # special-case one event's field name.
+    abandon_entry = entries[events.index("abandon_drill_down")]
+    assert abandon_entry["cyclesCompleted"] == 0
+    return_entry = entries[events.index("return_to_parent")]
+    assert return_entry["cyclesCompleted"] == 1
+
+
+def test_write_test_skeleton_appends_session_log_entry(tmp_path):
+    server = make_server(tmp_path)
+    call(server, "init_feature", featureName="f", testFile="tests/test_x.py")
+
+    call(server, "write_test_skeleton", testName="t")
+
+    log_path = tmp_path / ".tdd-session.log"
+    entry = json.loads(log_path.read_text().strip().splitlines()[-1])
+    assert entry["event"] == "write_test_skeleton"
+    assert entry["testName"] == "t"
+
+
+def test_log_event_does_not_raise_on_non_serializable_field(tmp_path):
+    server = make_server(tmp_path)
+    call(server, "init_feature", featureName="f", testFile="tests/test_x.py")
+
+    server._log_event("custom_event", bad=object())  # must not raise
+
+    log_path = tmp_path / ".tdd-session.log"
+    lines = log_path.read_text().strip().splitlines()
+    last_entry = json.loads(lines[-1])
+    assert last_entry["event"] in ("init_feature", "custom_event")
+
+
+def test_log_event_swallows_oserror_when_log_path_unwritable(tmp_path):
+    server = make_server(tmp_path)
+    call(server, "init_feature", featureName="f", testFile="tests/test_x.py")
+    # Parent directory doesn't exist -> open(..., "a") raises OSError.
+    server.session_log_path = str(tmp_path / "no-such-dir" / "session.log")
+
+    payload = call(server, "write_test", testName="t")  # must not raise
+
+    assert payload == {"ok": True}
+    assert not (tmp_path / "no-such-dir").exists()
+
+
+def test_run_tests_appends_session_log_entry_with_result(tmp_path):
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "adapterPath": str(
+                    PROJECT_ROOT / "adapters" / "pytest-adapter" / "run.sh"
+                )
+            }
+        )
+    )
+    server = TDDServer(
+        project_root=str(PROJECT_ROOT),
+        config_path=str(config_path),
+    )
+    server.session_log_path = str(tmp_path / ".tdd-session.log")
+    call(server, "init_feature", featureName="f", testFile="tests/test_state_machine.py")
+
+    call(server, "run_tests")
+
+    log_path = tmp_path / ".tdd-session.log"
+    entry = json.loads(log_path.read_text().strip().splitlines()[-1])
+    assert entry["event"] == "run_tests"
+    assert entry["passed"] > 0
+    assert entry["failed"] == 0
+    assert entry["phase"] == "verify_green"
+    assert isinstance(entry["durationMs"], int)
+
+
 def test_run_tests_uses_active_test_file_not_default_test_dir(tmp_path):
     # defaultTestDir is only ever consulted when no test_file is set on the
     # state machine — but call_tool's run_tests always has an active
