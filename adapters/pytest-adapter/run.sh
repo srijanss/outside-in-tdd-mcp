@@ -17,6 +17,20 @@ import tempfile
 from pathlib import Path
 
 
+def _trim_for_message(raw_output: str) -> str:
+    """Drop pytest-json-report's own "JSON report" boilerplate and the
+    short-summary section that follows it before capping to a message
+    size — both are printed after the actual traceback, so a fixed-size
+    tail slice of the untrimmed output would show only that noise and
+    lose the real error.
+    """
+    marker_index = raw_output.rfind("JSON report")
+    if marker_index == -1:
+        return raw_output
+    line_start = raw_output.rfind("\n", 0, marker_index)
+    return raw_output[: line_start if line_start != -1 else marker_index]
+
+
 def main() -> int:
     test_target = sys.argv[1] if len(sys.argv) > 1 else ""
     project_root = sys.argv[2] if len(sys.argv) > 2 else "."
@@ -50,7 +64,9 @@ def main() -> int:
                 "passed": 0,
                 "failed": 1,
                 "duration_ms": 0,
-                "failures": [{"name": "collection", "message": raw_output[-500:]}],
+                "failures": [
+                    {"name": "collection", "message": _trim_for_message(raw_output)[-500:]}
+                ],
                 "raw_output": raw_output[-3000:],
             }
             print(json.dumps(result))
@@ -62,7 +78,7 @@ def main() -> int:
             failures.append(
                 {
                     "name": test["nodeid"],
-                    "message": str(test.get("call", {}).get("longrepr", ""))[:500],
+                    "message": str(test.get("call", {}).get("longrepr", ""))[-500:],
                 }
             )
 
@@ -76,7 +92,7 @@ def main() -> int:
         # them here rather than silently reporting passed=0/failed=0.
         failed += errors
         failures.append(
-            {"name": "collection", "message": raw_output[-500:]}
+            {"name": "collection", "message": _trim_for_message(raw_output)[-500:]}
         )
     elif proc.returncode in (2, 3, 4):
         # Collection interrupted entirely (ImportError, syntax error, bad
@@ -86,7 +102,9 @@ def main() -> int:
         # the only remaining signal. Exit code 5 ("no tests collected") is
         # excluded on purpose — an empty selection isn't a failure.
         failed += 1
-        failures.append({"name": "collection", "message": raw_output[-500:]})
+        failures.append(
+            {"name": "collection", "message": _trim_for_message(raw_output)[-500:]}
+        )
 
     result = {
         "passed": summary.get("passed", 0),

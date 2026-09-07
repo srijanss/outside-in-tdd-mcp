@@ -8,6 +8,7 @@ BROKEN_FIXTURE = "tests/fixtures/broken_import_module.py"
 REAL_FAILURE_FIXTURE = "tests/fixtures/real_assertion_failure.py"
 NO_TESTS_FIXTURE = "tests/fixtures/no_tests_collected.py"
 SETUP_ERROR_FIXTURE = "tests/fixtures/setup_error.py"
+LONG_MESSAGE_FIXTURE = "tests/fixtures/long_traceback_failure.py"
 
 
 def run_adapter(test_target):
@@ -17,6 +18,27 @@ def run_adapter(test_target):
         text=True,
     )
     return json.loads(proc.stdout)
+
+
+def test_adapter_keeps_the_actual_error_in_a_collection_failure_message():
+    # pytest-json-report prints "JSON report" boilerplate and a short
+    # summary after the real traceback, which pushes the actual exception
+    # (e.g. ModuleNotFoundError) out of a fixed-size tail slice of
+    # raw_output — the collection message must surface it anyway.
+    result = run_adapter(BROKEN_FIXTURE)
+    message = result["failures"][0]["message"]
+    assert "this_module_does_not_exist_at_all_xyz" in message
+
+
+def test_adapter_uses_the_last_json_report_marker_not_the_first():
+    # A collection error whose own traceback text coincidentally contains
+    # the literal phrase "JSON report" (plausible in this project, which
+    # is itself about JSON reporting) must not have its trim point land on
+    # that earlier match — only the real pytest-json-report boilerplate
+    # marker (always the last such occurrence) should be stripped.
+    result = run_adapter("tests/fixtures/collection_error_mentions_json_report.py")
+    message = result["failures"][0]["message"]
+    assert "MARKER_AFTER_PHRASE" in message
 
 
 def test_adapter_reports_failure_when_collection_is_interrupted():
@@ -64,6 +86,17 @@ def test_adapter_reports_failure_when_target_mixes_broken_and_passing_files():
     result = run_adapter(mixed_target)
     assert result["failed"] >= 1
     assert result["passed"] == 0
+
+
+def test_adapter_keeps_the_tail_of_an_overlong_failure_message():
+    # pytest's longrepr puts the actual exception/assertion detail last,
+    # after the file/line header and source line — cutting it down to the
+    # first 500 chars keeps that header and throws away the real reason.
+    result = run_adapter(LONG_MESSAGE_FIXTURE)
+    assert result["failed"] == 1
+    message = result["failures"][0]["message"]
+    assert len(message) <= 500
+    assert "REAL_REASON_AT_THE_END" in message
 
 
 def test_adapter_reports_failure_when_a_fixture_raises_during_setup():
