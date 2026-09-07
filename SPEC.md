@@ -366,6 +366,9 @@ outside-in-tdd-mcp/
 - Session logging to a `.tdd-session.log` for cross-session review
 - Convention-based adapter discovery instead of hardcoded path
 - Additional adapters: vitest, cargo test, go test
+- Cost management: avoid redundant `run_tests()`/adapter invocations (e.g.
+  cache results for an unchanged test target) and trim what's echoed back
+  to Claude on each MCP call
 
 ---
 

@@ -179,7 +179,7 @@ MAX_FAILURE_MESSAGE_CHARS = 500
 
 def _cap_failures(failures: list[dict[str, Any]]) -> list[dict[str, Any]]:
     capped = [
-        {**f, "message": str(f.get("message", ""))[:MAX_FAILURE_MESSAGE_CHARS]}
+        {**f, "message": str(f.get("message", ""))[-MAX_FAILURE_MESSAGE_CHARS:]}
         for f in failures[:MAX_FAILURES_RETURNED]
     ]
     omitted = len(failures) - len(capped)

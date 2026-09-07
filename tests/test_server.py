@@ -664,6 +664,67 @@ print(json.dumps({"passed": 0, "failed": len(failures), "failures": failures}))
     assert len(status_payload["lastResult"]["failures"]) == 21
 
 
+def test_run_tests_keeps_the_tail_of_an_overlong_failure_message(tmp_path):
+    # A traceback's actual exception/assertion line is the last thing in
+    # it, not the first — cutting the message down to MAX_FAILURE_MESSAGE_
+    # CHARS from the front keeps irrelevant call-frame noise and throws
+    # away the one line that explains what actually went wrong.
+    fake_adapter = tmp_path / "fake_adapter.py"
+    fake_adapter.write_text(
+        '''#!/usr/bin/env python3
+import json
+
+failures = [
+    {
+        "name": "t1",
+        "message": ("noise " * 200) + "AssertionError: the real reason",
+    }
+]
+print(json.dumps({"passed": 0, "failed": 1, "failures": failures}))
+'''
+    )
+    fake_adapter.chmod(0o755)
+
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
+    server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
+    call(server, "init_feature", featureName="f", testFile="own_test.py")
+
+    payload = call(server, "run_tests")
+    message = payload["testResult"]["failures"][0]["message"]
+
+    assert len(message) <= 500
+    assert message.endswith("AssertionError: the real reason")
+
+
+def test_run_tests_leaves_a_short_failure_message_unchanged(tmp_path):
+    # The common case: most real failure messages are well under
+    # MAX_FAILURE_MESSAGE_CHARS. Guards against a future edit to
+    # _cap_failures (e.g. reverting to a head-cut, or adding formatting)
+    # silently corrupting the majority path while only the >500-char
+    # truncation path stays covered.
+    fake_adapter = tmp_path / "fake_adapter.py"
+    fake_adapter.write_text(
+        '''#!/usr/bin/env python3
+import json
+
+failures = [{"name": "t1", "message": "AssertionError: short and simple"}]
+print(json.dumps({"passed": 0, "failed": 1, "failures": failures}))
+'''
+    )
+    fake_adapter.chmod(0o755)
+
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
+    server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
+    call(server, "init_feature", featureName="f", testFile="own_test.py")
+
+    payload = call(server, "run_tests")
+    message = payload["testResult"]["failures"][0]["message"]
+
+    assert message == "AssertionError: short and simple"
+
+
 def test_run_tests_returns_clean_error_for_malformed_failure_entries(tmp_path):
     # An adapter's failures entries aren't required by adapter_contract.py
     # to be dicts today — a non-dict entry must surface as a clean
