@@ -23,7 +23,10 @@ Before calling `init_feature`, resolve both arguments — don't guess silently:
 
 Once both are settled, using the outside-in-tdd MCP server's tools (not your
 own file-editing tools in place of them), start the feature with
-`init_feature(featureName, testFile)` using the confirmed name and file.
+`init_feature(featureName, testFile, targetFiles)` using the confirmed name
+and file. `targetFiles` is the implementation file(s) you expect the
+base-level cycle to write directly — `write_code` will be blocked for
+anything outside that set (see IMPLEMENT below).
 
 ## How to verify (VERIFY_RED / VERIFY_GREEN) — mandatory checkpoint
 
@@ -43,13 +46,18 @@ tools are phase checkpoints, not file writers):
 1. RED: `write_test(testName)`, write the failing test to disk, then
    `run_tests()`. This should move the phase to VERIFY_RED.
 2. VERIFY_RED: follow "How to verify" above before calling `verify()`.
-3. IMPLEMENT: `write_code(filePath)`, write the implementation, then
-   `run_tests()` until it passes. If a piece needs its own test first (a
-   different app, a unit test, anything), use `drill_down(testFile)` instead
-   of switching test files informally — it runs its own independent
-   RED->VERIFY_RED->IMPLEMENT->VERIFY_GREEN->REFACTOR cycle, including its
-   own verify checkpoints. Call `return_to_parent()` once that's done, or
-   `abandon_drill_down()` if it turns out unnecessary.
+3. IMPLEMENT: `write_code(filePath)` only for a `filePath` in this level's
+   declared `targetFiles`, write the implementation, then `run_tests()`
+   until it passes. The moment IMPLEMENT needs to touch any other file —
+   new or existing, a different app, a unit test, a new module, anything
+   not already in `targetFiles` — that content needs its own test first:
+   never write it directly. Use `drill_down(testFile, targetFiles)`
+   instead, declaring the file(s) that nested cycle owns — it runs its own
+   independent RED->VERIFY_RED->IMPLEMENT->VERIFY_GREEN->REFACTOR cycle,
+   including its own verify checkpoints. Call `return_to_parent()` once
+   that's done, or `abandon_drill_down()` if it turns out unnecessary, then
+   resume writing only this level's own `targetFiles` (e.g. wiring in what
+   the drill-down just built).
 4. VERIFY_GREEN: follow "How to verify" above before calling `verify()`.
 5. REFACTOR: `refactor_code(description)`, then `run_tests()` to close the
    cycle (back to RED, cycle count +1).

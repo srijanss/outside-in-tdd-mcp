@@ -14,9 +14,10 @@ based on the returned phase, using the same VERIFY_RED/VERIFY_GREEN rule as
   yes, call `run_tests()`; if no, `write_test(testName)` then write it.
 - VERIFY_RED: show the failing test and its output, then call `verify()`.
 - IMPLEMENT: check whether an implementation already exists or is partial;
-  continue it or start with `write_code(filePath)`, then `run_tests()`. Use
-  `drill_down(testFile)` if a collaborator still needs its own cycle, same
-  as `/tdd-start`.
+  continue it or start with `write_code(filePath)`, restricted to this
+  level's `targetFiles` (from `get_status()`). Use
+  `drill_down(testFile, targetFiles)` if a collaborator still needs its own
+  cycle, same as `/tdd-start`.
 - VERIFY_GREEN: show the passing implementation, then call `verify()`.
 - REFACTOR: continue or start with `refactor_code(description)`, then
   `run_tests()`.
