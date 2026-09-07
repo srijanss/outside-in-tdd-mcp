@@ -1,17 +1,13 @@
 {
   "mcpServers": {
     "outside-in-tdd": {
-      "command": "docker",
-      "args": [
-        "run",
-        "-i",
-        "--rm",
-        "-v",
-        "${CLAUDE_PROJECT_DIR:-.}:/app",
-        "-w",
-        "/app",
-        "outside-in-tdd-mcp:pytest"
-      ]
+      "command": "/path/to/your/.local/bin/outside-in-tdd-mcp",
+      "args": [],
+      "env": {
+        "TDD_PROJECT_ROOT": "/path/to/your-project",
+        "TDD_CONFIG_PATH": "/path/to/your-project/.tdd-config.json",
+        "PATH": "/path/to/your-project/.venv/bin:/usr/bin:/bin"
+      }
     }
   }
 }

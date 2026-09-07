@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -800,3 +801,35 @@ print(json.dumps({"passed": 0, "failed": len(failures), "failures": failures}))
 
     assert len(failures) == 20
     assert all(f["name"] != "..." for f in failures)
+
+
+def test_run_tests_honors_custom_path_env_when_invoking_adapter(tmp_path, monkeypatch):
+    # The adapter shells out to language tools (pytest, npx) by bare name,
+    # relying on inherited PATH to resolve the project-pinned version (see
+    # .mcp.json's PATH override). run_adapter must not strip/replace the
+    # server process's environment before spawning the adapter, or a
+    # consumer project's PATH override would silently do nothing.
+    marker_dir = tmp_path / "custom-bin"
+    marker_dir.mkdir()
+
+    fake_adapter = tmp_path / "fake_adapter.py"
+    fake_adapter.write_text(
+        f'''#!/usr/bin/env python3
+import json
+import os
+
+found = {str(marker_dir)!r} in os.environ.get("PATH", "").split(os.pathsep)
+print(json.dumps({{"passed": 0, "failed": 1, "failures": [{{"name": "path", "message": "found" if found else "missing"}}]}}))
+'''
+    )
+    fake_adapter.chmod(0o755)
+
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
+    server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
+    call(server, "init_feature", featureName="f", testFile="own_test.py")
+
+    monkeypatch.setenv("PATH", f"{marker_dir}{os.pathsep}{os.environ['PATH']}")
+    payload = call(server, "run_tests")
+
+    assert payload["testResult"]["failures"][0]["message"] == "found"
