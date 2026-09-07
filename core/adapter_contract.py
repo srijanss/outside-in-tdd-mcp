@@ -12,9 +12,12 @@ how to invoke an adapter executable and validate/parse its output.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from dataclasses import dataclass, field
 from typing import Any
+
+DEFAULT_TIMEOUT_S = 120
 
 
 class AdapterError(Exception):
@@ -71,9 +74,26 @@ def run_adapter(
     adapter_path: str,
     test_target: str,
     project_root: str,
-    timeout_s: int = 120,
+    timeout_s: int | None = None,
 ) -> AdapterResult:
-    """Invoke the adapter executable and parse its JSON stdout contract."""
+    """Invoke the adapter executable and parse its JSON stdout contract.
+
+    timeout_s defaults to the TDD_ADAPTER_TIMEOUT_S environment variable
+    (set per project via .mcp.json's env block) when not given explicitly,
+    falling back to DEFAULT_TIMEOUT_S — slow suites can override it without
+    a code change.
+    """
+    if timeout_s is None:
+        raw_timeout = os.environ.get("TDD_ADAPTER_TIMEOUT_S")
+        if raw_timeout is None:
+            timeout_s = DEFAULT_TIMEOUT_S
+        else:
+            try:
+                timeout_s = int(raw_timeout)
+            except ValueError as exc:
+                raise AdapterError(
+                    f"TDD_ADAPTER_TIMEOUT_S must be an integer, got {raw_timeout!r}"
+                ) from exc
     try:
         proc = subprocess.run(
             [adapter_path, test_target, project_root],
