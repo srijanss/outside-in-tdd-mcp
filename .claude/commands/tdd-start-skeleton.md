@@ -20,13 +20,23 @@ Before calling `init_feature`, resolve both arguments — don't guess silently:
      `app/tests/test_<feature_name>.py`), and ask me to confirm or correct
      it before creating anything.
   Only proceed once we've settled on one concrete file path.
+- `targetFiles` is not something to ask me for. Infer it yourself the same
+  way you resolve the test target: from the feature name, the test file's
+  location, and this project's existing module layout, work out which
+  implementation file(s) the base-level cycle should own (an existing file
+  you expect to edit, or a new path that mirrors the test file's
+  package/naming convention). State what you inferred as part of your
+  normal narration before calling `init_feature` so I can correct it, but
+  don't stop and wait for confirmation the way you do for the feature name
+  and test target.
 
-Once both are settled, using the outside-in-tdd MCP server's tools (not your
-own file-editing tools in place of them), start the feature with
-`init_feature(featureName, testFile, targetFiles)` using the confirmed name
-and file. `targetFiles` is the implementation file(s) you expect the
-base-level cycle to write directly — `write_code` will be blocked for
-anything outside that set (see IMPLEMENT below).
+Once the feature name and test file are settled and `targetFiles` inferred,
+using the outside-in-tdd MCP server's tools (not your own file-editing tools
+in place of them), start the feature with
+`init_feature(featureName, testFile, targetFiles)`. `targetFiles` is the
+implementation file(s) you expect the base-level cycle to write directly —
+`write_code` will be blocked for anything outside that set (see IMPLEMENT
+below).
 
 For the RED phase, use `write_test_skeleton(testName)` instead of
 `write_test` — stub the test function(s) with TODO comments describing the
@@ -56,7 +66,9 @@ VERIFY_RED:
    new or existing, a different app, a unit test, a new module, anything
    not already in `targetFiles` — that content needs its own test first:
    never write it directly. Use `drill_down(testFile, targetFiles)`
-   instead, declaring the file(s) that nested cycle owns — it runs its own
+   instead, inferring `targetFiles` the same way as above (from the new
+   test file and what it needs), declaring the file(s) that nested cycle
+   owns — it runs its own
    independent RED->VERIFY_RED->IMPLEMENT->VERIFY_GREEN->REFACTOR cycle,
    including its own verify checkpoints. Call `return_to_parent()` once
    that's done, or `abandon_drill_down()` if it turns out unnecessary, then
