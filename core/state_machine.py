@@ -10,6 +10,15 @@ return_to_parent() pops back once a nested level finishes a full cycle.
 There's no "acceptance"/"unit" label anywhere: depth in the stack is the
 only signal, since a feature may fan out into any number of test files
 across any number of areas of the codebase.
+
+Each level declares the implementation file(s) it owns (target_files, set
+by init_feature()/drill_down()). write_code() may only target one of the
+current level's declared files — writing to anything else, new file or
+existing one, means that content needs its own test first: drill_down()
+into it instead of implementing it directly. This is what keeps IMPLEMENT
+from becoming "write the whole feature in one shot" — a leaf level's own
+RED test justifies its own write_code() calls, but a parent level can never
+bypass drilling down just because it's convenient to write more there.
 """
 
 from __future__ import annotations
@@ -37,6 +46,33 @@ class NoActiveFeatureError(Exception):
     """Raised when a feature-scoped tool is called with no feature initialized."""
 
 
+class InvalidTargetFilesError(Exception):
+    """Raised when target_files isn't a list/tuple of strings."""
+
+
+def _validate_target_files(target_files: Any) -> tuple[str, ...]:
+    if isinstance(target_files, str) or not isinstance(target_files, (list, tuple)):
+        raise InvalidTargetFilesError(
+            "target_files must be a list or tuple of strings, got "
+            f"{type(target_files).__name__}."
+        )
+    if not all(isinstance(t, str) for t in target_files):
+        raise InvalidTargetFilesError(
+            "target_files must be a list of strings — got non-string "
+            f"entries: {target_files!r}."
+        )
+    if not all(t.strip() for t in target_files):
+        raise InvalidTargetFilesError(
+            "target_files entries must not be empty or whitespace-only — "
+            f"got: {target_files!r}."
+        )
+    if len(set(target_files)) != len(target_files):
+        raise InvalidTargetFilesError(
+            f"target_files must not contain duplicate entries — got: {target_files!r}."
+        )
+    return tuple(target_files)
+
+
 @dataclass
 class TestResult:
     passed: int = 0
@@ -49,6 +85,7 @@ class TestResult:
 @dataclass
 class _Level:
     test_file: str
+    target_files: tuple[str, ...] = ()
     phase: str = "red"
     cycle_count: int = 0
     last_result: TestResult | None = None
@@ -65,6 +102,10 @@ class TDDStateMachine:
     @property
     def test_file(self) -> str | None:
         return self.stack[-1].test_file if self.stack else None
+
+    @property
+    def target_files(self) -> tuple[str, ...]:
+        return self.stack[-1].target_files if self.stack else ()
 
     @property
     def phase(self) -> str | None:
@@ -88,15 +129,18 @@ class TDDStateMachine:
 
     # -- lifecycle -----------------------------------------------------
 
-    def init_feature(self, name: str, test_file: str) -> None:
+    def init_feature(
+        self, name: str, test_file: str, target_files: list[str]
+    ) -> None:
         if self.stack:
             raise PhaseError(
                 f"A feature ('{self.feature_name}') is already active — "
                 "call complete_feature() or reset_feature() before "
                 "starting a new one."
             )
+        validated = _validate_target_files(target_files)
         self.feature_name = name
-        self.stack = [_Level(test_file=test_file)]
+        self.stack = [_Level(test_file=test_file, target_files=validated)]
 
     def reset_feature(self) -> None:
         self.feature_name = None
@@ -137,13 +181,16 @@ class TDDStateMachine:
 
     # -- drill-down stack ------------------------------------------------
 
-    def drill_down(self, test_file: str) -> None:
+    def drill_down(self, test_file: str, target_files: list[str]) -> None:
         """Push a nested test target on top of the current one. Only
         allowed while IMPLEMENT-ing the level above — you're mid
         implementation and need a lower-level test (a different app, a unit
-        test, anything) to get there."""
+        test, anything) to get there. target_files declares the
+        implementation file(s) this nested cycle owns — same rule as
+        init_feature's target_files, scoped to this level."""
         self._require_phase("implement", "drill_down")
-        self.stack.append(_Level(test_file=test_file))
+        validated = _validate_target_files(target_files)
+        self.stack.append(_Level(test_file=test_file, target_files=validated))
 
     def return_to_parent(self) -> dict[str, Any]:
         """Pop the current level and resume the one beneath it. Requires
@@ -225,6 +272,18 @@ class TDDStateMachine:
 
     def write_code(self, file_path: str) -> None:
         self._require_phase("implement", "write_code")
+        level = self.stack[-1]
+        # Exact string match on purpose -- no path normalization ("./f.py"
+        # vs "f.py"). Callers must declare target_files in the same form
+        # they'll pass to write_code().
+        if file_path not in level.target_files:
+            raise PhaseError(
+                f"write_code() target '{file_path}' is not one of this "
+                f"level's declared target files ({', '.join(str(t) for t in level.target_files) or 'none'}). "
+                "If it needs its own test, drill_down(testFile=..., "
+                f"targetFiles=[{file_path!r}]) first instead of implementing "
+                "it directly."
+            )
 
     def refactor_code(self, description: str) -> None:
         self._require_phase("refactor", "refactor_code")
@@ -326,6 +385,7 @@ class TDDStateMachine:
             "featureName": self.feature_name,
             "depth": self.depth,
             "testFile": self.test_file,
+            "targetFiles": list(self.target_files),
             "phase": self.phase,
             "cycleCount": self.cycle_count,
             "lastError": self.last_error,
@@ -334,6 +394,7 @@ class TDDStateMachine:
             payload["stack"] = [
                 {
                     "testFile": lvl.test_file,
+                    "targetFiles": list(lvl.target_files),
                     "phase": lvl.phase,
                     "cycleCount": lvl.cycle_count,
                 }

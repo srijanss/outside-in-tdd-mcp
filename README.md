@@ -61,8 +61,8 @@ looked at what's about to be cleaned up.
 test rarely gets to GREEN in one leap — it usually needs several unit tests
 underneath it, possibly across several apps (`cart/`, `orders/`, ...).
 `init_feature` pushes the base level (typically the functional/acceptance
-test). `drill_down(testFile)` — only callable in IMPLEMENT — pushes any
-other test target on top; it runs its own fully independent
+test). `drill_down(testFile, targetFiles)` — only callable in IMPLEMENT —
+pushes any other test target on top; it runs its own fully independent
 RED→VERIFY_RED→IMPLEMENT→VERIFY_GREEN→REFACTOR cycle, gated exactly like
 the base level.
 `return_to_parent()` pops back once that nested level finishes a full cycle
@@ -77,6 +77,22 @@ files across any number of areas of the codebase, not just a fixed two-level
 split. `complete_feature` now additionally requires depth 1 — you have to
 `return_to_parent` out of every drill-down before the whole feature can be
 marked done.
+
+**`targetFiles` — what stops IMPLEMENT from just writing the whole
+feature.** Phase gating alone doesn't stop an agent from reaching
+IMPLEMENT and writing a complete, working implementation in one
+`write_code` call — every phase transition rule is satisfied, but the
+"outside-in" part (decompose into unit-level RED/GREEN cycles for each
+new collaborator) never happened. `init_feature`/`drill_down` now require
+`targetFiles`: the implementation file(s) that level is allowed to write.
+`write_code(filePath)` is blocked unless `filePath` is one of the current
+level's declared `targetFiles` — new file or an existing one being edited,
+doesn't matter. If IMPLEMENT needs to touch anything else, that content
+needs its own test first: `drill_down(testFile, targetFiles)` into it,
+finish that level's own RED→...→REFACTOR cycle (that level's own test
+justifies its own `write_code` calls, no further gate needed there), then
+`return_to_parent()` and resume writing only the parent's own declared
+files (e.g. wiring the new piece in).
 
 **`return_to_parent` vs `abandon_drill_down`.** Same completed/abandoned
 split as `complete_feature`/`reset_feature`, scoped to one level instead of

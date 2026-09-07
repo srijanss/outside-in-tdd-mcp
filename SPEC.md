@@ -108,8 +108,11 @@ the two points where its judgment is easiest to get wrong unnoticed.
 ### Feature Lifecycle
 
 ```
-init_feature(name, testFile)
+init_feature(name, testFile, targetFiles)
   → Phase: RED
+  → targetFiles declares the implementation file(s) the base level owns —
+    write_code() at depth 1 can only target one of these (see write_code
+    below)
 
 write_test(name)
   → Only allowed in RED
@@ -132,6 +135,10 @@ verify()
 write_code(filePath)
   → Only allowed in IMPLEMENT
   → Blocks with error otherwise
+  → filePath must be one of the current level's declared targetFiles
+    (set by init_feature/drill_down) — new or existing file. A filePath
+    outside that set is blocked: that content needs its own test first,
+    via drill_down(), not direct implementation.
 
 refactor_code(description)
   → Only allowed in REFACTOR
@@ -147,8 +154,10 @@ complete_feature()
   → Only allowed at depth 1, in RED, after cycleCount >= 1
   → Clears feature state and reports success (distinct from reset_feature's abandonment)
 
-drill_down(testFile)
+drill_down(testFile, targetFiles)
   → Only allowed in IMPLEMENT — pushes a nested test target with its own independent cycle
+  → targetFiles declares the implementation file(s) this nested level
+    owns, same rule write_code() enforces at every level
 
 return_to_parent()
   → Only allowed in RED after the current (nested) level finishes a full cycle — pops back to the parent

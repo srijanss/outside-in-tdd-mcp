@@ -21,7 +21,12 @@ from mcp.server import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
 
 from core.adapter_contract import AdapterError, run_adapter
-from core.state_machine import NoActiveFeatureError, PhaseError, TDDStateMachine
+from core.state_machine import (
+    InvalidTargetFilesError,
+    NoActiveFeatureError,
+    PhaseError,
+    TDDStateMachine,
+)
 
 PROJECT_ROOT = os.environ.get("TDD_PROJECT_ROOT", "/app")
 CONFIG_PATH = os.environ.get(
@@ -43,8 +48,18 @@ TOOLS = [
                         "as-is to the adapter, e.g. a pytest path expression)."
                     ),
                 },
+                "targetFiles": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Implementation file(s) this base level owns. "
+                        "write_code() at this level can only write to one of "
+                        "these paths (new or existing) — anything else needs "
+                        "its own test via drill_down() first."
+                    ),
+                },
             },
-            "required": ["featureName", "testFile"],
+            "required": ["featureName", "testFile", "targetFiles"],
         },
     ),
     types.Tool(
@@ -77,7 +92,11 @@ TOOLS = [
         name="write_code",
         description=(
             "Declare implementation code written to disk (via your own "
-            "file tools). Only available in IMPLEMENT phase."
+            "file tools). Only available in IMPLEMENT phase, and only for "
+            "one of the current level's declared targetFiles (see "
+            "init_feature/drill_down) — new file or existing one. If the "
+            "content you need belongs in a different file, drill_down into "
+            "it with a test first instead of writing it here directly."
         ),
         inputSchema={
             "type": "object",
@@ -137,15 +156,27 @@ TOOLS = [
     types.Tool(
         name="drill_down",
         description=(
-            "Push a nested test target on top of the current one (e.g. a "
-            "unit test needed mid-implementation). IMPLEMENT phase only; "
-            "runs its own RED->...->REFACTOR cycle. Call return_to_parent "
-            "when done."
+            "Push a nested test target on top of the current one — required "
+            "whenever IMPLEMENT needs to write to a file that isn't one of "
+            "the current level's declared targetFiles (e.g. a new module or "
+            "collaborator), new or existing. IMPLEMENT phase only; runs its "
+            "own RED->...->REFACTOR cycle scoped to targetFiles declared "
+            "here. Call return_to_parent when done."
         ),
         inputSchema={
             "type": "object",
-            "properties": {"testFile": {"type": "string"}},
-            "required": ["testFile"],
+            "properties": {
+                "testFile": {"type": "string"},
+                "targetFiles": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Implementation file(s) this nested level owns — "
+                        "same rule as init_feature's targetFiles."
+                    ),
+                },
+            },
+            "required": ["testFile", "targetFiles"],
         },
     ),
     types.Tool(
@@ -301,8 +332,12 @@ class TDDServer:
                         "exist. Fix .tdd-config.json before starting a "
                         "feature."
                     )
-                self.sm.init_feature(arguments["featureName"], arguments["testFile"])
-                self._log_event("init_feature")
+                self.sm.init_feature(
+                    arguments["featureName"],
+                    arguments["testFile"],
+                    arguments["targetFiles"],
+                )
+                self._log_event("init_feature", targetFiles=arguments["targetFiles"])
                 return self._text(self.sm.status(include_last_result=False))
 
             if name == "write_test":
@@ -375,8 +410,12 @@ class TDDServer:
                 )
 
             if name == "drill_down":
-                self.sm.drill_down(arguments["testFile"])
-                self._log_event("drill_down", testFile=arguments["testFile"])
+                self.sm.drill_down(arguments["testFile"], arguments["targetFiles"])
+                self._log_event(
+                    "drill_down",
+                    testFile=arguments["testFile"],
+                    targetFiles=arguments["targetFiles"],
+                )
                 return self._text(
                     {
                         "ok": True,
@@ -430,7 +469,7 @@ class TDDServer:
 
             return self._error(f"Unknown tool: {name}")
 
-        except (PhaseError, NoActiveFeatureError) as exc:
+        except (PhaseError, NoActiveFeatureError, InvalidTargetFilesError) as exc:
             return self._error(str(exc))
         except KeyError as exc:
             return self._error(f"Missing required argument: {exc}")
