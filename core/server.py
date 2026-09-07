@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import shlex
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -499,8 +498,16 @@ class TDDServer:
         closing_base_refactor = (
             self.sm.phase == "refactor" and self.sm.depth == 1 and default_test_dir
         )
+        # defaultTestDir follows the same contract as test_target itself
+        # (run.sh's docstring: "a single path, several space-separated
+        # paths/dirs, or a full pytest argument expression") — it is not a
+        # single opaque path, so it must NOT be shlex.quote()'d as one
+        # token. A caller who genuinely needs a literal path containing a
+        # space must quote that substring themselves in defaultTestDir
+        # (e.g. '"dir with space"'), exactly as run.sh's own shlex.split()
+        # already expects.
         run_target = (
-            f"{test_target} {shlex.quote(default_test_dir)}"
+            f"{test_target} {default_test_dir}"
             if closing_base_refactor
             else test_target
         )

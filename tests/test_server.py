@@ -577,10 +577,12 @@ def test_regression_check_does_not_double_count_overlapping_tests(tmp_path):
 
 
 def test_regression_check_handles_default_test_dir_with_space(tmp_path):
-    # defaultTestDir containing a space must not get mangled when combined
-    # with test_target into one adapter argument — the adapter shlex-splits
-    # that argument, so an unquoted "dir with space" would be parsed as
-    # three separate (nonexistent) targets instead of one directory.
+    # defaultTestDir follows the same contract as test_target: it's parsed
+    # as a full pytest argument expression, not treated as one opaque path.
+    # So a literal directory name containing a space must be quoted by the
+    # caller in the config value itself (matching run.sh's own documented
+    # shlex-split contract) — an unquoted "dir with space" would otherwise
+    # be parsed as three separate (nonexistent) targets.
     suite_dir = tmp_path / "suite"
     suite_dir.mkdir()
     (suite_dir / "test_a.py").write_text("def test_a1():\n    assert True\n")
@@ -591,7 +593,7 @@ def test_regression_check_handles_default_test_dir_with_space(tmp_path):
     adapter_path = str(PROJECT_ROOT / "adapters" / "pytest-adapter" / "run.sh")
     config_path = tmp_path / ".tdd-config.json"
     config_path.write_text(
-        json.dumps({"adapterPath": adapter_path, "defaultTestDir": "dir with space"})
+        json.dumps({"adapterPath": adapter_path, "defaultTestDir": '"dir with space"'})
     )
     server = TDDServer(project_root=str(suite_dir), config_path=str(config_path))
     call(server, "init_feature", featureName="f", testFile="test_a.py", targetFiles=["test_a.py"])
@@ -604,6 +606,41 @@ def test_regression_check_handles_default_test_dir_with_space(tmp_path):
     assert payload["phase"] == "red"  # nothing actually broken -> cycle closes
     assert payload["cycleCount"] == 1
     assert payload["testResult"]["passed"] == 2  # test_a.py + test_b.py
+    assert payload["testResult"]["failed"] == 0
+
+
+def test_regression_check_supports_defaulttestdir_with_extra_pytest_args(tmp_path):
+    # defaultTestDir isn't always a bare path — run.sh's own contract says
+    # the combined target can be "a full pytest argument expression" (e.g.
+    # ". --ignore=vendor"). shlex.quote()-ing the whole defaultTestDir value
+    # as one token breaks that: "." and "--ignore=vendor" collapse into a
+    # single literal (nonexistent) path "'. --ignore=vendor'" instead of two
+    # pytest args, so pytest immediately errors with "collected 0 items"
+    # instead of running the regression sweep. The regression run must
+    # preserve multiple space-separated args in defaultTestDir.
+    suite_dir = tmp_path / "suite"
+    suite_dir.mkdir()
+    (suite_dir / "test_a.py").write_text("def test_a1():\n    assert True\n")
+    vendor_dir = suite_dir / "vendor"
+    vendor_dir.mkdir()
+    (vendor_dir / "test_vendor.py").write_text("def test_v1():\n    assert False\n")
+
+    adapter_path = str(PROJECT_ROOT / "adapters" / "pytest-adapter" / "run.sh")
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(
+        json.dumps({"adapterPath": adapter_path, "defaultTestDir": ". --ignore=vendor"})
+    )
+    server = TDDServer(project_root=str(suite_dir), config_path=str(config_path))
+    call(server, "init_feature", featureName="f", testFile="test_a.py", targetFiles=["test_a.py"])
+
+    call(server, "run_tests")  # red -> verify_green (own target already passes)
+    call(server, "verify")  # -> refactor
+
+    payload = call(server, "run_tests")  # closes refactor -> regression check runs
+
+    assert payload["phase"] == "red"  # vendor/ ignored, nothing actually broke
+    assert payload["cycleCount"] == 1
+    assert payload["testResult"]["passed"] == 1  # test_a.py only
     assert payload["testResult"]["failed"] == 0
 
 
