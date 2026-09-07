@@ -9,3 +9,4 @@ dist/
 .tdd-config.json
 .mcp.json
 .tdd-session.log
+node_modules
