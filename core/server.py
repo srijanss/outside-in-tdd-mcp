@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shlex
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -484,6 +485,11 @@ class TDDServer:
         adapter_path = config["adapterPath"]
         test_target = self.sm.test_file
         default_test_dir = config.get("defaultTestDir")
+        # A whitespace-only value (e.g. "   ") is truthy but shlex.split()
+        # collapses it to nothing — treat it the same as unset rather than
+        # running a no-op regression check that looks like real coverage.
+        if default_test_dir is not None and not default_test_dir.strip():
+            default_test_dir = None
 
         # Closing a base-level REFACTOR cycle is what unlocks
         # complete_feature() — check the whole suite (not just this cycle's
@@ -506,6 +512,15 @@ class TDDServer:
         # space must quote that substring themselves in defaultTestDir
         # (e.g. '"dir with space"'), exactly as run.sh's own shlex.split()
         # already expects.
+        if closing_base_refactor:
+            try:
+                shlex.split(default_test_dir)
+            except ValueError as exc:
+                return {
+                    "error": (
+                        f"defaultTestDir in .tdd-config.json is malformed: {exc}"
+                    )
+                }
         run_target = (
             f"{test_target} {default_test_dir}"
             if closing_base_refactor

@@ -644,6 +644,69 @@ def test_regression_check_supports_defaulttestdir_with_extra_pytest_args(tmp_pat
     assert payload["testResult"]["failed"] == 0
 
 
+def test_regression_check_skips_when_default_test_dir_is_whitespace_only(tmp_path):
+    # A whitespace-only defaultTestDir (e.g. "   ") is truthy in Python, so
+    # it used to pass closing_base_refactor's truthiness check and trigger
+    # a regression run — but shlex.split() collapses pure whitespace to
+    # nothing, silently degrading run_target back to just test_target. The
+    # regression check would then report success having actually checked
+    # nothing beyond the cycle's own test. Treat it the same as an unset
+    # defaultTestDir: skip the regression check entirely instead of running
+    # a no-op that looks like real coverage.
+    suite_dir = tmp_path / "suite"
+    suite_dir.mkdir()
+    (suite_dir / "test_a.py").write_text("def test_a1():\n    assert True\n")
+    vendor_dir = suite_dir / "vendor"
+    vendor_dir.mkdir()
+    (vendor_dir / "test_vendor.py").write_text("def test_v1():\n    assert False\n")
+
+    adapter_path = str(PROJECT_ROOT / "adapters" / "pytest-adapter" / "run.sh")
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(
+        json.dumps({"adapterPath": adapter_path, "defaultTestDir": "   "})
+    )
+    server = TDDServer(project_root=str(suite_dir), config_path=str(config_path))
+    call(server, "init_feature", featureName="f", testFile="test_a.py", targetFiles=["test_a.py"])
+
+    call(server, "run_tests")  # red -> verify_green (own target already passes)
+    call(server, "verify")  # -> refactor
+
+    payload = call(server, "run_tests")  # closes refactor; regression check must be skipped
+
+    assert payload["phase"] == "red"
+    assert payload["cycleCount"] == 1
+    assert payload["testResult"]["passed"] == 1  # test_a.py only — no phantom regression run
+    assert payload["testResult"]["failed"] == 0
+
+
+def test_regression_check_reports_clean_error_for_malformed_default_test_dir(tmp_path):
+    # An unbalanced quote in defaultTestDir (e.g. a config typo) makes
+    # run.sh's shlex.split() raise ValueError, crashing the adapter script
+    # with a raw Python traceback on stderr instead of running anything.
+    # The server should catch this itself and surface a clear config error
+    # instead of forwarding a confusing traceback dump.
+    suite_dir = tmp_path / "suite"
+    suite_dir.mkdir()
+    (suite_dir / "test_a.py").write_text("def test_a1():\n    assert True\n")
+
+    adapter_path = str(PROJECT_ROOT / "adapters" / "pytest-adapter" / "run.sh")
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(
+        json.dumps({"adapterPath": adapter_path, "defaultTestDir": '"unmatched'})
+    )
+    server = TDDServer(project_root=str(suite_dir), config_path=str(config_path))
+    call(server, "init_feature", featureName="f", testFile="test_a.py", targetFiles=["test_a.py"])
+
+    call(server, "run_tests")  # red -> verify_green (own target already passes)
+    call(server, "verify")  # -> refactor
+
+    payload = call(server, "run_tests")  # closing refactor hits the malformed defaultTestDir
+
+    assert "error" in payload
+    assert "defaultTestDir" in payload["error"]
+    assert "Traceback" not in payload["error"]
+
+
 def test_regression_check_attributes_failure_to_refactor_when_own_target_breaks(tmp_path):
     # closing_base_refactor's combined run can fail because the cycle's own
     # test broke, not because of a regression elsewhere. The second
