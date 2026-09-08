@@ -494,7 +494,9 @@ def test_refactor_closing_cycle_also_checks_full_suite_for_regressions(tmp_path)
     assert payload["phase"] == "verify_green"
     call(server, "verify")  # -> refactor
 
-    payload = call(server, "run_tests")
+    payload = call(
+        server, "run_tests", regressionScope="tests/fixtures/broken_import_module.py"
+    )
 
     assert payload["phase"] == "refactor"
     assert payload["cycleCount"] == 0
@@ -526,7 +528,11 @@ def test_regression_check_merges_passed_counts_and_reports_accurate_error(tmp_pa
     call(server, "run_tests")  # red -> verify_green (own target already passes)
     call(server, "verify")  # -> refactor
 
-    payload = call(server, "run_tests")  # closes refactor -> triggers regression check
+    payload = call(
+        server,
+        "run_tests",
+        regressionScope="tests/fixtures/mixed_pass_and_fail.py",
+    )  # closes refactor -> triggers regression check
 
     assert payload["phase"] == "refactor"  # blocked: regression found
     # The regression fixture has 1 passing and 1 failing test — both must
@@ -568,7 +574,9 @@ def test_regression_check_does_not_double_count_overlapping_tests(tmp_path):
     call(server, "run_tests")  # red -> verify_green (own target already passes)
     call(server, "verify")  # -> refactor
 
-    payload = call(server, "run_tests")  # closes refactor -> regression check runs
+    payload = call(
+        server, "run_tests", regressionScope="."
+    )  # closes refactor -> regression check runs
 
     assert payload["phase"] == "red"  # nothing actually broken -> cycle closes
     assert payload["cycleCount"] == 1
@@ -601,7 +609,9 @@ def test_regression_check_handles_default_test_dir_with_space(tmp_path):
     call(server, "run_tests")  # red -> verify_green (own target already passes)
     call(server, "verify")  # -> refactor
 
-    payload = call(server, "run_tests")  # closes refactor -> regression check runs
+    payload = call(
+        server, "run_tests", regressionScope='"dir with space"'
+    )  # closes refactor -> regression check runs
 
     assert payload["phase"] == "red"  # nothing actually broken -> cycle closes
     assert payload["cycleCount"] == 1
@@ -636,7 +646,9 @@ def test_regression_check_supports_defaulttestdir_with_extra_pytest_args(tmp_pat
     call(server, "run_tests")  # red -> verify_green (own target already passes)
     call(server, "verify")  # -> refactor
 
-    payload = call(server, "run_tests")  # closes refactor -> regression check runs
+    payload = call(
+        server, "run_tests", regressionScope=". --ignore=vendor"
+    )  # closes refactor -> regression check runs
 
     assert payload["phase"] == "red"  # vendor/ ignored, nothing actually broke
     assert payload["cycleCount"] == 1
@@ -700,11 +712,103 @@ def test_regression_check_reports_clean_error_for_malformed_default_test_dir(tmp
     call(server, "run_tests")  # red -> verify_green (own target already passes)
     call(server, "verify")  # -> refactor
 
-    payload = call(server, "run_tests")  # closing refactor hits the malformed defaultTestDir
+    payload = call(
+        server, "run_tests", regressionScope='"unmatched'
+    )  # closing refactor hits the malformed defaultTestDir
 
     assert "error" in payload
     assert "defaultTestDir" in payload["error"]
     assert "Traceback" not in payload["error"]
+
+
+def test_run_tests_requests_regression_scope_confirmation_before_full_sweep(tmp_path):
+    # Closing a base-level REFACTOR with defaultTestDir set used to run the
+    # full-suite sweep immediately and unconditionally — for a large/slow
+    # suite that's an unwanted surprise. run_tests() should instead pause
+    # and ask which scope to run, rather than just doing it, before any
+    # adapter call happens.
+    suite_dir = tmp_path / "suite"
+    suite_dir.mkdir()
+    (suite_dir / "test_a.py").write_text("def test_a1():\n    assert True\n")
+
+    adapter_path = str(PROJECT_ROOT / "adapters" / "pytest-adapter" / "run.sh")
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(
+        json.dumps({"adapterPath": adapter_path, "defaultTestDir": "."})
+    )
+    server = TDDServer(project_root=str(suite_dir), config_path=str(config_path))
+    call(server, "init_feature", featureName="f", testFile="test_a.py", targetFiles=["test_a.py"])
+
+    call(server, "run_tests")  # red -> verify_green
+    call(server, "verify")  # -> refactor
+
+    payload = call(server, "run_tests")  # closing refactor: must ask first
+
+    assert payload["needsRegressionScopeConfirmation"] is True
+    assert payload["suggestedScope"] == "."
+    assert payload["phase"] == "refactor"  # cycle not closed yet, nothing ran
+    assert payload["cycleCount"] == 0
+
+
+def test_run_tests_runs_regression_sweep_scoped_to_given_regression_scope(tmp_path):
+    # Once a scope is explicitly given, run_tests() proceeds using that
+    # scope instead of the configured defaultTestDir — e.g. a specific
+    # app/folder instead of the whole project.
+    suite_dir = tmp_path / "suite"
+    suite_dir.mkdir()
+    (suite_dir / "test_a.py").write_text("def test_a1():\n    assert True\n")
+    vendor_dir = suite_dir / "vendor"
+    vendor_dir.mkdir()
+    (vendor_dir / "test_vendor.py").write_text("def test_v1():\n    assert False\n")
+
+    adapter_path = str(PROJECT_ROOT / "adapters" / "pytest-adapter" / "run.sh")
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(
+        json.dumps({"adapterPath": adapter_path, "defaultTestDir": "."})
+    )
+    server = TDDServer(project_root=str(suite_dir), config_path=str(config_path))
+    call(server, "init_feature", featureName="f", testFile="test_a.py", targetFiles=["test_a.py"])
+
+    call(server, "run_tests")  # red -> verify_green
+    call(server, "verify")  # -> refactor
+
+    # Scope narrowed to just test_a.py — vendor/'s failing test is excluded.
+    payload = call(server, "run_tests", regressionScope="test_a.py")
+
+    assert payload["phase"] == "red"
+    assert payload["cycleCount"] == 1
+    assert payload["testResult"]["passed"] == 1
+    assert payload["testResult"]["failed"] == 0
+
+
+def test_run_tests_skips_regression_sweep_when_regression_scope_is_skip(tmp_path):
+    # An explicit "skip" opts out of the regression sweep entirely for this
+    # closing cycle — equivalent to defaultTestDir being unset, without
+    # requiring a config edit.
+    suite_dir = tmp_path / "suite"
+    suite_dir.mkdir()
+    (suite_dir / "test_a.py").write_text("def test_a1():\n    assert True\n")
+    vendor_dir = suite_dir / "vendor"
+    vendor_dir.mkdir()
+    (vendor_dir / "test_vendor.py").write_text("def test_v1():\n    assert False\n")
+
+    adapter_path = str(PROJECT_ROOT / "adapters" / "pytest-adapter" / "run.sh")
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(
+        json.dumps({"adapterPath": adapter_path, "defaultTestDir": "."})
+    )
+    server = TDDServer(project_root=str(suite_dir), config_path=str(config_path))
+    call(server, "init_feature", featureName="f", testFile="test_a.py", targetFiles=["test_a.py"])
+
+    call(server, "run_tests")  # red -> verify_green
+    call(server, "verify")  # -> refactor
+
+    payload = call(server, "run_tests", regressionScope="skip")
+
+    assert payload["phase"] == "red"
+    assert payload["cycleCount"] == 1
+    assert payload["testResult"]["passed"] == 1  # test_a.py only, vendor/ never run
+    assert payload["testResult"]["failed"] == 0
 
 
 def test_regression_check_attributes_failure_to_refactor_when_own_target_breaks(tmp_path):
@@ -733,7 +837,9 @@ def test_regression_check_attributes_failure_to_refactor_when_own_target_breaks(
     # Simulate the refactor breaking the cycle's own test.
     (suite_dir / "test_a.py").write_text("def test_a1():\n    assert False\n")
 
-    payload = call(server, "run_tests")  # closes refactor -> regression check runs
+    payload = call(
+        server, "run_tests", regressionScope="."
+    )  # closes refactor -> regression check runs
 
     assert payload["phase"] == "refactor"  # blocked: own target broke
     assert payload["lastError"] == "Refactor broke the tests."
@@ -769,7 +875,9 @@ def test_regression_check_labels_extra_regressions_when_own_target_also_breaks(t
     (suite_dir / "test_a.py").write_text("def test_a1():\n    assert False\n")
     (suite_dir / "test_b.py").write_text("def test_b1():\n    assert False\n")
 
-    payload = call(server, "run_tests")  # closes refactor -> regression check runs
+    payload = call(
+        server, "run_tests", regressionScope="."
+    )  # closes refactor -> regression check runs
 
     assert payload["phase"] == "refactor"  # blocked: own target broke
     failures = payload["testResult"]["failures"]
@@ -820,7 +928,9 @@ else:
     call(server, "run_tests")  # count=1: red -> verify_green (own target passes)
     call(server, "verify")  # -> refactor
 
-    payload = call(server, "run_tests")  # count=2 combined fails, count=3 own-only crashes
+    payload = call(
+        server, "run_tests", regressionScope="whole/"
+    )  # count=2 combined fails, count=3 own-only crashes
 
     assert "error" in payload
     assert "Adapter failed" in payload["error"]
@@ -871,7 +981,9 @@ else:
     call(server, "run_tests")  # count=1: red -> verify_green (own target passes)
     call(server, "verify")  # -> refactor
 
-    payload = call(server, "run_tests")  # count=2 combined fails, count=3 own-only clean
+    payload = call(
+        server, "run_tests", regressionScope="whole/"
+    )  # count=2 combined fails, count=3 own-only clean
 
     assert "error" in payload
     assert "Adapter failed" in payload["error"]

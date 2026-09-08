@@ -116,9 +116,25 @@ TOOLS = [
         name="run_tests",
         description=(
             "Run the test suite via the configured adapter. "
-            "Auto-advances phase based on results."
+            "Auto-advances phase based on results. Closing a base-level "
+            "REFACTOR with defaultTestDir configured returns "
+            "needsRegressionScopeConfirmation instead of running the full "
+            "sweep — re-call with regressionScope set to a path/expression "
+            "(or \"skip\") to proceed."
         ),
-        inputSchema={"type": "object", "properties": {}},
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "regressionScope": {
+                    "type": "string",
+                    "description": (
+                        "Scope for the closing-REFACTOR regression sweep: a "
+                        "path/pytest expression to use instead of "
+                        "defaultTestDir, or \"skip\" to skip it entirely."
+                    ),
+                }
+            },
+        },
     ),
     types.Tool(
         name="refactor_code",
@@ -372,7 +388,9 @@ class TDDServer:
                 )
 
             if name == "run_tests":
-                return self._text(self._run_tests())
+                return self._text(
+                    self._run_tests(arguments.get("regressionScope"))
+                )
 
             if name == "get_status":
                 return self._text(self.sm.status(include_stack=True))
@@ -474,7 +492,7 @@ class TDDServer:
         except KeyError as exc:
             return self._error(f"Missing required argument: {exc}")
 
-    def _run_tests(self) -> dict[str, Any]:
+    def _run_tests(self, regression_scope: str | None = None) -> dict[str, Any]:
         if self.sm.phase is None:
             return {"error": "No active feature. Call init_feature() first."}
 
@@ -495,12 +513,32 @@ class TDDServer:
         # complete_feature() — check the whole suite (not just this cycle's
         # target), so a regression elsewhere can't slip through unnoticed.
         # Nested drill-down levels skip this; only the outer feature's
-        # cycle gates completion. test_target and defaultTestDir are run
-        # together in one adapter call (rather than two separate calls
-        # summed) since defaultTestDir almost always already contains
-        # test_target — summing two runs would double-count the overlap,
-        # and running it as a single pytest invocation lets pytest's own
-        # collection dedupe overlapping paths for free.
+        # cycle gates completion.
+        would_close_base_refactor = (
+            self.sm.phase == "refactor" and self.sm.depth == 1 and default_test_dir
+        )
+        # Running the full defaultTestDir sweep unconditionally can be an
+        # unwanted surprise for a large/slow suite — pause and let the
+        # caller choose a scope (or "skip") instead of just doing it,
+        # before any adapter call happens. Once regression_scope is given,
+        # proceed using it in place of defaultTestDir for this call only.
+        if would_close_base_refactor and regression_scope is None:
+            return {
+                "needsRegressionScopeConfirmation": True,
+                "suggestedScope": default_test_dir,
+                **self.sm.status(),
+            }
+        if regression_scope == "skip":
+            default_test_dir = None
+        elif regression_scope is not None:
+            default_test_dir = regression_scope
+
+        # test_target and defaultTestDir are run together in one adapter
+        # call (rather than two separate calls summed) since defaultTestDir
+        # almost always already contains test_target — summing two runs
+        # would double-count the overlap, and running it as a single
+        # pytest invocation lets pytest's own collection dedupe overlapping
+        # paths for free.
         closing_base_refactor = (
             self.sm.phase == "refactor" and self.sm.depth == 1 and default_test_dir
         )
