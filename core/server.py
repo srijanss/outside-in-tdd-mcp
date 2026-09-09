@@ -174,7 +174,9 @@ TOOLS = [
             "List the feature ledger (.tdd-features.json) — an optional "
             "upfront plan (write this file yourself as an array of "
             "{featureName, description, dependsOn: [featureName,...], "
-            "status: 'pending'} entries before starting work) that "
+            "status: 'draft'} entries before starting work — a human must "
+            "then call approve_plan() to flip 'draft' entries to "
+            "'pending' before init_feature will accept them) that "
             "init_feature/complete_feature/reset_feature update in place "
             "as work progresses (status becomes 'in_progress', "
             "'completed', or 'abandoned'; testFile/targetFiles/"
@@ -184,6 +186,30 @@ TOOLS = [
             "especially when resuming after a cleared/summarized session."
         ),
         inputSchema={"type": "object", "properties": {}},
+    ),
+    types.Tool(
+        name="approve_plan",
+        description=(
+            "Human-only checkpoint (no auto-approval, mirroring verify()) "
+            "that flips 'draft' entries in the feature ledger "
+            "(.tdd-features.json) to 'pending', clearing them to be "
+            "started via init_feature. With no arguments, approves every "
+            "'draft' entry; pass featureNames to approve only those."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "featureNames": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Only approve these entries (must currently be "
+                        "'draft'). Omit to approve every 'draft' entry in "
+                        "the ledger."
+                    ),
+                },
+            },
+        },
     ),
     types.Tool(
         name="reset_feature",
@@ -515,6 +541,12 @@ class TDDServer:
             return None, None
 
         status = plan_entry.get("status")
+        if status == "draft":
+            return (
+                f"Feature '{feature_name}' is still 'draft' in "
+                ".tdd-features.json. Call approve_plan() to approve it "
+                "before starting."
+            ), plan_entry
         if status == "completed":
             return (
                 f"Feature '{feature_name}' is already marked 'completed' "
@@ -727,6 +759,27 @@ class TDDServer:
 
             if name == "list_features":
                 return self._text({"features": self._load_features()})
+
+            if name == "approve_plan":
+                feature_names = arguments.get("featureNames")
+                with self._features_lock():
+                    features = self._load_features()
+                    approved = []
+                    for entry in features:
+                        if not isinstance(entry, dict):
+                            continue
+                        name = entry.get("featureName")
+                        if not isinstance(name, str) or not name.strip():
+                            continue
+                        if entry.get("status") != "draft":
+                            continue
+                        if feature_names is not None and name not in feature_names:
+                            continue
+                        entry["status"] = "pending"
+                        approved.append(name)
+                    self._save_features(features)
+                self._log_event("approve_plan", approved=approved)
+                return self._text({"ok": True, "approved": approved})
 
             if name == "reset_feature":
                 prior_feature = self.sm.feature_name

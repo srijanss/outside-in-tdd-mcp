@@ -388,7 +388,13 @@
     "featureName": "plan-approval-gate",
     "description": "Add a 'draft' status to the feature ledger; planning passes write entries as 'draft' instead of 'pending'; init_feature blocks on 'draft'; add approve_plan(featureNames?) as a human-only checkpoint (no auto-approval, mirroring verify()) that flips draft entries to pending.",
     "dependsOn": [],
-    "status": "pending"
+    "status": "completed",
+    "testFile": "tests/test_server.py",
+    "targetFiles": [
+      "core/server.py"
+    ],
+    "recordedAt": "2026-09-09T02:49:03.378446+00:00",
+    "cyclesCompleted": 3
   },
   {
     "featureName": "research-log-hardening",
@@ -422,5 +428,16 @@
     ],
     "recordedAt": "2026-09-09T02:40:26.096128+00:00",
     "cyclesCompleted": 1
+  },
+  {
+    "featureName": "approve-plan-skips-malformed-entries",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/test_server.py",
+    "targetFiles": [
+      "core/server.py"
+    ],
+    "recordedAt": "2026-09-09T02:55:22.266709+00:00",
+    "cyclesCompleted": 2
   }
 ]

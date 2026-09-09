@@ -37,7 +37,7 @@ For each feature, work out:
 Read the features file (if `$2` wasn't given, the default path) with
 `list_features()` if the MCP server is configured for this project,
 otherwise by reading the file directly. If it doesn't exist yet, you're
-creating it fresh — every entry starts `"status": "pending"`.
+creating it fresh — every entry starts `"status": "draft"`.
 
 If it already exists:
 
@@ -49,7 +49,7 @@ If it already exists:
   feature under a different name/description). Skip it if so — don't
   create a duplicate. If the match is ambiguous, list it separately and
   ask me rather than silently deciding.
-- Append only the genuinely new entries, each `"status": "pending"`,
+- Append only the genuinely new entries, each `"status": "draft"`,
   `dependsOn` referencing existing `featureName`s (old or newly-added)
   where applicable.
 
@@ -60,4 +60,6 @@ dependsOn) before writing the file — this shapes all future dependency
 gating via `init_feature`, so it's worth a quick look before it's
 committed to disk. Once I confirm (or you have no reason to think I'd
 object — use judgment on how much this plan matters), write the merged
-array to the features file.
+array to the features file as `"status": "draft"` entries, then call
+`approve_plan()` (or tell me to) before any of them can be started with
+`init_feature`.

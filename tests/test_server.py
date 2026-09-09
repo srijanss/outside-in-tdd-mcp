@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "core"))
 
 from core.server import TDDServer
+from core.server import TOOLS
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -439,6 +440,145 @@ def test_list_features_returns_empty_list_when_ledger_missing(tmp_path):
     assert payload == {"features": []}
 
 
+def test_list_features_tool_description_instructs_draft_status_for_new_plan_entries(tmp_path):
+    tool = next(t for t in TOOLS if t.name == "list_features")
+
+    assert "status: 'draft'" in tool.description
+    assert "approve_plan" in tool.description
+
+
+def test_approve_plan_flips_all_draft_entries_to_pending(tmp_path):
+    server = make_server(tmp_path)
+    (tmp_path / ".tdd-features.json").write_text(
+        json.dumps(
+            [
+                {"featureName": "a", "dependsOn": [], "status": "draft"},
+                {"featureName": "b", "dependsOn": [], "status": "draft"},
+                {"featureName": "c", "dependsOn": [], "status": "completed"},
+            ]
+        )
+    )
+
+    payload = call(server, "approve_plan")
+
+    assert payload["ok"] is True
+    assert sorted(payload["approved"]) == ["a", "b"]
+    features = json.loads((tmp_path / ".tdd-features.json").read_text())
+    statuses = {f["featureName"]: f["status"] for f in features}
+    assert statuses == {"a": "pending", "b": "pending", "c": "completed"}
+
+
+def test_approve_plan_skips_draft_entry_missing_feature_name(tmp_path):
+    server = make_server(tmp_path)
+    (tmp_path / ".tdd-features.json").write_text(
+        json.dumps(
+            [
+                {"status": "draft", "dependsOn": []},
+                {"featureName": "a", "dependsOn": [], "status": "draft"},
+            ]
+        )
+    )
+
+    payload = call(server, "approve_plan")
+
+    assert payload["ok"] is True
+    assert payload["approved"] == ["a"]
+    features = json.loads((tmp_path / ".tdd-features.json").read_text())
+    malformed = next(f for f in features if "featureName" not in f)
+    assert malformed["status"] == "draft"
+
+
+def test_approve_plan_when_ledger_file_does_not_exist(tmp_path):
+    server = make_server(tmp_path)
+
+    payload = call(server, "approve_plan")
+
+    assert payload == {"ok": True, "approved": []}
+
+
+def test_approve_plan_with_empty_feature_names_approves_nothing(tmp_path):
+    server = make_server(tmp_path)
+    (tmp_path / ".tdd-features.json").write_text(
+        json.dumps([{"featureName": "a", "dependsOn": [], "status": "draft"}])
+    )
+
+    payload = call(server, "approve_plan", featureNames=[])
+
+    assert payload == {"ok": True, "approved": []}
+    features = json.loads((tmp_path / ".tdd-features.json").read_text())
+    assert features[0]["status"] == "draft"
+
+
+def test_approve_plan_does_not_bypass_dependency_gate(tmp_path):
+    server = make_server(tmp_path)
+    (tmp_path / ".tdd-features.json").write_text(
+        json.dumps(
+            [
+                {"featureName": "base", "dependsOn": [], "status": "pending"},
+                {
+                    "featureName": "downstream",
+                    "dependsOn": ["base"],
+                    "status": "draft",
+                },
+            ]
+        )
+    )
+
+    approve_payload = call(server, "approve_plan")
+    assert approve_payload["approved"] == ["downstream"]
+
+    init_payload = call(
+        server,
+        "init_feature",
+        featureName="downstream",
+        testFile="t.py",
+        targetFiles=["f.py"],
+    )
+
+    assert "error" in init_payload
+    assert "base" in init_payload["error"]
+
+
+def test_approve_plan_with_unknown_feature_name_still_approves_others(tmp_path):
+    server = make_server(tmp_path)
+    (tmp_path / ".tdd-features.json").write_text(
+        json.dumps(
+            [
+                {"featureName": "a", "dependsOn": [], "status": "draft"},
+                {"featureName": "b", "dependsOn": [], "status": "draft"},
+            ]
+        )
+    )
+
+    payload = call(server, "approve_plan", featureNames=["a", "ghost"])
+
+    assert payload["ok"] is True
+    assert payload["approved"] == ["a"]
+    features = json.loads((tmp_path / ".tdd-features.json").read_text())
+    statuses = {f["featureName"]: f["status"] for f in features}
+    assert statuses == {"a": "pending", "b": "draft"}
+
+
+def test_approve_plan_scoped_to_given_feature_names(tmp_path):
+    server = make_server(tmp_path)
+    (tmp_path / ".tdd-features.json").write_text(
+        json.dumps(
+            [
+                {"featureName": "a", "dependsOn": [], "status": "draft"},
+                {"featureName": "b", "dependsOn": [], "status": "draft"},
+            ]
+        )
+    )
+
+    payload = call(server, "approve_plan", featureNames=["a"])
+
+    assert payload["ok"] is True
+    assert payload["approved"] == ["a"]
+    features = json.loads((tmp_path / ".tdd-features.json").read_text())
+    statuses = {f["featureName"]: f["status"] for f in features}
+    assert statuses == {"a": "pending", "b": "draft"}
+
+
 def test_init_feature_blocked_when_dependency_not_completed(tmp_path):
     server = make_server(tmp_path)
     (tmp_path / ".tdd-features.json").write_text(
@@ -521,6 +661,21 @@ def test_init_feature_blocked_when_plan_entry_already_in_progress(tmp_path):
 
     assert "error" in payload
     assert "in_progress" in payload["error"]
+
+
+def test_init_feature_blocked_when_plan_entry_is_draft(tmp_path):
+    server = make_server(tmp_path)
+    (tmp_path / ".tdd-features.json").write_text(
+        json.dumps([{"featureName": "f", "dependsOn": [], "status": "draft"}])
+    )
+
+    payload = call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=["f.py"])
+
+    assert "error" in payload
+    assert "draft" in payload["error"]
+    assert "approve_plan" in payload["error"]
+    # blocked before the state machine started anything
+    assert call(server, "get_status")["featureName"] is None
 
 
 def test_init_feature_without_plan_entry_starts_normally_and_records_in_progress_entry(tmp_path):
