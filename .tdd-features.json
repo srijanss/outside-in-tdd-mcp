@@ -1,0 +1,353 @@
+[
+  {
+    "featureName": "core-tdd-state-machine",
+    "description": "Initial scaffold: RED/VERIFY_RED/IMPLEMENT/VERIFY_GREEN/REFACTOR state machine, MCP server wiring, and pytest adapter.",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/test_state_machine.py",
+    "targetFiles": [
+      "core/state_machine.py",
+      "core/server.py",
+      "core/adapter_contract.py"
+    ],
+    "cyclesCompleted": null,
+    "backfilledFrom": "d5385af",
+    "recordedAt": "2026-09-04T11:50:01+10:00"
+  },
+  {
+    "featureName": "drill-down-test-stack",
+    "description": "Nested drill-down test stack, complete_feature, and write_test_skeleton.",
+    "dependsOn": [
+      "core-tdd-state-machine"
+    ],
+    "status": "completed",
+    "testFile": "tests/test_state_machine.py",
+    "targetFiles": [
+      "core/state_machine.py",
+      "core/server.py"
+    ],
+    "cyclesCompleted": null,
+    "backfilledFrom": "a7ebd97",
+    "recordedAt": "2026-09-04T13:54:35+10:00"
+  },
+  {
+    "featureName": "tdd-slash-commands",
+    "description": "/tdd-start and /tdd-start-skeleton slash commands driving the MCP tools through a full cycle.",
+    "dependsOn": [
+      "core-tdd-state-machine"
+    ],
+    "status": "completed",
+    "testFile": null,
+    "targetFiles": [
+      ".claude/commands/tdd-start.md",
+      ".claude/commands/tdd-start-skeleton.md"
+    ],
+    "cyclesCompleted": null,
+    "backfilledFrom": "841887f",
+    "recordedAt": "2026-09-04T14:15:19+10:00"
+  },
+  {
+    "featureName": "config-validation",
+    "description": "Validate .tdd-config.json contents and raise a clear ConfigError.",
+    "dependsOn": [
+      "core-tdd-state-machine"
+    ],
+    "status": "completed",
+    "testFile": "tests/test_config_validation.py",
+    "targetFiles": [
+      "core/server.py"
+    ],
+    "cyclesCompleted": null,
+    "backfilledFrom": "60947fd",
+    "recordedAt": "2026-09-04T14:40:52+10:00"
+  },
+  {
+    "featureName": "verify-checkpoints",
+    "description": "VERIFY_RED/VERIFY_GREEN human checkpoint phases so an agent can't self-approve past RED->IMPLEMENT or IMPLEMENT->REFACTOR; slash-command docs updated in fc1deff.",
+    "dependsOn": [
+      "core-tdd-state-machine"
+    ],
+    "status": "completed",
+    "testFile": "tests/test_state_machine.py",
+    "targetFiles": [
+      "core/state_machine.py",
+      "core/server.py"
+    ],
+    "cyclesCompleted": null,
+    "backfilledFrom": "62a5663",
+    "recordedAt": "2026-09-04T14:51:31+10:00"
+  },
+  {
+    "featureName": "review-checklist-and-protocol",
+    "description": "Extracted TDD verify protocol doc and end-of-feature review checklist referenced by the slash commands; fixed in b5a38eb.",
+    "dependsOn": [
+      "verify-checkpoints"
+    ],
+    "status": "completed",
+    "testFile": null,
+    "targetFiles": [
+      ".claude/docs/tdd-verify-protocol.md",
+      ".claude/docs/tdd-review-checklist.md"
+    ],
+    "cyclesCompleted": null,
+    "backfilledFrom": "1a5dffd",
+    "recordedAt": "2026-09-04T15:31:30+10:00"
+  },
+  {
+    "featureName": "pytest-adapter-collection-error-handling",
+    "description": "Surface pytest collection interrupts (ImportError, syntax errors, no-tests-collected) as failures instead of a silent passed=0/failed=0.",
+    "dependsOn": [
+      "core-tdd-state-machine"
+    ],
+    "status": "completed",
+    "testFile": "tests/test_pytest_adapter.py",
+    "targetFiles": [
+      "adapters/pytest-adapter/run.sh"
+    ],
+    "cyclesCompleted": null,
+    "backfilledFrom": "01b6dfa",
+    "recordedAt": "2026-09-04T15:46:44+10:00"
+  },
+  {
+    "featureName": "regression-check-on-refactor-close",
+    "description": "Run a full-suite regression check when closing a base-level REFACTOR cycle before complete_feature unlocks: accurate pass counting, no double-counting overlapping tests, correct refactor-vs-regression failure attribution, and a regressionScope confirmation step before running a large sweep. Refined across d6e7231, 099172f, cbc4ba1, 5b07d73, e432616, 27c9ce0, ba4cdcb.",
+    "dependsOn": [
+      "core-tdd-state-machine"
+    ],
+    "status": "completed",
+    "testFile": "tests/test_server.py",
+    "targetFiles": [
+      "core/server.py",
+      "core/state_machine.py"
+    ],
+    "cyclesCompleted": null,
+    "backfilledFrom": "b8a195b",
+    "recordedAt": "2026-09-04T16:14:20+10:00"
+  },
+  {
+    "featureName": "adapter-output-hardening",
+    "description": "Validate adapter JSON output strictly (reject non-dict/malformed failure entries), quote test dirs safely, guard state machine edge cases, and keep the true error tail instead of truncating from the head. Refined across e137d11, dc1a582, d9500ac, fbea1a7.",
+    "dependsOn": [
+      "core-tdd-state-machine"
+    ],
+    "status": "completed",
+    "testFile": "tests/test_adapter_contract.py",
+    "targetFiles": [
+      "core/adapter_contract.py",
+      "adapters/pytest-adapter/run.sh"
+    ],
+    "cyclesCompleted": null,
+    "backfilledFrom": "6ec038c",
+    "recordedAt": "2026-09-05T21:24:40+10:00"
+  },
+  {
+    "featureName": "review-finder-agent",
+    "description": "review-finder subagent wired into the tdd-review checklist as a first-pass scanner.",
+    "dependsOn": [
+      "review-checklist-and-protocol"
+    ],
+    "status": "completed",
+    "testFile": null,
+    "targetFiles": [
+      ".claude/agents/review-finder.md",
+      ".claude/docs/tdd-review-checklist.md"
+    ],
+    "cyclesCompleted": null,
+    "backfilledFrom": "3e3ae2f",
+    "recordedAt": "2026-09-05T20:17:34+10:00"
+  },
+  {
+    "featureName": "tool-response-slimming",
+    "description": "Trimmed MCP tool descriptions, slimmed per-call status payloads, and dropped unused code args from write_test/write_code. Continued in 7f4d20b.",
+    "dependsOn": [
+      "core-tdd-state-machine"
+    ],
+    "status": "completed",
+    "testFile": "tests/test_server.py",
+    "targetFiles": [
+      "core/server.py",
+      "core/state_machine.py"
+    ],
+    "cyclesCompleted": null,
+    "backfilledFrom": "44abff7",
+    "recordedAt": "2026-09-04T16:47:49+10:00"
+  },
+  {
+    "featureName": "tdd-start-verify-and-commit-confirmation",
+    "description": "/tdd-start-verify command with mandatory human verify checkpoints, plus a CLAUDE.md rule requiring confirmation before commits.",
+    "dependsOn": [
+      "verify-checkpoints"
+    ],
+    "status": "completed",
+    "testFile": null,
+    "targetFiles": [
+      ".claude/commands/tdd-start-verify.md",
+      "CLAUDE.md"
+    ],
+    "cyclesCompleted": null,
+    "backfilledFrom": "f765997",
+    "recordedAt": "2026-09-05T21:27:42+10:00"
+  },
+  {
+    "featureName": "scoped-utility-slash-commands",
+    "description": "Scoped utility slash commands: diff-review, just-code, run-only, short, why-failed, tdd-complete, tdd-refactor, tdd-resume, tdd-status, extend-project, flaky-check.",
+    "dependsOn": [
+      "tdd-slash-commands"
+    ],
+    "status": "completed",
+    "testFile": null,
+    "targetFiles": [
+      ".claude/commands/"
+    ],
+    "cyclesCompleted": null,
+    "backfilledFrom": "7a4d146",
+    "recordedAt": "2026-09-06T19:44:12+10:00"
+  },
+  {
+    "featureName": "session-logging",
+    "description": "Log TDD lifecycle and run_tests events to a .tdd-session.log file for cross-session review.",
+    "dependsOn": [
+      "core-tdd-state-machine"
+    ],
+    "status": "completed",
+    "testFile": "tests/test_server.py",
+    "targetFiles": [
+      "core/server.py"
+    ],
+    "cyclesCompleted": null,
+    "backfilledFrom": "6e1d01b",
+    "recordedAt": "2026-09-07T10:22:29+10:00"
+  },
+  {
+    "featureName": "vitest-adapter",
+    "description": "Vitest test adapter (Node/JS) with collection-failure and hook-error handling, wired into the Docker image and example config in cba5fe6.",
+    "dependsOn": [
+      "core-tdd-state-machine"
+    ],
+    "status": "completed",
+    "testFile": "tests/test_vitest_adapter.py",
+    "targetFiles": [
+      "adapters/vitest-adapter/run.sh",
+      "Dockerfile"
+    ],
+    "cyclesCompleted": null,
+    "backfilledFrom": "276bd3c",
+    "recordedAt": "2026-09-07T11:29:00+10:00"
+  },
+  {
+    "featureName": "target-files-declaration",
+    "description": "Require targetFiles on init_feature/drill_down and gate write_code to only those declared files, forcing a drill_down for anything else. Docs updated in c623d46, 22b584f.",
+    "dependsOn": [
+      "core-tdd-state-machine"
+    ],
+    "status": "completed",
+    "testFile": "tests/test_state_machine.py",
+    "targetFiles": [
+      "core/state_machine.py",
+      "core/server.py"
+    ],
+    "cyclesCompleted": null,
+    "backfilledFrom": "22af471",
+    "recordedAt": "2026-09-07T16:05:41+10:00"
+  },
+  {
+    "featureName": "block-direct-test-runner-hook",
+    "description": "PreToolUse hook blocking direct test-runner tool calls (forcing run_tests() through the MCP server) and a /refresh command for context resets.",
+    "dependsOn": [
+      "core-tdd-state-machine"
+    ],
+    "status": "completed",
+    "testFile": null,
+    "targetFiles": [
+      ".claude/hooks/block-direct-test-runs.sh",
+      ".claude/commands/refresh.md"
+    ],
+    "cyclesCompleted": null,
+    "backfilledFrom": "51a537e",
+    "recordedAt": "2026-09-07T16:13:36+10:00"
+  },
+  {
+    "featureName": "tdd-resume-skeleton-command",
+    "description": "/tdd-resume-skeleton command for resuming an in-progress skeleton-based TDD feature.",
+    "dependsOn": [
+      "drill-down-test-stack"
+    ],
+    "status": "completed",
+    "testFile": null,
+    "targetFiles": [
+      ".claude/commands/tdd-resume-skeleton.md"
+    ],
+    "cyclesCompleted": null,
+    "backfilledFrom": "d33ef30",
+    "recordedAt": "2026-09-07T16:47:21+10:00"
+  },
+  {
+    "featureName": "adapter-timeout-config",
+    "description": "Configurable run_adapter subprocess timeout via TDD_ADAPTER_TIMEOUT_S env var.",
+    "dependsOn": [
+      "core-tdd-state-machine"
+    ],
+    "status": "completed",
+    "testFile": "tests/test_adapter_contract.py",
+    "targetFiles": [
+      "core/adapter_contract.py"
+    ],
+    "cyclesCompleted": null,
+    "backfilledFrom": "153ee87",
+    "recordedAt": "2026-09-08T09:44:54+10:00"
+  },
+  {
+    "featureName": "coverage-tracking",
+    "description": "Adapters optionally report a coverage % alongside pass/fail; surfaced in run_tests()/get_status() results.",
+    "dependsOn": [],
+    "status": "pending"
+  },
+  {
+    "featureName": "slow-test-detection",
+    "description": "State machine flags a run whose duration_ms exceeds a configurable threshold.",
+    "dependsOn": [],
+    "status": "pending"
+  },
+  {
+    "featureName": "git-commit-hooks-at-phase-transitions",
+    "description": "Optional hook invoked when the phase advances (e.g. auto-commit at REFACTOR->RED).",
+    "dependsOn": [],
+    "status": "pending"
+  },
+  {
+    "featureName": "convention-based-adapter-discovery",
+    "description": "Resolve .tdd-adapters/<name>/run.sh by convention instead of requiring a hardcoded adapterPath in config.",
+    "dependsOn": [],
+    "status": "pending"
+  },
+  {
+    "featureName": "cargo-test-adapter",
+    "description": "New adapter satisfying the existing contract for Rust's cargo test.",
+    "dependsOn": [],
+    "status": "pending"
+  },
+  {
+    "featureName": "go-test-adapter",
+    "description": "New adapter satisfying the existing contract for go test.",
+    "dependsOn": [],
+    "status": "pending"
+  },
+  {
+    "featureName": "test-result-caching",
+    "description": "Cache run_tests() results for an unchanged test target to skip redundant adapter invocations.",
+    "dependsOn": [],
+    "status": "pending"
+  },
+  {
+    "featureName": "feature-plan-ledger-with-dependency-gating",
+    "description": "Uncommitted feature: .tdd-features.json as a combined upfront plan + live ledger. init_feature checks a matching plan entry's dependsOn are all 'completed' before starting and flips it to 'in_progress' (ad hoc features too); complete_feature/reset_feature upsert it to 'completed'/'abandoned'. Hardened across 2 TDD cycles once review surfaced issues: a malformed (non-dict) ledger entry crashing init_feature, a self/circular dependsOn chain deadlocking with a misleading error, a non-list/non-string dependsOn silently mis-parsed or crashing on error-message join, a locked+atomic read-modify-write for the ledger file, and clearer 'not found' vs 'not yet completed' dependency error wording. Not yet committed.",
+    "dependsOn": [],
+    "testFile": "tests/test_server.py",
+    "targetFiles": [
+      "core/server.py"
+    ],
+    "cyclesCompleted": 2,
+    "status": "completed",
+    "recordedAt": "2026-09-09T01:44:51.935380+00:00"
+  }
+]

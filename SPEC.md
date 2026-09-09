@@ -113,6 +113,11 @@ init_feature(name, testFile, targetFiles)
   → targetFiles declares the implementation file(s) the base level owns —
     write_code() at depth 1 can only target one of these (see write_code
     below)
+  → If name matches a .tdd-features.json entry: blocks with an error if
+    that entry's status is already "completed" or "in_progress", or if
+    any of its dependsOn features aren't "completed" yet. Otherwise flips
+    the entry's status to "in_progress". A name not in the ledger starts
+    normally (ad hoc, no plan/dependency checks).
 
 write_test(name)
   → Only allowed in RED
@@ -149,10 +154,24 @@ get_status()
 
 reset_feature()
   → Discards the current feature from any phase/depth, ready for init_feature() on a new one
+  → Sets its .tdd-features.json entry's status to "abandoned" (upserted —
+    updates the plan entry in place if one exists, else appends a new one)
 
 complete_feature()
   → Only allowed at depth 1, in RED, after cycleCount >= 1
   → Clears feature state and reports success (distinct from reset_feature's abandonment)
+  → Sets its .tdd-features.json entry's status to "completed" (same
+    upsert as reset_feature), unblocking any features whose dependsOn
+    lists it
+
+list_features()
+  → Returns the full contents of .tdd-features.json: an optional upfront
+    plan (featureName, description, dependsOn) with status/testFile/
+    targetFiles/cyclesCompleted/recordedAt kept up to date by
+    init_feature/complete_feature/reset_feature as work progresses
+    ("pending" → "in_progress" → "completed"/"abandoned") — independent
+    of the current in-memory feature/phase. See "Feature Plan Ledger"
+    below for the file's schema.
 
 drill_down(testFile, targetFiles)
   → Only allowed in IMPLEMENT — pushes a nested test target with its own independent cycle
@@ -165,6 +184,27 @@ return_to_parent()
 abandon_drill_down()
   → Unconditionally pops the current nested level, any phase, any cycle count — for a drill-down that turned out unnecessary
 ```
+
+### Feature Plan Ledger (.tdd-features.json)
+
+Optional. Write it yourself (before any init_feature calls) as a JSON
+array, broken down into the smallest features you can, e.g.:
+
+```json
+[
+  { "featureName": "user-model", "description": "...", "dependsOn": [], "status": "pending" },
+  { "featureName": "auth-login", "description": "...", "dependsOn": ["user-model"], "status": "pending" }
+]
+```
+
+`dependsOn` names other entries' `featureName` values. `status` starts
+`"pending"`; the server flips it to `"in_progress"` on init_feature (after
+checking every `dependsOn` entry is `"completed"` — see init_feature
+above), and to `"completed"`/`"abandoned"` on complete_feature/
+reset_feature, filling in `testFile`, `targetFiles`, `cyclesCompleted`,
+and `recordedAt` at the same time. A feature started via init_feature with
+a name not already in the file gets appended automatically, with no
+dependency checks — the plan is optional, not required to use the server.
 
 ### Tool Availability By Phase
 
@@ -184,10 +224,10 @@ The full `TOOLS` list (with exact descriptions and input schemas) lives in
 `core/server.py` — duplicating it here just goes stale, as this section
 already did once. Current tool names: `init_feature`, `write_test`,
 `write_test_skeleton`, `write_code`, `verify`, `run_tests`,
-`refactor_code`, `get_status`, `reset_feature`, `complete_feature`,
-`drill_down`, `return_to_parent`, `abandon_drill_down`. See the "State
-Machine Specification" section above for what each does and when it's
-allowed.
+`refactor_code`, `get_status`, `list_features`, `reset_feature`,
+`complete_feature`, `drill_down`, `return_to_parent`, `abandon_drill_down`.
+See the "State Machine Specification" section above for what each does and
+when it's allowed.
 
 ---
 

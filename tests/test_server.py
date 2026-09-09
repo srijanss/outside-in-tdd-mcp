@@ -361,6 +361,340 @@ else:
     assert return_entry["cyclesCompleted"] == 1
 
 
+def test_complete_feature_appends_entry_to_feature_ledger(tmp_path):
+    fake_adapter = tmp_path / "fake_adapter.py"
+    fake_adapter.write_text(
+        '''#!/usr/bin/env python3
+import json
+print(json.dumps({"passed": 1, "failed": 0, "failures": []}))
+'''
+    )
+    fake_adapter.chmod(0o755)
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
+    server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
+
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=["f.py"])
+    call(server, "write_test", testName="t")
+    call(server, "run_tests")  # passed=1, no impl yet -> verify_green (skip)
+    call(server, "verify")  # -> refactor
+    call(server, "refactor_code", description="tidy up")
+    call(server, "run_tests")  # passed=1 -> red, cycle 1
+    call(server, "complete_feature")
+
+    features_path = tmp_path / ".tdd-features.json"
+    features = json.loads(features_path.read_text())
+    assert len(features) == 1
+    entry = features[0]
+    assert entry["featureName"] == "f"
+    assert entry["testFile"] == "t.py"
+    assert entry["targetFiles"] == ["f.py"]
+    assert entry["cyclesCompleted"] == 1
+    assert entry["status"] == "completed"
+    assert "recordedAt" in entry
+
+
+def test_reset_feature_appends_abandoned_entry_to_feature_ledger(tmp_path):
+    server = make_server(tmp_path)
+    call(server, "init_feature", featureName="g", testFile="g.py", targetFiles=["g.py"])
+
+    call(server, "reset_feature")
+
+    features_path = tmp_path / ".tdd-features.json"
+    features = json.loads(features_path.read_text())
+    assert len(features) == 1
+    entry = features[0]
+    assert entry["featureName"] == "g"
+    assert entry["testFile"] == "g.py"
+    assert entry["targetFiles"] == ["g.py"]
+    assert entry["cyclesCompleted"] == 0
+    assert entry["status"] == "abandoned"
+
+
+def test_reset_feature_with_no_active_feature_does_not_touch_ledger(tmp_path):
+    server = make_server(tmp_path)
+
+    call(server, "reset_feature")
+
+    features_path = tmp_path / ".tdd-features.json"
+    assert not features_path.exists()
+
+
+def test_list_features_returns_ledger_contents(tmp_path):
+    server = make_server(tmp_path)
+    call(server, "init_feature", featureName="g", testFile="g.py", targetFiles=["g.py"])
+    call(server, "reset_feature")
+
+    payload = call(server, "list_features")
+
+    assert len(payload["features"]) == 1
+    assert payload["features"][0]["featureName"] == "g"
+
+
+def test_list_features_returns_empty_list_when_ledger_missing(tmp_path):
+    server = make_server(tmp_path)
+
+    payload = call(server, "list_features")
+
+    assert payload == {"features": []}
+
+
+def test_init_feature_blocked_when_dependency_not_completed(tmp_path):
+    server = make_server(tmp_path)
+    (tmp_path / ".tdd-features.json").write_text(
+        json.dumps(
+            [
+                {"featureName": "base", "dependsOn": [], "status": "pending"},
+                {
+                    "featureName": "downstream",
+                    "dependsOn": ["base"],
+                    "status": "pending",
+                },
+            ]
+        )
+    )
+
+    payload = call(
+        server,
+        "init_feature",
+        featureName="downstream",
+        testFile="t.py",
+        targetFiles=["f.py"],
+    )
+
+    assert "error" in payload
+    assert "base" in payload["error"]
+    # blocked before the state machine started anything
+    assert call(server, "get_status")["featureName"] is None
+
+
+def test_init_feature_allowed_when_dependency_completed(tmp_path):
+    server = make_server(tmp_path)
+    (tmp_path / ".tdd-features.json").write_text(
+        json.dumps(
+            [
+                {"featureName": "base", "dependsOn": [], "status": "completed"},
+                {
+                    "featureName": "downstream",
+                    "dependsOn": ["base"],
+                    "status": "pending",
+                },
+            ]
+        )
+    )
+
+    payload = call(
+        server,
+        "init_feature",
+        featureName="downstream",
+        testFile="t.py",
+        targetFiles=["f.py"],
+    )
+
+    assert payload["featureName"] == "downstream"
+    features = json.loads((tmp_path / ".tdd-features.json").read_text())
+    entry = next(f for f in features if f["featureName"] == "downstream")
+    assert entry["status"] == "in_progress"
+    assert entry["testFile"] == "t.py"
+    assert entry["targetFiles"] == ["f.py"]
+
+
+def test_init_feature_blocked_when_plan_entry_already_completed(tmp_path):
+    server = make_server(tmp_path)
+    (tmp_path / ".tdd-features.json").write_text(
+        json.dumps([{"featureName": "f", "dependsOn": [], "status": "completed"}])
+    )
+
+    payload = call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=["f.py"])
+
+    assert "error" in payload
+    assert "completed" in payload["error"]
+
+
+def test_init_feature_blocked_when_plan_entry_already_in_progress(tmp_path):
+    server = make_server(tmp_path)
+    (tmp_path / ".tdd-features.json").write_text(
+        json.dumps([{"featureName": "f", "dependsOn": [], "status": "in_progress"}])
+    )
+
+    payload = call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=["f.py"])
+
+    assert "error" in payload
+    assert "in_progress" in payload["error"]
+
+
+def test_init_feature_without_plan_entry_starts_normally_and_records_in_progress_entry(tmp_path):
+    server = make_server(tmp_path)
+
+    payload = call(server, "init_feature", featureName="adhoc", testFile="t.py", targetFiles=["f.py"])
+
+    assert payload["featureName"] == "adhoc"
+    features = json.loads((tmp_path / ".tdd-features.json").read_text())
+    assert len(features) == 1
+    entry = features[0]
+    assert entry["featureName"] == "adhoc"
+    assert entry["status"] == "in_progress"
+    assert entry["testFile"] == "t.py"
+    assert entry["targetFiles"] == ["f.py"]
+
+
+def test_init_feature_returns_clear_error_when_dependson_is_not_a_list(tmp_path):
+    server = make_server(tmp_path)
+    (tmp_path / ".tdd-features.json").write_text(
+        json.dumps([{"featureName": "f", "dependsOn": "gh", "status": "pending"}])
+    )
+
+    payload = call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=["f.py"])
+
+    assert "error" in payload
+    assert "dependson" in payload["error"].lower()
+    assert "list" in payload["error"].lower()
+
+
+def test_init_feature_returns_clear_error_when_dependson_contains_non_string_items(tmp_path):
+    server = make_server(tmp_path)
+    (tmp_path / ".tdd-features.json").write_text(
+        json.dumps([{"featureName": "f", "dependsOn": [123, None], "status": "pending"}])
+    )
+
+    payload = call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=["f.py"])
+
+    assert "error" in payload
+    assert "dependson" in payload["error"].lower()
+
+
+def test_complete_feature_preserves_plan_metadata_when_upserting(tmp_path):
+    fake_adapter = tmp_path / "fake_adapter.py"
+    fake_adapter.write_text(
+        '''#!/usr/bin/env python3
+import json
+print(json.dumps({"passed": 1, "failed": 0, "failures": []}))
+'''
+    )
+    fake_adapter.chmod(0o755)
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
+    (tmp_path / ".tdd-features.json").write_text(
+        json.dumps(
+            [
+                {
+                    "featureName": "f",
+                    "description": "does the thing",
+                    "dependsOn": [],
+                    "status": "pending",
+                }
+            ]
+        )
+    )
+    server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
+
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=["f.py"])
+    call(server, "write_test", testName="t")
+    call(server, "run_tests")  # passed=1, no impl yet -> verify_green (skip)
+    call(server, "verify")  # -> refactor
+    call(server, "refactor_code", description="tidy up")
+    call(server, "run_tests")  # passed=1 -> red, cycle 1
+    call(server, "complete_feature")
+
+    features = json.loads((tmp_path / ".tdd-features.json").read_text())
+    assert len(features) == 1
+    entry = features[0]
+    assert entry["description"] == "does the thing"
+    assert entry["status"] == "completed"
+    assert entry["cyclesCompleted"] == 1
+
+
+def test_init_feature_returns_clear_error_for_malformed_non_dict_ledger_entry(tmp_path):
+    server = make_server(tmp_path)
+    (tmp_path / ".tdd-features.json").write_text(json.dumps(["not-a-dict-entry"]))
+
+    payload = call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=["f.py"])
+
+    assert "error" in payload
+    assert "malformed" in payload["error"].lower() or "invalid" in payload["error"].lower()
+
+
+def test_init_feature_returns_clear_error_for_self_referencing_dependency(tmp_path):
+    server = make_server(tmp_path)
+    (tmp_path / ".tdd-features.json").write_text(
+        json.dumps([{"featureName": "f", "dependsOn": ["f"], "status": "pending"}])
+    )
+
+    payload = call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=["f.py"])
+
+    assert "error" in payload
+    assert "circular" in payload["error"].lower() or "itself" in payload["error"].lower()
+
+
+def test_init_feature_returns_clear_error_for_circular_dependency(tmp_path):
+    server = make_server(tmp_path)
+    (tmp_path / ".tdd-features.json").write_text(
+        json.dumps(
+            [
+                {"featureName": "a", "dependsOn": ["b"], "status": "pending"},
+                {"featureName": "b", "dependsOn": ["a"], "status": "pending"},
+            ]
+        )
+    )
+
+    payload = call(server, "init_feature", featureName="a", testFile="t.py", targetFiles=["f.py"])
+
+    assert "error" in payload
+    assert "circular" in payload["error"].lower()
+
+
+def test_init_feature_distinguishes_missing_from_incomplete_dependency_in_error(tmp_path):
+    server = make_server(tmp_path)
+    (tmp_path / ".tdd-features.json").write_text(
+        json.dumps(
+            [
+                {"featureName": "base", "dependsOn": [], "status": "pending"},
+                {
+                    "featureName": "downstream",
+                    "dependsOn": ["base", "ghost"],
+                    "status": "pending",
+                },
+            ]
+        )
+    )
+
+    payload = call(
+        server, "init_feature", featureName="downstream", testFile="t.py", targetFiles=["f.py"]
+    )
+
+    assert "error" in payload
+    assert "not found" in payload["error"].lower() or "unknown" in payload["error"].lower()
+    assert "ghost" in payload["error"]
+    assert "base" in payload["error"]
+
+
+def test_features_lock_provides_mutual_exclusion(tmp_path):
+    import threading
+    import time
+
+    server = make_server(tmp_path)
+    order = []
+
+    def worker(name):
+        with server._features_lock():
+            order.append(f"{name}-start")
+            time.sleep(0.05)
+            order.append(f"{name}-end")
+
+    t1 = threading.Thread(target=worker, args=("a",))
+    t2 = threading.Thread(target=worker, args=("b",))
+    t1.start()
+    time.sleep(0.01)
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert order in (
+        ["a-start", "a-end", "b-start", "b-end"],
+        ["b-start", "b-end", "a-start", "a-end"],
+    )
+
+
 def test_write_test_skeleton_appends_session_log_entry(tmp_path):
     server = make_server(tmp_path)
     call(server, "init_feature", featureName="f", testFile="tests/test_x.py", targetFiles=["tests/test_x.py"])
@@ -413,6 +747,7 @@ def test_run_tests_appends_session_log_entry_with_result(tmp_path):
         config_path=str(config_path),
     )
     server.session_log_path = str(tmp_path / ".tdd-session.log")
+    server.features_path = str(tmp_path / ".tdd-features.json")
     call(server, "init_feature", featureName="f", testFile="tests/test_state_machine.py", targetFiles=["tests/test_state_machine.py"])
 
     call(server, "run_tests")
@@ -445,6 +780,7 @@ def test_run_tests_uses_active_test_file_not_default_test_dir(tmp_path):
         )
     )
     server = TDDServer(project_root=str(PROJECT_ROOT), config_path=str(config_path))
+    server.features_path = str(tmp_path / ".tdd-features.json")
     call(server, "init_feature", featureName="f", testFile="tests/test_state_machine.py", targetFiles=["tests/test_state_machine.py"])
 
     payload = call(server, "run_tests")
@@ -487,6 +823,7 @@ def test_refactor_closing_cycle_also_checks_full_suite_for_regressions(tmp_path)
         )
     )
     server = TDDServer(project_root=str(PROJECT_ROOT), config_path=str(config_path))
+    server.features_path = str(tmp_path / ".tdd-features.json")
     call(server, "init_feature", featureName="f", testFile="tests/test_state_machine.py", targetFiles=["tests/test_state_machine.py"])
 
     # test_state_machine.py already passes -> red skips straight to verify_green
@@ -515,6 +852,7 @@ def test_regression_check_merges_passed_counts_and_reports_accurate_error(tmp_pa
         )
     )
     server = TDDServer(project_root=str(PROJECT_ROOT), config_path=str(config_path))
+    server.features_path = str(tmp_path / ".tdd-features.json")
     call(server, "init_feature", featureName="f", testFile="tests/test_state_machine.py", targetFiles=["tests/test_state_machine.py"])
 
     own_result = json.loads(

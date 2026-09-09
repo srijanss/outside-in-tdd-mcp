@@ -8,12 +8,18 @@ and adapters/*/run.sh for that.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import shlex
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - POSIX-only; best-effort elsewhere too
+    fcntl = None
 
 import mcp.server.stdio
 from mcp import types
@@ -36,7 +42,14 @@ CONFIG_PATH = os.environ.get(
 TOOLS = [
     types.Tool(
         name="init_feature",
-        description="Start a new TDD feature. Sets phase to RED.",
+        description=(
+            "Start a new TDD feature. Sets phase to RED. If featureName "
+            "matches an entry in .tdd-features.json (an upfront plan "
+            "breakdown), checks that entry's dependsOn are all "
+            "'completed' first (rejecting with an error listing any "
+            "unmet dependencies) and flips its status to 'in_progress'. "
+            "featureName not in the plan starts normally, ad hoc."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
@@ -151,6 +164,23 @@ TOOLS = [
     types.Tool(
         name="get_status",
         description="Get current feature, phase, drill-down stack, and last test result.",
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    types.Tool(
+        name="list_features",
+        description=(
+            "List the feature ledger (.tdd-features.json) — an optional "
+            "upfront plan (write this file yourself as an array of "
+            "{featureName, description, dependsOn: [featureName,...], "
+            "status: 'pending'} entries before starting work) that "
+            "init_feature/complete_feature/reset_feature update in place "
+            "as work progresses (status becomes 'in_progress', "
+            "'completed', or 'abandoned'; testFile/targetFiles/"
+            "cyclesCompleted get filled in). Features started without a "
+            "matching plan entry are appended automatically. Use this to "
+            "see what's done, in progress, or blocked on dependencies — "
+            "especially when resuming after a cleared/summarized session."
+        ),
         inputSchema={"type": "object", "properties": {}},
     ),
     types.Tool(
@@ -296,6 +326,205 @@ class TDDServer:
         self.session_log_path = os.environ.get(
             "TDD_SESSION_LOG_PATH", str(Path(project_root) / ".tdd-session.log")
         )
+        self.features_path = os.environ.get(
+            "TDD_FEATURES_PATH", str(Path(project_root) / ".tdd-features.json")
+        )
+
+    def _load_features(self) -> list[dict[str, Any]]:
+        path = Path(self.features_path)
+        if not path.exists():
+            return []
+        try:
+            with path.open() as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return []
+        return data if isinstance(data, list) else []
+
+    def _save_features(self, features: list[dict[str, Any]]) -> None:
+        # Write to a temp file and rename into place (atomic on POSIX and
+        # Windows for a same-filesystem replace) so a crash mid-write never
+        # leaves .tdd-features.json truncated/partial.
+        tmp_path = f"{self.features_path}.tmp"
+        try:
+            with open(tmp_path, "w") as f:
+                json.dump(features, f, indent=2)
+                f.write("\n")
+            os.replace(tmp_path, self.features_path)
+        except OSError:
+            pass  # feature ledger is best-effort; never block the TDD cycle
+
+    @contextlib.contextmanager
+    def _features_lock(self):
+        """Exclusive lock around a .tdd-features.json read-modify-write, so
+        two MCP server processes on the same project (e.g. two concurrent
+        Claude Code sessions) can't race and silently drop each other's
+        update. Best-effort: if flock isn't available, proceeds unlocked
+        rather than blocking the TDD cycle."""
+        if fcntl is None:
+            yield
+            return
+        lock_path = f"{self.features_path}.lock"
+        try:
+            lock_file = open(lock_path, "w")
+        except OSError:
+            yield
+            return
+        try:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+            yield
+        finally:
+            try:
+                fcntl.flock(lock_file, fcntl.LOCK_UN)
+            finally:
+                lock_file.close()
+
+    def _find_feature(
+        self, features: list[dict[str, Any]], feature_name: str
+    ) -> dict[str, Any] | None:
+        for entry in features:
+            if isinstance(entry, dict) and entry.get("featureName") == feature_name:
+                return entry
+        return None
+
+    def _features_structure_error(self, features: list[Any]) -> str | None:
+        for entry in features:
+            if not isinstance(entry, dict):
+                return (
+                    f"'{self.features_path}' contains a malformed entry "
+                    f"(not a JSON object): {entry!r}. Fix the ledger before "
+                    "starting a feature."
+                )
+            name = entry.get("featureName")
+            if not isinstance(name, str) or not name.strip():
+                return (
+                    f"'{self.features_path}' contains an entry with a "
+                    f"missing or invalid featureName: {entry!r}."
+                )
+            if "dependsOn" in entry:
+                depends_on = entry["dependsOn"]
+                if not isinstance(depends_on, list) or not all(
+                    isinstance(dep, str) for dep in depends_on
+                ):
+                    return (
+                        f"'{self.features_path}' entry '{name}' has an "
+                        f"invalid dependsOn (must be a list of strings): "
+                        f"{depends_on!r}."
+                    )
+        return None
+
+    def _has_dependency_cycle(
+        self, features: list[dict[str, Any]], feature_name: str
+    ) -> bool:
+        """True if feature_name's dependsOn chain (transitively) loops back
+        on itself — including a feature naming itself directly."""
+
+        def visit(name: str, ancestors: frozenset[str]) -> bool:
+            if name in ancestors:
+                return True
+            entry = self._find_feature(features, name)
+            if entry is None:
+                return False
+            return any(
+                visit(dep, ancestors | {name})
+                for dep in entry.get("dependsOn") or []
+                if isinstance(dep, str)
+            )
+
+        entry = self._find_feature(features, feature_name)
+        if entry is None:
+            return False
+        return any(
+            visit(dep, frozenset({feature_name}))
+            for dep in entry.get("dependsOn") or []
+            if isinstance(dep, str)
+        )
+
+    def _validate_feature_start(
+        self, features: list[dict[str, Any]], feature_name: str
+    ) -> tuple[str | None, dict[str, Any] | None]:
+        """Checks whether feature_name is startable given the ledger.
+        Returns (error, plan_entry): error is None when clear to proceed;
+        plan_entry is None for an ad hoc feature not present in the ledger
+        (always clear to proceed, no plan/dependency checks apply)."""
+        structure_error = self._features_structure_error(features)
+        if structure_error:
+            return structure_error, None
+
+        plan_entry = self._find_feature(features, feature_name)
+        if plan_entry is None:
+            return None, None
+
+        status = plan_entry.get("status")
+        if status == "completed":
+            return (
+                f"Feature '{feature_name}' is already marked 'completed' "
+                "in .tdd-features.json. Use a different featureName, or "
+                "edit the ledger directly if this is intentional rework."
+            ), plan_entry
+        if status == "in_progress":
+            return (
+                f"Feature '{feature_name}' is already marked 'in_progress' "
+                "in .tdd-features.json."
+            ), plan_entry
+        if self._has_dependency_cycle(features, feature_name):
+            return (
+                f"Feature '{feature_name}' has a circular dependency chain "
+                "in .tdd-features.json (a dependsOn cycle, possibly "
+                "through other features, or naming itself) — fix the plan "
+                "before starting."
+            ), plan_entry
+
+        depends_on = plan_entry.get("dependsOn") or []
+        missing = [
+            dep for dep in depends_on if self._find_feature(features, dep) is None
+        ]
+        incomplete = [
+            dep
+            for dep in depends_on
+            if dep not in missing
+            and (self._find_feature(features, dep) or {}).get("status")
+            != "completed"
+        ]
+        if missing or incomplete:
+            parts = []
+            if missing:
+                parts.append(f"not found in the ledger: {', '.join(missing)}")
+            if incomplete:
+                parts.append(f"not yet completed: {', '.join(incomplete)}")
+            return (
+                f"Feature '{feature_name}' depends on feature(s) "
+                f"{'; '.join(parts)}. Fix the ledger or complete those "
+                "first."
+            ), plan_entry
+
+        return None, plan_entry
+
+    def _record_feature(
+        self,
+        *,
+        status: str,
+        feature_name: str,
+        test_file: str | None,
+        target_files: list[str] | None = None,
+        cycles_completed: int,
+    ) -> None:
+        """Upsert this feature's entry in the ledger — updates the plan
+        entry in place (preserving its dependsOn/description) if one
+        already exists from an upfront plan, otherwise appends a new one
+        for a feature started ad hoc."""
+        with self._features_lock():
+            features = self._load_features()
+            entry = self._find_feature(features, feature_name)
+            if entry is None:
+                entry = {"featureName": feature_name, "dependsOn": []}
+                features.append(entry)
+            entry["testFile"] = test_file
+            entry["targetFiles"] = target_files or []
+            entry["cyclesCompleted"] = cycles_completed
+            entry["status"] = status
+            entry["recordedAt"] = datetime.now(timezone.utc).isoformat()
+            self._save_features(features)
 
     def _log_event(self, event: str, **fields: Any) -> None:
         entry = {
@@ -348,12 +577,38 @@ class TDDServer:
                         "exist. Fix .tdd-config.json before starting a "
                         "feature."
                     )
-                self.sm.init_feature(
-                    arguments["featureName"],
-                    arguments["testFile"],
-                    arguments["targetFiles"],
-                )
-                self._log_event("init_feature", targetFiles=arguments["targetFiles"])
+
+                feature_name = arguments["featureName"]
+                with self._features_lock():
+                    features = self._load_features()
+                    plan_error, plan_entry = self._validate_feature_start(
+                        features, feature_name
+                    )
+                    if plan_error:
+                        return self._error(plan_error)
+
+                    self.sm.init_feature(
+                        feature_name,
+                        arguments["testFile"],
+                        arguments["targetFiles"],
+                    )
+                    self._log_event(
+                        "init_feature", targetFiles=arguments["targetFiles"]
+                    )
+
+                    if plan_entry is None:
+                        # Ad hoc feature (no matching plan entry) — record it
+                        # as in_progress too, not just retroactively at
+                        # complete_feature/reset_feature, so list_features()
+                        # reflects what's actually running right now.
+                        plan_entry = {"featureName": feature_name, "dependsOn": []}
+                        features.append(plan_entry)
+                    plan_entry["status"] = "in_progress"
+                    plan_entry["testFile"] = arguments["testFile"]
+                    plan_entry["targetFiles"] = list(arguments["targetFiles"])
+                    plan_entry["recordedAt"] = datetime.now(timezone.utc).isoformat()
+                    self._save_features(features)
+
                 return self._text(self.sm.status(include_last_result=False))
 
             if name == "write_test":
@@ -395,26 +650,47 @@ class TDDServer:
             if name == "get_status":
                 return self._text(self.sm.status(include_stack=True))
 
+            if name == "list_features":
+                return self._text({"features": self._load_features()})
+
             if name == "reset_feature":
                 prior_feature = self.sm.feature_name
                 prior_test_file = self.sm.test_file
+                prior_target_files = list(self.sm.target_files)
+                prior_cycle_count = self.sm.cycle_count
                 self.sm.reset_feature()
                 self._log_event(
                     "reset_feature",
                     featureName=prior_feature,
                     testFile=prior_test_file,
                 )
+                if prior_feature is not None:
+                    self._record_feature(
+                        status="abandoned",
+                        feature_name=prior_feature,
+                        test_file=prior_test_file,
+                        target_files=prior_target_files,
+                        cycles_completed=prior_cycle_count,
+                    )
                 return self._text(
                     {"ok": True, **self.sm.status(include_last_result=False)}
                 )
 
             if name == "complete_feature":
+                target_files = list(self.sm.target_files)
                 summary = self.sm.complete_feature()
                 self._log_event(
                     "complete_feature",
                     featureName=summary["featureName"],
                     testFile=summary["testFile"],
                     cyclesCompleted=summary["cyclesCompleted"],
+                )
+                self._record_feature(
+                    status="completed",
+                    feature_name=summary["featureName"],
+                    test_file=summary["testFile"],
+                    target_files=target_files,
+                    cycles_completed=summary["cyclesCompleted"],
                 )
                 return self._text(
                     {
