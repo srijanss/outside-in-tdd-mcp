@@ -27,6 +27,8 @@ from mcp.server import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
 
 from core.adapter_contract import AdapterError, run_adapter
+from core.research_log import list_research as _list_research_entries
+from core.research_log import record_research as _record_research_entry
 from core.state_machine import (
     InvalidTargetFilesError,
     NoActiveFeatureError,
@@ -243,6 +245,43 @@ TOOLS = [
         ),
         inputSchema={"type": "object", "properties": {}},
     ),
+    types.Tool(
+        name="record_research",
+        description=(
+            "Append an entry to the durable research log "
+            "(.tdd-research.json) — external context (a link read, a "
+            "design decision, a summary) worth keeping across a /clear or "
+            "a fresh session, so it doesn't have to be re-fetched or "
+            "re-derived. Not phase-gated; callable any time."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "source": {
+                    "type": "string",
+                    "description": "URL or short description of where this came from.",
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "Short summary or bullet points — not the full content.",
+                },
+                "relatedFeature": {
+                    "type": "string",
+                    "description": "Optional featureName this research informed.",
+                },
+            },
+            "required": ["source", "summary"],
+        },
+    ),
+    types.Tool(
+        name="list_research",
+        description=(
+            "List the durable research log (.tdd-research.json). Use this "
+            "at the start of a session (or after a /clear) instead of "
+            "re-fetching a source already recorded via record_research."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
 ]
 
 
@@ -329,6 +368,9 @@ class TDDServer:
         self.features_path = os.environ.get(
             "TDD_FEATURES_PATH", str(Path(project_root) / ".tdd-features.json")
         )
+        self.research_path = os.environ.get(
+            "TDD_RESEARCH_PATH", str(Path(project_root) / ".tdd-research.json")
+        )
 
     def _load_features(self) -> list[dict[str, Any]]:
         path = Path(self.features_path)
@@ -355,16 +397,16 @@ class TDDServer:
             pass  # feature ledger is best-effort; never block the TDD cycle
 
     @contextlib.contextmanager
-    def _features_lock(self):
-        """Exclusive lock around a .tdd-features.json read-modify-write, so
-        two MCP server processes on the same project (e.g. two concurrent
-        Claude Code sessions) can't race and silently drop each other's
-        update. Best-effort: if flock isn't available, proceeds unlocked
-        rather than blocking the TDD cycle."""
+    def _file_lock(self, path: str):
+        """Exclusive lock around a read-modify-write of the file at `path`,
+        so two MCP server processes on the same project (e.g. two
+        concurrent Claude Code sessions) can't race and silently drop each
+        other's update. Best-effort: if flock isn't available, proceeds
+        unlocked rather than blocking the TDD cycle."""
         if fcntl is None:
             yield
             return
-        lock_path = f"{self.features_path}.lock"
+        lock_path = f"{path}.lock"
         try:
             lock_file = open(lock_path, "w")
         except OSError:
@@ -378,6 +420,12 @@ class TDDServer:
                 fcntl.flock(lock_file, fcntl.LOCK_UN)
             finally:
                 lock_file.close()
+
+    def _features_lock(self):
+        return self._file_lock(self.features_path)
+
+    def _research_lock(self):
+        return self._file_lock(self.research_path)
 
     def _find_feature(
         self, features: list[dict[str, Any]], feature_name: str
@@ -760,6 +808,22 @@ class TDDServer:
                         **self.sm.status(include_last_result=False),
                     }
                 )
+
+            if name == "record_research":
+                with self._research_lock():
+                    entry = _record_research_entry(
+                        source=arguments["source"],
+                        summary=arguments["summary"],
+                        related_feature=arguments.get("relatedFeature"),
+                        path=self.research_path,
+                    )
+                self._log_event("record_research", source=arguments["source"])
+                return self._text({"ok": True, "entry": entry})
+
+            if name == "list_research":
+                with self._research_lock():
+                    entries = _list_research_entries(path=self.research_path)
+                return self._text({"research": entries})
 
             return self._error(f"Unknown tool: {name}")
 

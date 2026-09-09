@@ -695,6 +695,33 @@ def test_features_lock_provides_mutual_exclusion(tmp_path):
     )
 
 
+def test_research_lock_provides_mutual_exclusion(tmp_path):
+    import threading
+    import time
+
+    server = make_server(tmp_path)
+    order = []
+
+    def worker(name):
+        with server._research_lock():
+            order.append(f"{name}-start")
+            time.sleep(0.05)
+            order.append(f"{name}-end")
+
+    t1 = threading.Thread(target=worker, args=("a",))
+    t2 = threading.Thread(target=worker, args=("b",))
+    t1.start()
+    time.sleep(0.01)
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert order in (
+        ["a-start", "a-end", "b-start", "b-end"],
+        ["b-start", "b-end", "a-start", "a-end"],
+    )
+
+
 def test_write_test_skeleton_appends_session_log_entry(tmp_path):
     server = make_server(tmp_path)
     call(server, "init_feature", featureName="f", testFile="tests/test_x.py", targetFiles=["tests/test_x.py"])
@@ -1498,6 +1525,28 @@ print(json.dumps({"passed": 0, "failed": len(failures), "failures": failures}))
 
     assert len(failures) == 20
     assert all(f["name"] != "..." for f in failures)
+
+
+def test_record_research_then_list_research_via_call_tool(tmp_path):
+    server = make_server(tmp_path)
+
+    payload = call(
+        server,
+        "record_research",
+        source="https://example.com/thread",
+        summary="Harness engineering: agent = model + harness.",
+    )
+
+    assert payload["ok"] is True
+    assert payload["entry"]["source"] == "https://example.com/thread"
+    assert payload["entry"]["summary"] == "Harness engineering: agent = model + harness."
+    assert payload["entry"]["relatedFeature"] is None
+    assert "date" in payload["entry"]
+
+    listing = call(server, "list_research")
+
+    assert len(listing["research"]) == 1
+    assert listing["research"][0]["source"] == "https://example.com/thread"
 
 
 def test_run_tests_honors_custom_path_env_when_invoking_adapter(tmp_path, monkeypatch):

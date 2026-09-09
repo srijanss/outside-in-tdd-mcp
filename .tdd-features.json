@@ -349,5 +349,50 @@
     "cyclesCompleted": 2,
     "status": "completed",
     "recordedAt": "2026-09-09T01:44:51.935380+00:00"
+  },
+  {
+    "featureName": "research-log",
+    "dependsOn": [],
+    "testFile": "tests/test_research_log.py",
+    "targetFiles": [
+      "core/research_log.py"
+    ],
+    "cyclesCompleted": 1,
+    "status": "completed",
+    "recordedAt": "2026-09-09T02:04:24.252698+00:00"
+  },
+  {
+    "featureName": "research-log-mcp-tools",
+    "dependsOn": [],
+    "testFile": "tests/test_server.py",
+    "targetFiles": [
+      "core/server.py"
+    ],
+    "cyclesCompleted": 2,
+    "status": "completed",
+    "recordedAt": "2026-09-09T02:12:29.743006+00:00"
+  },
+  {
+    "featureName": "session-start",
+    "description": "Read-only session-initialization tool bundling list_features() + get_status() + tail of .tdd-session.log + tail of .tdd-research.json, so a fresh session/after-/clear gets oriented without re-deriving context. Wire to a SessionStart hook.",
+    "dependsOn": [],
+    "status": "pending"
+  },
+  {
+    "featureName": "plan-approval-gate",
+    "description": "Add a 'draft' status to the feature ledger; planning passes write entries as 'draft' instead of 'pending'; init_feature blocks on 'draft'; add approve_plan(featureNames?) as a human-only checkpoint (no auto-approval, mirroring verify()) that flips draft entries to pending.",
+    "dependsOn": [],
+    "status": "pending"
+  },
+  {
+    "featureName": "research-log-hardening",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/test_research_log.py",
+    "targetFiles": [
+      "core/research_log.py"
+    ],
+    "recordedAt": "2026-09-09T02:24:12.991370+00:00",
+    "cyclesCompleted": 1
   }
 ]

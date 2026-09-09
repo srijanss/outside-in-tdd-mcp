@@ -157,12 +157,25 @@ verified before clearing and what the response tells Claude happened.
 - `adapters/pytest-adapter/run.sh` is the only pytest-specific code in the
   whole project. To support a new language, clone this file's shape (same
   CLI contract, same JSON shape out) with entirely different guts inside.
-- `core/server.py` is the MCP glue: registers the 12 tools, dispatches each
+- `core/server.py` is the MCP glue: registers all the tools, dispatches each
   `call_tool` into a `TDDStateMachine` method, and for `run_tests`
   specifically also calls the adapter and feeds the result back into the
   state machine. Every response includes the full status (phase, cycle
   count, available tools) so Claude always knows what it's allowed to do
   next without a separate round-trip.
+- `core/research_log.py` is a pure-logic module (no MCP knowledge, same
+  split as `state_machine.py`) backing two tools, `record_research` and
+  `list_research`, that append to / read `.tdd-research.json` — a durable
+  log of external context (a link read, a design decision, a summary) that
+  survives a `/clear` or a fresh session, so it doesn't have to be
+  re-fetched or re-derived. Deliberately separate from `.tdd-session.log`
+  (operational TDD-cycle events) and from `.tdd-features.json` (the plan
+  ledger) — this one is for knowledge, not state. Neither tool is
+  phase-gated, same as `get_status`/`list_features`. `core/server.py`
+  wraps both in `_research_lock()` (a generalized `_file_lock(path)` also
+  backing `_features_lock()`), the same mutual-exclusion pattern the
+  feature ledger uses, so two concurrent server processes can't race on a
+  read-modify-write and silently drop an entry.
 - `.tdd-config.json` (per-consumer-project, not tracked here — only the
   `.example` is) and `.mcp.json` are deliberately two separate files.
   `.tdd-config.json` is the *server's* concern (which adapter, where the

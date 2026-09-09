@@ -225,7 +225,8 @@ The full `TOOLS` list (with exact descriptions and input schemas) lives in
 already did once. Current tool names: `init_feature`, `write_test`,
 `write_test_skeleton`, `write_code`, `verify`, `run_tests`,
 `refactor_code`, `get_status`, `list_features`, `reset_feature`,
-`complete_feature`, `drill_down`, `return_to_parent`, `abandon_drill_down`.
+`complete_feature`, `drill_down`, `return_to_parent`, `abandon_drill_down`,
+`record_research`, `list_research`.
 See the "State Machine Specification" section above for what each does and
 when it's allowed.
 
