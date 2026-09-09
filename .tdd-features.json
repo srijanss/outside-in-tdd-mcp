@@ -376,7 +376,13 @@
     "featureName": "session-start",
     "description": "Read-only session-initialization tool bundling list_features() + get_status() + tail of .tdd-session.log + tail of .tdd-research.json, so a fresh session/after-/clear gets oriented without re-deriving context. Wire to a SessionStart hook.",
     "dependsOn": [],
-    "status": "pending"
+    "status": "completed",
+    "testFile": "tests/test_server.py",
+    "targetFiles": [
+      "core/server.py"
+    ],
+    "recordedAt": "2026-09-09T02:28:50.934776+00:00",
+    "cyclesCompleted": 1
   },
   {
     "featureName": "plan-approval-gate",
@@ -393,6 +399,28 @@
       "core/research_log.py"
     ],
     "recordedAt": "2026-09-09T02:24:12.991370+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "session-start-hardening",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/test_server.py",
+    "targetFiles": [
+      "core/server.py"
+    ],
+    "recordedAt": "2026-09-09T02:37:30.945414+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "session-start-log-entry-type-guard",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/test_server.py",
+    "targetFiles": [
+      "core/server.py"
+    ],
+    "recordedAt": "2026-09-09T02:40:26.096128+00:00",
     "cyclesCompleted": 1
   }
 ]

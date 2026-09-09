@@ -9,4 +9,5 @@ dist/
 .tdd-config.json
 .mcp.json
 .tdd-session.log
+*.lock
 node_modules

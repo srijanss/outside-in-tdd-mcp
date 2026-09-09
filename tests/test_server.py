@@ -1579,3 +1579,83 @@ print(json.dumps({{"passed": 0, "failed": 1, "failures": [{{"name": "path", "mes
     payload = call(server, "run_tests")
 
     assert payload["testResult"]["failures"][0]["message"] == "found"
+
+
+def test_session_start_bundles_features_status_session_log_and_research_via_call_tool(tmp_path):
+    server = make_server(tmp_path)
+
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=["own_test.py"])
+    call(
+        server,
+        "record_research",
+        source="https://example.com/thread",
+        summary="Harness engineering: agent = model + harness.",
+    )
+
+    payload = call(server, "session_start")
+
+    assert [f["featureName"] for f in payload["features"]] == ["f"]
+
+    assert payload["status"]["featureName"] == "f"
+    assert payload["status"]["phase"] == "red"
+
+    assert [e["event"] for e in payload["sessionLog"]] == [
+        "init_feature",
+        "record_research",
+    ]
+
+    assert len(payload["research"]) == 1
+    assert payload["research"][0]["source"] == "https://example.com/thread"
+
+
+def test_session_start_truncates_research_to_last_20_entries(tmp_path):
+    server = make_server(tmp_path)
+
+    for i in range(21):
+        call(server, "record_research", source=f"https://example.com/{i}", summary="s")
+
+    payload = call(server, "session_start")
+
+    assert len(payload["research"]) == 20
+    assert payload["research"][0]["source"] == "https://example.com/1"
+    assert payload["research"][-1]["source"] == "https://example.com/20"
+
+
+def test_session_start_on_fresh_project_returns_empty_bundle(tmp_path):
+    server = make_server(tmp_path)
+
+    payload = call(server, "session_start")
+
+    assert payload["features"] == []
+    assert payload["status"]["featureName"] is None
+    assert payload["sessionLog"] == []
+    assert payload["research"] == []
+
+
+def test_session_start_skips_corrupted_session_log_lines(tmp_path):
+    server = make_server(tmp_path)
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=["own_test.py"])
+
+    session_log_path = tmp_path / ".tdd-session.log"
+    with open(session_log_path, "a") as f:
+        f.write("not valid json\n")
+        f.write('{"truncated": tr\n')
+
+    payload = call(server, "session_start")
+
+    assert [e["event"] for e in payload["sessionLog"]] == ["init_feature"]
+
+
+def test_session_start_skips_session_log_lines_that_are_valid_json_but_not_objects(tmp_path):
+    server = make_server(tmp_path)
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=["own_test.py"])
+
+    session_log_path = tmp_path / ".tdd-session.log"
+    with open(session_log_path, "a") as f:
+        f.write("123\n")
+        f.write("null\n")
+        f.write('"just a string"\n')
+
+    payload = call(server, "session_start")
+
+    assert [e["event"] for e in payload["sessionLog"]] == ["init_feature"]

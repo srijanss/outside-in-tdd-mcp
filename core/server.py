@@ -282,6 +282,17 @@ TOOLS = [
         ),
         inputSchema={"type": "object", "properties": {}},
     ),
+    types.Tool(
+        name="session_start",
+        description=(
+            "Read-only orientation bundle for a fresh session or after a "
+            "/clear: the feature ledger (list_features), current phase/"
+            "drill-down stack (get_status), a tail of .tdd-session.log, "
+            "and a tail of the durable research log (.tdd-research.json). "
+            "Call this first instead of re-deriving context from scratch."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
 ]
 
 
@@ -594,6 +605,22 @@ class TDDServer:
         except OSError:
             pass  # session logging is best-effort; never block the TDD cycle
 
+    def _tail_session_log(self, limit: int = 20) -> list[dict[str, Any]]:
+        try:
+            with open(self.session_log_path) as f:
+                lines = f.readlines()
+        except OSError:
+            return []
+        entries: list[dict[str, Any]] = []
+        for line in lines[-limit:]:
+            try:
+                parsed = json.loads(line)
+            except json.JSONDecodeError:
+                continue  # a corrupted line must never block orientation
+            if isinstance(parsed, dict):
+                entries.append(parsed)
+        return entries
+
     def _text(self, payload: dict[str, Any]) -> list[types.TextContent]:
         return [
             types.TextContent(
@@ -824,6 +851,18 @@ class TDDServer:
                 with self._research_lock():
                     entries = _list_research_entries(path=self.research_path)
                 return self._text({"research": entries})
+
+            if name == "session_start":
+                with self._research_lock():
+                    research = _list_research_entries(path=self.research_path)
+                return self._text(
+                    {
+                        "features": self._load_features(),
+                        "status": self.sm.status(include_stack=True),
+                        "sessionLog": self._tail_session_log(),
+                        "research": research[-20:],
+                    }
+                )
 
             return self._error(f"Unknown tool: {name}")
 
