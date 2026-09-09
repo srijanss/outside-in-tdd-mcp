@@ -67,10 +67,15 @@ TOOLS = [
                     "type": "array",
                     "items": {"type": "string"},
                     "description": (
-                        "Implementation file(s) this base level owns. "
-                        "write_code() at this level can only write to one of "
-                        "these paths (new or existing) — anything else needs "
-                        "its own test via drill_down() first."
+                        "Must be an empty list ([]) — the base level never "
+                        "owns implementation files directly, regardless of "
+                        "whether testFile is an acceptance test, a unit "
+                        "test, or a refactor-only feature. Passing any "
+                        "entries here is rejected. Declare real "
+                        "implementation file(s) via drill_down(testFile, "
+                        "targetFiles) once identified — write_code() only "
+                        "works inside a drilled-down level's declared "
+                        "target files."
                     ),
                 },
             },

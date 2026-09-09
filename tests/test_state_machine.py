@@ -13,9 +13,20 @@ from core.state_machine import (
 )
 
 
-def make_sm(target_files=("f.py",)):
+def make_sm(target_files=()):
+    """The base level always starts with target_files=[] (init_feature's
+    hard rule -- it never owns implementation files directly). When a
+    real target_files is requested, drill into a nested level that owns
+    it instead, since only drill_down() can ever declare real files; the
+    returned sm's top-of-stack level then looks just like the old
+    base-level one did (fresh RED phase, the requested target_files),
+    just one level deeper.
+    """
     sm = TDDStateMachine()
-    sm.init_feature("feature", "tests/test_x.py", list(target_files))
+    sm.init_feature("feature", "tests/test_x.py", [])
+    if target_files:
+        to_implement(sm)
+        sm.drill_down("tests/test_x.py", list(target_files))
     return sm
 
 
@@ -147,7 +158,7 @@ def test_write_test_skeleton_only_allowed_in_red():
 
 
 def test_write_code_only_allowed_in_implement():
-    sm = make_sm()
+    sm = make_sm(target_files=["f.py"])
     with pytest.raises(PhaseError):
         sm.write_code("f.py")  # blocked in red
     to_implement(sm)
@@ -155,7 +166,7 @@ def test_write_code_only_allowed_in_implement():
 
 
 def test_write_code_blocked_in_verify_green_and_refactor():
-    sm = make_sm()
+    sm = make_sm(target_files=["f.py"])
     sm.record_test_result(passed=1, failed=0)  # -> verify_green
     with pytest.raises(PhaseError):
         sm.write_code("f.py")
@@ -201,6 +212,39 @@ def test_drill_down_scopes_write_code_to_its_own_declared_targets():
     sm.write_code("cart/models.py")  # this level's own declared target
 
 
+def test_init_feature_rejects_any_non_empty_target_files():
+    # The base level never owns implementation files directly -- whether
+    # testFile is an acceptance test, a unit test, or a refactor-only
+    # feature -- so a non-empty list must be rejected unconditionally,
+    # regardless of whether it's otherwise well-formed. This isn't left to
+    # the caller's judgment about what "kind" of test testFile is.
+    sm = TDDStateMachine()
+    with pytest.raises(InvalidTargetFilesError, match="must be empty"):
+        sm.init_feature("f", "tests/test_x.py", ["f.py"])
+    with pytest.raises(InvalidTargetFilesError, match="must be empty"):
+        sm.init_feature("f", "tests/test_x.py", ("a.py", "b.py"))
+    # empty list still works
+    sm.init_feature("f", "tests/test_x.py", [])
+    assert sm.target_files == ()
+
+    # empty tuple still works too (on a fresh instance -- the one above
+    # already has an active feature)
+    sm2 = TDDStateMachine()
+    sm2.init_feature("f", "tests/test_x.py", ())
+    assert sm2.target_files == ()
+
+
+def test_module_docstring_does_not_claim_init_feature_sets_target_files():
+    # init_feature() now always forces target_files=[] -- only drill_down()
+    # ever declares real implementation files. The module docstring must
+    # not claim otherwise.
+    docstring = Path(__file__).resolve().parents[1] / "core" / "state_machine.py"
+    text = docstring.read_text()
+    module_doc = " ".join(text.split('"""')[1].split())
+    assert "set by init_feature()/drill_down()" not in module_doc
+    assert "drill_down()" in module_doc
+
+
 def test_init_feature_and_drill_down_reject_non_list_or_non_string_target_files():
     # target_files arrives from the MCP call boundary with no guarantee of
     # shape -- a bad value (a bare string, or a list with non-string
@@ -213,7 +257,7 @@ def test_init_feature_and_drill_down_reject_non_list_or_non_string_target_files(
     with pytest.raises(InvalidTargetFilesError):
         sm.init_feature("f", "tests/test_x.py", [1, 2])
     # a valid call still works after the rejected ones
-    sm.init_feature("f", "tests/test_x.py", ["f.py"])
+    sm.init_feature("f", "tests/test_x.py", [])
 
     to_implement(sm)
     with pytest.raises(InvalidTargetFilesError):
@@ -236,7 +280,7 @@ def test_init_feature_and_drill_down_reject_none_target_files():
     sm = TDDStateMachine()
     with pytest.raises(InvalidTargetFilesError):
         sm.init_feature("f", "tests/test_x.py", None)
-    sm.init_feature("f", "tests/test_x.py", ["f.py"])
+    sm.init_feature("f", "tests/test_x.py", [])
 
     to_implement(sm)
     with pytest.raises(InvalidTargetFilesError):
@@ -265,14 +309,10 @@ def test_init_feature_and_drill_down_reject_empty_or_whitespace_target_files():
     # An empty string or whitespace-only string isn't a meaningful file
     # path -- it would never match a real write_code() call, so it should
     # be rejected upfront rather than silently accepted as a dead entry.
+    # (Only exercised via drill_down now -- init_feature's target_files is
+    # always [], so these malformed non-empty entries never reach it.)
     sm = TDDStateMachine()
-    with pytest.raises(InvalidTargetFilesError):
-        sm.init_feature("f", "tests/test_x.py", ["a.py", ""])
-    with pytest.raises(InvalidTargetFilesError):
-        sm.init_feature("f", "tests/test_x.py", ["a.py", "   "])
-    with pytest.raises(InvalidTargetFilesError):
-        sm.init_feature("f", "tests/test_x.py", ["a.py", "\t"])
-    sm.init_feature("f", "tests/test_x.py", ["a.py"])  # still works
+    sm.init_feature("f", "tests/test_x.py", [])
 
     to_implement(sm)
     with pytest.raises(InvalidTargetFilesError):
@@ -286,10 +326,10 @@ def test_init_feature_and_drill_down_reject_duplicate_target_files():
     # A duplicate entry is either a copy-paste mistake or a sign the caller
     # doesn't actually know what it's declaring -- reject it rather than
     # silently collapsing it, so the mistake is visible immediately.
+    # (Only exercised via drill_down now -- init_feature's target_files is
+    # always [], so a duplicate-entries list never reaches it.)
     sm = TDDStateMachine()
-    with pytest.raises(InvalidTargetFilesError):
-        sm.init_feature("f", "tests/test_x.py", ["a.py", "a.py"])
-    sm.init_feature("f", "tests/test_x.py", ["a.py", "b.py"])  # still works
+    sm.init_feature("f", "tests/test_x.py", [])
 
     to_implement(sm)
     with pytest.raises(InvalidTargetFilesError):
@@ -297,11 +337,15 @@ def test_init_feature_and_drill_down_reject_duplicate_target_files():
     sm.drill_down("cart/tests.py", ["cart/models.py"])  # still works
 
 
-def test_init_feature_and_drill_down_accept_tuple_of_strings():
+def test_drill_down_accepts_tuple_of_strings():
     # The validator explicitly allows tuples, not just lists -- must
     # actually be exercised, not just permitted by the isinstance check.
+    # (Only exercised via drill_down now -- init_feature's target_files is
+    # always [].)
     sm = TDDStateMachine()
-    sm.init_feature("f", "tests/test_x.py", ("a.py", "b.py"))
+    sm.init_feature("f", "tests/test_x.py", [])
+    to_implement(sm)
+    sm.drill_down("cart/tests.py", ("a.py", "b.py"))
     to_implement(sm)
     sm.write_code("a.py")
     sm.drill_down("cart/tests.py", ("cart/models.py",))
@@ -440,15 +484,20 @@ def test_return_to_parent_blocked_before_nested_cycle_completes():
 
 
 def test_return_to_parent_pops_and_resumes_parent_implement():
-    sm = make_sm()
+    # "parent" here is itself a drilled-down level (owning f.py) since the
+    # true base level can never own real target_files -- what matters is
+    # the relative depth change across drill_down/return_to_parent, not
+    # the absolute stack size.
+    sm = make_sm(target_files=["f.py"])
     to_implement(sm)
+    parent_depth = sm.depth
     sm.drill_down("cart/tests.py", ["cart/models.py"])
     to_red_after_one_cycle(sm)  # nested: red -> ... -> red, cycle 1
-    assert sm.depth == 2
+    assert sm.depth == parent_depth + 1
 
     summary = sm.return_to_parent()
     assert summary == {"testFile": "cart/tests.py", "cyclesCompleted": 1}
-    assert sm.depth == 1
+    assert sm.depth == parent_depth
     assert sm.phase == "implement"  # resumed exactly where the parent was
     assert sm.test_file == "tests/test_x.py"
     sm.write_code("f.py")  # parent's implement still works

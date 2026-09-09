@@ -64,7 +64,24 @@ def test_init_feature_returns_clear_error_for_invalid_target_files(tmp_path):
 
     # a valid call still works after the rejected ones
     payload = call(
+        server, "init_feature", featureName="f", testFile="t.py", targetFiles=[]
+    )
+    assert payload["phase"] == "red"
+
+
+def test_init_feature_returns_clear_error_for_non_empty_target_files(tmp_path):
+    # The base level never owns implementation files directly -- not left
+    # to judgment about whether testFile is acceptance/unit/refactor-only.
+    server = make_server(tmp_path)
+
+    payload = call(
         server, "init_feature", featureName="f", testFile="t.py", targetFiles=["f.py"]
+    )
+    assert "must be empty" in payload["error"]
+
+    # a valid (empty) call still works after the rejected one
+    payload = call(
+        server, "init_feature", featureName="f", testFile="t.py", targetFiles=[]
     )
     assert payload["phase"] == "red"
 
@@ -81,7 +98,7 @@ def test_drill_down_returns_clear_error_for_invalid_target_files(tmp_path):
     config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
     server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
 
-    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=["f.py"])
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
     call(server, "run_tests")  # -> verify_red
     call(server, "verify")  # -> implement
 
@@ -109,7 +126,7 @@ def test_drill_down_missing_target_files_argument_returns_clear_error(tmp_path):
     config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
     server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
 
-    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=["f.py"])
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
     call(server, "run_tests")  # -> verify_red
     call(server, "verify")  # -> implement
 
@@ -119,7 +136,7 @@ def test_drill_down_missing_target_files_argument_returns_clear_error(tmp_path):
 
 def test_phase_error_returns_clear_error_without_raising(tmp_path):
     server = make_server(tmp_path)
-    call(server, "init_feature", featureName="f", testFile="tests/test_x.py", targetFiles=["tests/test_x.py"])
+    call(server, "init_feature", featureName="f", testFile="tests/test_x.py", targetFiles=[])
     payload = call(server, "write_code", filePath="f.py")
     assert "only allowed in IMPLEMENT phase" in payload["error"]
 
@@ -136,9 +153,14 @@ def test_write_code_blocked_for_file_outside_declared_targets(tmp_path):
     config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
     server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
 
-    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=["views.py"])
+    # The base level can never own real target files -- drill into a
+    # nested level that owns "views.py" before exercising write_code().
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
     call(server, "run_tests")  # failed=1 -> verify_red
     call(server, "verify")  # -> implement
+    call(server, "drill_down", testFile="views_test.py", targetFiles=["views.py"])
+    call(server, "run_tests")  # nested failed=1 -> verify_red
+    call(server, "verify")  # nested -> implement
 
     payload = call(server, "write_code", filePath="new_module.py")
 
@@ -147,19 +169,30 @@ def test_write_code_blocked_for_file_outside_declared_targets(tmp_path):
 
 
 def test_get_status_reports_target_files(tmp_path):
+    # The base level can never own real target files -- drill into a
+    # nested level that owns them before checking status.
     server = make_server(tmp_path)
     call(
         server,
         "init_feature",
         featureName="f",
         testFile="tests/test_x.py",
+        targetFiles=[],
+    )
+    call(server, "run_tests")  # test file doesn't exist -> verify_red
+    call(server, "verify")  # -> implement
+    call(
+        server,
+        "drill_down",
+        testFile="cart/tests.py",
         targetFiles=["views.py", "urls.py"],
     )
 
     status = call(server, "get_status")
 
     assert status["targetFiles"] == ["views.py", "urls.py"]
-    assert status["stack"][0]["targetFiles"] == ["views.py", "urls.py"]
+    assert status["stack"][0]["targetFiles"] == []
+    assert status["stack"][1]["targetFiles"] == ["views.py", "urls.py"]
 
 
 def test_get_status_reports_target_files_at_nested_depth(tmp_path):
@@ -179,10 +212,18 @@ def test_get_status_reports_target_files_at_nested_depth(tmp_path):
         "init_feature",
         featureName="f",
         testFile="tests/test_x.py",
-        targetFiles=["views.py"],
+        targetFiles=[],
     )
     call(server, "run_tests")  # -> verify_red
     call(server, "verify")  # -> implement
+    call(
+        server,
+        "drill_down",
+        testFile="views_test.py",
+        targetFiles=["views.py"],
+    )
+    call(server, "run_tests")  # nested -> verify_red
+    call(server, "verify")  # nested -> implement
     call(
         server,
         "drill_down",
@@ -193,8 +234,9 @@ def test_get_status_reports_target_files_at_nested_depth(tmp_path):
     status = call(server, "get_status")
 
     assert status["targetFiles"] == ["cart/models.py", "cart/urls.py"]
-    assert status["stack"][0]["targetFiles"] == ["views.py"]
-    assert status["stack"][1]["targetFiles"] == ["cart/models.py", "cart/urls.py"]
+    assert status["stack"][0]["targetFiles"] == []
+    assert status["stack"][1]["targetFiles"] == ["views.py"]
+    assert status["stack"][2]["targetFiles"] == ["cart/models.py", "cart/urls.py"]
 
 
 def test_no_active_feature_returns_clear_error_without_raising(tmp_path):
@@ -216,7 +258,7 @@ counter_file = pathlib.Path(__file__).parent / "count.txt"
 count = int(counter_file.read_text()) if counter_file.exists() else 0
 count += 1
 counter_file.write_text(str(count))
-if count == 1:
+if count <= 2:
     print(json.dumps({"passed": 0, "failed": 1, "failures": []}))
 else:
     print(json.dumps({"passed": 1, "failed": 0, "failures": []}))
@@ -227,22 +269,28 @@ else:
     config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
     server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
 
-    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=["f.py"])
+    # The base level can never own real target files -- drill into a
+    # nested level that owns "f.py" before exercising write_code().
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
     assert call(server, "write_test", testName="t") == {"ok": True}
     assert call(server, "write_test_skeleton", testName="t") == {"ok": True}
 
-    call(server, "run_tests")  # failed=1 -> verify_red
-    call(server, "verify")  # -> implement
+    call(server, "run_tests")  # count=1: failed=1 -> base verify_red
+    call(server, "verify")  # -> base implement
+    call(server, "drill_down", testFile="sub.py", targetFiles=["f.py"])
+
+    call(server, "run_tests")  # count=2: failed=1 -> nested verify_red
+    call(server, "verify")  # -> nested implement
     assert call(server, "write_code", filePath="f.py") == {"ok": True}
 
-    call(server, "run_tests")  # passed=1 -> verify_green
-    call(server, "verify")  # -> refactor
+    call(server, "run_tests")  # count=3: passed=1 -> nested verify_green
+    call(server, "verify")  # -> nested refactor
     assert call(server, "refactor_code", description="tidy up") == {"ok": True}
 
 
 def test_init_feature_returns_status_via_call_tool(tmp_path):
     server = make_server(tmp_path)
-    payload = call(server, "init_feature", featureName="f", testFile="tests/test_x.py", targetFiles=["tests/test_x.py"])
+    payload = call(server, "init_feature", featureName="f", testFile="tests/test_x.py", targetFiles=[])
     assert payload["featureName"] == "f"
     assert payload["testFile"] == "tests/test_x.py"
     assert payload["phase"] == "red"
@@ -250,7 +298,7 @@ def test_init_feature_returns_status_via_call_tool(tmp_path):
 
 def test_init_feature_appends_session_log_entry(tmp_path):
     server = make_server(tmp_path)
-    call(server, "init_feature", featureName="f", testFile="tests/test_x.py", targetFiles=["tests/test_x.py"])
+    call(server, "init_feature", featureName="f", testFile="tests/test_x.py", targetFiles=[])
 
     log_path = tmp_path / ".tdd-session.log"
     assert log_path.exists()
@@ -263,6 +311,11 @@ def test_init_feature_appends_session_log_entry(tmp_path):
 
 
 def test_session_log_records_lifecycle_events(tmp_path):
+    # The base level can never own real target files -- "f.py" is now
+    # owned by a drilled-down level instead of the base itself, which
+    # means that level needs its own full cycle (and its own
+    # return_to_parent) closed before the true base can close its own
+    # cycle and complete_feature() becomes reachable.
     fake_adapter = tmp_path / "fake_adapter.py"
     fake_adapter.write_text(
         '''#!/usr/bin/env python3
@@ -271,7 +324,7 @@ counter_file = pathlib.Path(__file__).parent / "count.txt"
 count = int(counter_file.read_text()) if counter_file.exists() else 0
 count += 1
 counter_file.write_text(str(count))
-if count == 1:
+if count <= 2:
     print(json.dumps({"passed": 0, "failed": 1, "failures": []}))
 else:
     print(json.dumps({"passed": 1, "failed": 0, "failures": []}))
@@ -282,10 +335,14 @@ else:
     config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
     server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
 
-    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=["f.py"])
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
     call(server, "write_test", testName="t")
-    call(server, "run_tests")  # failed=1 -> verify_red
-    call(server, "verify")  # -> implement
+    call(server, "run_tests")  # count=1: failed=1 -> base verify_red
+    call(server, "verify")  # -> base implement
+
+    call(server, "drill_down", testFile="f_test.py", targetFiles=["f.py"])
+    call(server, "run_tests")  # count=2: failed=1 -> nested verify_red
+    call(server, "verify")  # -> nested implement
     call(server, "write_code", filePath="f.py")
 
     call(server, "drill_down", testFile="subA.py", targetFiles=["subA_impl.py"])
@@ -293,19 +350,25 @@ else:
 
     call(server, "drill_down", testFile="subB.py", targetFiles=["subB_impl.py"])
     call(server, "write_test", testName="sub")
-    call(server, "run_tests")  # passed=1, nested red -> verify_green (skip)
+    call(server, "run_tests")  # count=3: passed=1, nested red -> verify_green (skip)
     call(server, "verify")  # -> refactor (nested)
     call(server, "refactor_code", description="nested tidy up")
-    call(server, "run_tests")  # passed=1 -> nested back to red, cycle 1
-    call(server, "return_to_parent")  # -> back to implement at base
+    call(server, "run_tests")  # count=4: passed=1 -> nested back to red, cycle 1
+    call(server, "return_to_parent")  # -> back to implement at the "f.py" level
 
-    call(server, "run_tests")  # passed=1 -> verify_green
-    call(server, "verify")  # -> refactor
+    call(server, "run_tests")  # count=5: passed=1 -> verify_green (f.py level)
+    call(server, "verify")  # -> refactor (f.py level)
     call(server, "refactor_code", description="tidy up")
-    call(server, "run_tests")  # passed=1 -> red, cycle 1
+    call(server, "run_tests")  # count=6: passed=1 -> red, cycle 1 (f.py level)
+    call(server, "return_to_parent")  # -> back to implement at true base
+
+    call(server, "run_tests")  # count=7: passed=1 -> verify_green (base)
+    call(server, "verify")  # -> refactor (base)
+    call(server, "refactor_code", description="finish up")
+    call(server, "run_tests")  # count=8: passed=1 -> red, cycle 1 (base)
     call(server, "complete_feature")
 
-    call(server, "init_feature", featureName="g", testFile="g.py", targetFiles=["g.py"])
+    call(server, "init_feature", featureName="g", testFile="g.py", targetFiles=[])
     call(server, "reset_feature")
 
     log_path = tmp_path / ".tdd-session.log"
@@ -316,11 +379,19 @@ else:
         "write_test",
         "run_tests",
         "verify",
+        "drill_down",
+        "run_tests",
+        "verify",
         "write_code",
         "drill_down",
         "abandon_drill_down",
         "drill_down",
         "write_test",
+        "run_tests",
+        "verify",
+        "refactor_code",
+        "run_tests",
+        "return_to_parent",
         "run_tests",
         "verify",
         "refactor_code",
@@ -375,7 +446,7 @@ print(json.dumps({"passed": 1, "failed": 0, "failures": []}))
     config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
     server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
 
-    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=["f.py"])
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
     call(server, "write_test", testName="t")
     call(server, "run_tests")  # passed=1, no impl yet -> verify_green (skip)
     call(server, "verify")  # -> refactor
@@ -389,7 +460,7 @@ print(json.dumps({"passed": 1, "failed": 0, "failures": []}))
     entry = features[0]
     assert entry["featureName"] == "f"
     assert entry["testFile"] == "t.py"
-    assert entry["targetFiles"] == ["f.py"]
+    assert entry["targetFiles"] == []
     assert entry["cyclesCompleted"] == 1
     assert entry["status"] == "completed"
     assert "recordedAt" in entry
@@ -397,7 +468,7 @@ print(json.dumps({"passed": 1, "failed": 0, "failures": []}))
 
 def test_reset_feature_appends_abandoned_entry_to_feature_ledger(tmp_path):
     server = make_server(tmp_path)
-    call(server, "init_feature", featureName="g", testFile="g.py", targetFiles=["g.py"])
+    call(server, "init_feature", featureName="g", testFile="g.py", targetFiles=[])
 
     call(server, "reset_feature")
 
@@ -407,7 +478,7 @@ def test_reset_feature_appends_abandoned_entry_to_feature_ledger(tmp_path):
     entry = features[0]
     assert entry["featureName"] == "g"
     assert entry["testFile"] == "g.py"
-    assert entry["targetFiles"] == ["g.py"]
+    assert entry["targetFiles"] == []
     assert entry["cyclesCompleted"] == 0
     assert entry["status"] == "abandoned"
 
@@ -423,7 +494,7 @@ def test_reset_feature_with_no_active_feature_does_not_touch_ledger(tmp_path):
 
 def test_list_features_returns_ledger_contents(tmp_path):
     server = make_server(tmp_path)
-    call(server, "init_feature", featureName="g", testFile="g.py", targetFiles=["g.py"])
+    call(server, "init_feature", featureName="g", testFile="g.py", targetFiles=[])
     call(server, "reset_feature")
 
     payload = call(server, "list_features")
@@ -628,7 +699,7 @@ def test_init_feature_allowed_when_dependency_completed(tmp_path):
         "init_feature",
         featureName="downstream",
         testFile="t.py",
-        targetFiles=["f.py"],
+        targetFiles=[],
     )
 
     assert payload["featureName"] == "downstream"
@@ -636,7 +707,7 @@ def test_init_feature_allowed_when_dependency_completed(tmp_path):
     entry = next(f for f in features if f["featureName"] == "downstream")
     assert entry["status"] == "in_progress"
     assert entry["testFile"] == "t.py"
-    assert entry["targetFiles"] == ["f.py"]
+    assert entry["targetFiles"] == []
 
 
 def test_init_feature_blocked_when_plan_entry_already_completed(tmp_path):
@@ -681,7 +752,7 @@ def test_init_feature_blocked_when_plan_entry_is_draft(tmp_path):
 def test_init_feature_without_plan_entry_starts_normally_and_records_in_progress_entry(tmp_path):
     server = make_server(tmp_path)
 
-    payload = call(server, "init_feature", featureName="adhoc", testFile="t.py", targetFiles=["f.py"])
+    payload = call(server, "init_feature", featureName="adhoc", testFile="t.py", targetFiles=[])
 
     assert payload["featureName"] == "adhoc"
     features = json.loads((tmp_path / ".tdd-features.json").read_text())
@@ -690,7 +761,7 @@ def test_init_feature_without_plan_entry_starts_normally_and_records_in_progress
     assert entry["featureName"] == "adhoc"
     assert entry["status"] == "in_progress"
     assert entry["testFile"] == "t.py"
-    assert entry["targetFiles"] == ["f.py"]
+    assert entry["targetFiles"] == []
 
 
 def test_init_feature_returns_clear_error_when_dependson_is_not_a_list(tmp_path):
@@ -743,7 +814,7 @@ print(json.dumps({"passed": 1, "failed": 0, "failures": []}))
     )
     server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
 
-    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=["f.py"])
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
     call(server, "write_test", testName="t")
     call(server, "run_tests")  # passed=1, no impl yet -> verify_green (skip)
     call(server, "verify")  # -> refactor
@@ -879,7 +950,7 @@ def test_research_lock_provides_mutual_exclusion(tmp_path):
 
 def test_write_test_skeleton_appends_session_log_entry(tmp_path):
     server = make_server(tmp_path)
-    call(server, "init_feature", featureName="f", testFile="tests/test_x.py", targetFiles=["tests/test_x.py"])
+    call(server, "init_feature", featureName="f", testFile="tests/test_x.py", targetFiles=[])
 
     call(server, "write_test_skeleton", testName="t")
 
@@ -891,7 +962,7 @@ def test_write_test_skeleton_appends_session_log_entry(tmp_path):
 
 def test_log_event_does_not_raise_on_non_serializable_field(tmp_path):
     server = make_server(tmp_path)
-    call(server, "init_feature", featureName="f", testFile="tests/test_x.py", targetFiles=["tests/test_x.py"])
+    call(server, "init_feature", featureName="f", testFile="tests/test_x.py", targetFiles=[])
 
     server._log_event("custom_event", bad=object())  # must not raise
 
@@ -903,7 +974,7 @@ def test_log_event_does_not_raise_on_non_serializable_field(tmp_path):
 
 def test_log_event_swallows_oserror_when_log_path_unwritable(tmp_path):
     server = make_server(tmp_path)
-    call(server, "init_feature", featureName="f", testFile="tests/test_x.py", targetFiles=["tests/test_x.py"])
+    call(server, "init_feature", featureName="f", testFile="tests/test_x.py", targetFiles=[])
     # Parent directory doesn't exist -> open(..., "a") raises OSError.
     server.session_log_path = str(tmp_path / "no-such-dir" / "session.log")
 
@@ -930,7 +1001,7 @@ def test_run_tests_appends_session_log_entry_with_result(tmp_path):
     )
     server.session_log_path = str(tmp_path / ".tdd-session.log")
     server.features_path = str(tmp_path / ".tdd-features.json")
-    call(server, "init_feature", featureName="f", testFile="tests/test_state_machine.py", targetFiles=["tests/test_state_machine.py"])
+    call(server, "init_feature", featureName="f", testFile="tests/test_state_machine.py", targetFiles=[])
 
     call(server, "run_tests")
 
@@ -963,7 +1034,7 @@ def test_run_tests_uses_active_test_file_not_default_test_dir(tmp_path):
     )
     server = TDDServer(project_root=str(PROJECT_ROOT), config_path=str(config_path))
     server.features_path = str(tmp_path / ".tdd-features.json")
-    call(server, "init_feature", featureName="f", testFile="tests/test_state_machine.py", targetFiles=["tests/test_state_machine.py"])
+    call(server, "init_feature", featureName="f", testFile="tests/test_state_machine.py", targetFiles=[])
 
     payload = call(server, "run_tests")
 
@@ -978,7 +1049,7 @@ def test_init_feature_returns_clear_error_when_adapter_path_does_not_exist(tmp_p
     )
     server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
 
-    payload = call(server, "init_feature", featureName="f", testFile="tests/test_x.py", targetFiles=["tests/test_x.py"])
+    payload = call(server, "init_feature", featureName="f", testFile="tests/test_x.py", targetFiles=[])
 
     assert "no-such-adapter.sh" in payload["error"]
     # init_feature must not have gone through — a bad adapterPath should be
@@ -1006,7 +1077,7 @@ def test_refactor_closing_cycle_also_checks_full_suite_for_regressions(tmp_path)
     )
     server = TDDServer(project_root=str(PROJECT_ROOT), config_path=str(config_path))
     server.features_path = str(tmp_path / ".tdd-features.json")
-    call(server, "init_feature", featureName="f", testFile="tests/test_state_machine.py", targetFiles=["tests/test_state_machine.py"])
+    call(server, "init_feature", featureName="f", testFile="tests/test_state_machine.py", targetFiles=[])
 
     # test_state_machine.py already passes -> red skips straight to verify_green
     payload = call(server, "run_tests")
@@ -1035,7 +1106,7 @@ def test_regression_check_merges_passed_counts_and_reports_accurate_error(tmp_pa
     )
     server = TDDServer(project_root=str(PROJECT_ROOT), config_path=str(config_path))
     server.features_path = str(tmp_path / ".tdd-features.json")
-    call(server, "init_feature", featureName="f", testFile="tests/test_state_machine.py", targetFiles=["tests/test_state_machine.py"])
+    call(server, "init_feature", featureName="f", testFile="tests/test_state_machine.py", targetFiles=[])
 
     own_result = json.loads(
         subprocess.run(
@@ -1082,7 +1153,7 @@ def test_regression_check_does_not_double_count_overlapping_tests(tmp_path):
         json.dumps({"adapterPath": adapter_path, "defaultTestDir": "."})
     )
     server = TDDServer(project_root=str(suite_dir), config_path=str(config_path))
-    call(server, "init_feature", featureName="f", testFile="test_a.py", targetFiles=["test_a.py"])
+    call(server, "init_feature", featureName="f", testFile="test_a.py", targetFiles=[])
 
     whole_suite = json.loads(
         subprocess.run(
@@ -1124,7 +1195,7 @@ def test_regression_check_handles_default_test_dir_with_space(tmp_path):
         json.dumps({"adapterPath": adapter_path, "defaultTestDir": '"dir with space"'})
     )
     server = TDDServer(project_root=str(suite_dir), config_path=str(config_path))
-    call(server, "init_feature", featureName="f", testFile="test_a.py", targetFiles=["test_a.py"])
+    call(server, "init_feature", featureName="f", testFile="test_a.py", targetFiles=[])
 
     call(server, "run_tests")  # red -> verify_green (own target already passes)
     call(server, "verify")  # -> refactor
@@ -1161,7 +1232,7 @@ def test_regression_check_supports_defaulttestdir_with_extra_pytest_args(tmp_pat
         json.dumps({"adapterPath": adapter_path, "defaultTestDir": ". --ignore=vendor"})
     )
     server = TDDServer(project_root=str(suite_dir), config_path=str(config_path))
-    call(server, "init_feature", featureName="f", testFile="test_a.py", targetFiles=["test_a.py"])
+    call(server, "init_feature", featureName="f", testFile="test_a.py", targetFiles=[])
 
     call(server, "run_tests")  # red -> verify_green (own target already passes)
     call(server, "verify")  # -> refactor
@@ -1198,7 +1269,7 @@ def test_regression_check_skips_when_default_test_dir_is_whitespace_only(tmp_pat
         json.dumps({"adapterPath": adapter_path, "defaultTestDir": "   "})
     )
     server = TDDServer(project_root=str(suite_dir), config_path=str(config_path))
-    call(server, "init_feature", featureName="f", testFile="test_a.py", targetFiles=["test_a.py"])
+    call(server, "init_feature", featureName="f", testFile="test_a.py", targetFiles=[])
 
     call(server, "run_tests")  # red -> verify_green (own target already passes)
     call(server, "verify")  # -> refactor
@@ -1227,7 +1298,7 @@ def test_regression_check_reports_clean_error_for_malformed_default_test_dir(tmp
         json.dumps({"adapterPath": adapter_path, "defaultTestDir": '"unmatched'})
     )
     server = TDDServer(project_root=str(suite_dir), config_path=str(config_path))
-    call(server, "init_feature", featureName="f", testFile="test_a.py", targetFiles=["test_a.py"])
+    call(server, "init_feature", featureName="f", testFile="test_a.py", targetFiles=[])
 
     call(server, "run_tests")  # red -> verify_green (own target already passes)
     call(server, "verify")  # -> refactor
@@ -1257,7 +1328,7 @@ def test_run_tests_requests_regression_scope_confirmation_before_full_sweep(tmp_
         json.dumps({"adapterPath": adapter_path, "defaultTestDir": "."})
     )
     server = TDDServer(project_root=str(suite_dir), config_path=str(config_path))
-    call(server, "init_feature", featureName="f", testFile="test_a.py", targetFiles=["test_a.py"])
+    call(server, "init_feature", featureName="f", testFile="test_a.py", targetFiles=[])
 
     call(server, "run_tests")  # red -> verify_green
     call(server, "verify")  # -> refactor
@@ -1287,7 +1358,7 @@ def test_run_tests_runs_regression_sweep_scoped_to_given_regression_scope(tmp_pa
         json.dumps({"adapterPath": adapter_path, "defaultTestDir": "."})
     )
     server = TDDServer(project_root=str(suite_dir), config_path=str(config_path))
-    call(server, "init_feature", featureName="f", testFile="test_a.py", targetFiles=["test_a.py"])
+    call(server, "init_feature", featureName="f", testFile="test_a.py", targetFiles=[])
 
     call(server, "run_tests")  # red -> verify_green
     call(server, "verify")  # -> refactor
@@ -1318,7 +1389,7 @@ def test_run_tests_skips_regression_sweep_when_regression_scope_is_skip(tmp_path
         json.dumps({"adapterPath": adapter_path, "defaultTestDir": "."})
     )
     server = TDDServer(project_root=str(suite_dir), config_path=str(config_path))
-    call(server, "init_feature", featureName="f", testFile="test_a.py", targetFiles=["test_a.py"])
+    call(server, "init_feature", featureName="f", testFile="test_a.py", targetFiles=[])
 
     call(server, "run_tests")  # red -> verify_green
     call(server, "verify")  # -> refactor
@@ -1349,7 +1420,7 @@ def test_regression_check_attributes_failure_to_refactor_when_own_target_breaks(
         json.dumps({"adapterPath": adapter_path, "defaultTestDir": "."})
     )
     server = TDDServer(project_root=str(suite_dir), config_path=str(config_path))
-    call(server, "init_feature", featureName="f", testFile="test_a.py", targetFiles=["test_a.py"])
+    call(server, "init_feature", featureName="f", testFile="test_a.py", targetFiles=[])
 
     call(server, "run_tests")  # red -> verify_green (own target passes)
     call(server, "verify")  # -> refactor
@@ -1386,7 +1457,7 @@ def test_regression_check_labels_extra_regressions_when_own_target_also_breaks(t
         json.dumps({"adapterPath": adapter_path, "defaultTestDir": "."})
     )
     server = TDDServer(project_root=str(suite_dir), config_path=str(config_path))
-    call(server, "init_feature", featureName="f", testFile="test_a.py", targetFiles=["test_a.py"])
+    call(server, "init_feature", featureName="f", testFile="test_a.py", targetFiles=[])
 
     call(server, "run_tests")  # red -> verify_green (own target passes)
     call(server, "verify")  # -> refactor
@@ -1443,7 +1514,7 @@ else:
         json.dumps({"adapterPath": str(fake_adapter), "defaultTestDir": "whole/"})
     )
     server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
-    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=["own_test.py"])
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
 
     call(server, "run_tests")  # count=1: red -> verify_green (own target passes)
     call(server, "verify")  # -> refactor
@@ -1496,7 +1567,7 @@ else:
         json.dumps({"adapterPath": str(fake_adapter), "defaultTestDir": "whole/"})
     )
     server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
-    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=["own_test.py"])
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
 
     call(server, "run_tests")  # count=1: red -> verify_green (own target passes)
     call(server, "verify")  # -> refactor
@@ -1530,7 +1601,7 @@ print(json.dumps({"passed": 0, "failed": len(failures), "failures": failures}))
     config_path = tmp_path / ".tdd-config.json"
     config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
     server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
-    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=["own_test.py"])
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
 
     payload = call(server, "run_tests")
     failures = payload["testResult"]["failures"]
@@ -1568,7 +1639,7 @@ print(json.dumps({"passed": 0, "failed": 1, "failures": failures}))
     config_path = tmp_path / ".tdd-config.json"
     config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
     server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
-    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=["own_test.py"])
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
 
     payload = call(server, "run_tests")
     message = payload["testResult"]["failures"][0]["message"]
@@ -1597,7 +1668,7 @@ print(json.dumps({"passed": 0, "failed": 1, "failures": failures}))
     config_path = tmp_path / ".tdd-config.json"
     config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
     server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
-    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=["own_test.py"])
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
 
     payload = call(server, "run_tests")
     message = payload["testResult"]["failures"][0]["message"]
@@ -1623,7 +1694,7 @@ print(json.dumps({"passed": 0, "failed": 1, "failures": ["not a dict"]}))
     config_path = tmp_path / ".tdd-config.json"
     config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
     server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
-    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=["own_test.py"])
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
 
     payload = call(server, "run_tests")
 
@@ -1648,7 +1719,7 @@ print(json.dumps({"passed": 0, "failed": 1, "failures": [{"name": "t"}]}))
     config_path = tmp_path / ".tdd-config.json"
     config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
     server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
-    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=["own_test.py"])
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
 
     payload = call(server, "run_tests")
 
@@ -1673,7 +1744,7 @@ print(json.dumps({"passed": 0, "failed": len(failures), "failures": failures}))
     config_path = tmp_path / ".tdd-config.json"
     config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
     server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
-    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=["own_test.py"])
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
 
     payload = call(server, "run_tests")
     failures = payload["testResult"]["failures"]
@@ -1728,7 +1799,7 @@ print(json.dumps({{"passed": 0, "failed": 1, "failures": [{{"name": "path", "mes
     config_path = tmp_path / ".tdd-config.json"
     config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
     server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
-    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=["own_test.py"])
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
 
     monkeypatch.setenv("PATH", f"{marker_dir}{os.pathsep}{os.environ['PATH']}")
     payload = call(server, "run_tests")
@@ -1739,7 +1810,7 @@ print(json.dumps({{"passed": 0, "failed": 1, "failures": [{{"name": "path", "mes
 def test_session_start_bundles_features_status_session_log_and_research_via_call_tool(tmp_path):
     server = make_server(tmp_path)
 
-    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=["own_test.py"])
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
     call(
         server,
         "record_research",
@@ -1789,7 +1860,7 @@ def test_session_start_on_fresh_project_returns_empty_bundle(tmp_path):
 
 def test_session_start_skips_corrupted_session_log_lines(tmp_path):
     server = make_server(tmp_path)
-    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=["own_test.py"])
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
 
     session_log_path = tmp_path / ".tdd-session.log"
     with open(session_log_path, "a") as f:
@@ -1803,7 +1874,7 @@ def test_session_start_skips_corrupted_session_log_lines(tmp_path):
 
 def test_session_start_skips_session_log_lines_that_are_valid_json_but_not_objects(tmp_path):
     server = make_server(tmp_path)
-    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=["own_test.py"])
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
 
     session_log_path = tmp_path / ".tdd-session.log"
     with open(session_log_path, "a") as f:

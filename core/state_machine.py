@@ -12,7 +12,9 @@ only signal, since a feature may fan out into any number of test files
 across any number of areas of the codebase.
 
 Each level declares the implementation file(s) it owns (target_files, set
-by init_feature()/drill_down()). write_code() may only target one of the
+by drill_down() -- init_feature() always starts the base level with an
+empty target_files, since it never owns implementation files directly).
+write_code() may only target one of the
 current level's declared files — writing to anything else, new file or
 existing one, means that content needs its own test first: drill_down()
 into it instead of implementing it directly. This is what keeps IMPLEMENT
@@ -139,6 +141,15 @@ class TDDStateMachine:
                 "starting a new one."
             )
         validated = _validate_target_files(target_files)
+        if validated:
+            raise InvalidTargetFilesError(
+                "init_feature's target_files must be empty ([]) — the base "
+                "level never owns implementation files directly, whether "
+                "it's an acceptance test, a refactor-only feature, or "
+                "anything else. Declare real target files via drill_down() "
+                f"once identified, e.g. drill_down(testFile=..., "
+                f"targetFiles={list(validated)!r})."
+            )
         self.feature_name = name
         self.stack = [_Level(test_file=test_file, target_files=validated)]
 

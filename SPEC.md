@@ -110,9 +110,11 @@ the two points where its judgment is easiest to get wrong unnoticed.
 ```
 init_feature(name, testFile, targetFiles)
   → Phase: RED
-  → targetFiles declares the implementation file(s) the base level owns —
-    write_code() at depth 1 can only target one of these (see write_code
-    below)
+  → targetFiles must be [] — the base level never owns implementation
+    files directly (regardless of whether testFile is acceptance, unit, or
+    a refactor-only feature). Rejected with InvalidTargetFilesError if
+    non-empty. Real implementation file(s) are declared later via
+    drill_down() (see write_code below).
   → If name matches a .tdd-features.json entry: blocks with an error if
     that entry's status is already "completed" or "in_progress", or if
     any of its dependsOn features aren't "completed" yet. Otherwise flips

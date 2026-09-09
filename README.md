@@ -83,8 +83,8 @@ feature.** Phase gating alone doesn't stop an agent from reaching
 IMPLEMENT and writing a complete, working implementation in one
 `write_code` call — every phase transition rule is satisfied, but the
 "outside-in" part (decompose into unit-level RED/GREEN cycles for each
-new collaborator) never happened. `init_feature`/`drill_down` now require
-`targetFiles`: the implementation file(s) that level is allowed to write.
+new collaborator) never happened. `drill_down` requires `targetFiles`:
+the implementation file(s) that level is allowed to write.
 `write_code(filePath)` is blocked unless `filePath` is one of the current
 level's declared `targetFiles` — new file or an existing one being edited,
 doesn't matter. If IMPLEMENT needs to touch anything else, that content
@@ -93,6 +93,15 @@ finish that level's own RED→...→REFACTOR cycle (that level's own test
 justifies its own `write_code` calls, no further gate needed there), then
 `return_to_parent()` and resume writing only the parent's own declared
 files (e.g. wiring the new piece in).
+
+`init_feature`'s `targetFiles` must always be `[]` — this isn't left to
+judgment (an agent that's already planning the implementation will
+usually think it "knows" the target file even at the base level, which
+defeats the whole point). The base level structurally can't own files: it
+only runs `write_test`/`refactor_code`/`drill_down`, never a `write_code`
+that would pass validation, so every real implementation file gets
+declared via `drill_down` once identified, no exceptions for "simple"
+or refactor-only features either.
 
 **`return_to_parent` vs `abandon_drill_down`.** Same completed/abandoned
 split as `complete_feature`/`reset_feature`, scoped to one level instead of
