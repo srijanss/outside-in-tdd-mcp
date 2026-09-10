@@ -31,6 +31,10 @@ context beyond what's needed to understand the change itself.
 - **Missing tests/edge cases**: invalid input, boundary values, empty/null
   cases, repeated or out-of-order calls, concurrent/nested scenarios — name
   the specific untested scenario, concrete enough to write a test from.
+- **Missing error cases**: an exception, error return, or failure branch
+  that exists in the code but has no test asserting on it (e.g. a raised
+  error, an error-status response, a caught-and-logged failure path) — name
+  the specific error path and what should be asserted.
 - **Security**: injection, secret/credential leakage, unsafe subprocess or
   file-path handling.
 

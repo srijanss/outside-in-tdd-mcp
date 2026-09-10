@@ -27,18 +27,19 @@ concrete findings:
 
   If there are candidates to verify, ask (structured choice if available,
   otherwise plain text) whether to verify them yourself (default) or hand
-  verification to a separate subagent on a stronger model of the user's
+  verification to the `review-verifier` subagent on a model of the user's
   choosing:
   - **Verify it yourself** (default) — read the actual code/line for each
     candidate and confirm or drop it, same as before.
   - **Verify with another model** — ask which model to use (don't assume
-    one), then spawn a general-purpose subagent pinned to that model, give
-    it the candidate list plus the files in scope, and have it
-    independently confirm or reject each one against the real code before
-    you report anything. A stronger/pricier model costs more per run, but
-    it's a one-time cost per feature, not per commit, so it's optional and
-    worth it when the user wants a second opinion on the candidates rather
-    than trusting the caller's own read.
+    one — `review-verifier` intentionally has no model pinned in its
+    frontmatter), then spawn `review-verifier` with that model as an
+    explicit override, giving it the candidate list plus the files in
+    scope. Use its CONFIRMED/REJECTED output to decide what to report — a
+    stronger/pricier model costs more per run, but it's a one-time cost
+    per feature, not per commit, so it's optional and worth it when the
+    user wants a second opinion on the candidates rather than trusting the
+    caller's own read.
 - **Security issues or leaks** — use the `security-review` skill if
   available; otherwise check manually (injection, secret/credential
   leakage, unsafe subprocess or file-path handling).
