@@ -14,6 +14,8 @@ dev = ["pytest", "pytest-json-report"]
 
 [project.scripts]
 outside-in-tdd-mcp = "core.server:run"
+pytest-adapter-runner = "core.adapter_entrypoints:pytest_adapter_main"
+vitest-adapter-runner = "core.adapter_entrypoints:vitest_adapter_main"
 
 [tool.setuptools]
 packages = ["core"]

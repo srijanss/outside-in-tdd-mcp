@@ -228,6 +228,16 @@ pip install -e .
 outside-in-tdd-mcp   # starts the MCP server on stdio
 ```
 
+`.tdd-config.json`'s `adapterPath` may be relative here — it resolves
+against `TDD_PROJECT_ROOT` (the env var passed to the server), which is
+only meaningful when the adapter script actually lives inside the project
+being tested, as it does for this repo's own `.tdd-config.json`
+(self-hosted: this repo is both the tool and a project developed with it).
+This is unrelated to the Docker consumer flow below, where `adapterPath`
+must stay absolute (`/adapters/...`, a container-root path baked into the
+image) — a relative path there would incorrectly resolve against the
+*mounted* project instead.
+
 ## Building the image
 
 ```bash
@@ -264,6 +274,27 @@ docker build -t outside-in-tdd-mcp:pytest .
    `outside-in-tdd` as connected, with all 12 tools listed. Claude then calls
    `init_feature` to start a feature, and the phase gating takes over from
    there.
+
+### Without Docker
+
+`pip install -e .` (from this repo) also installs `pytest-adapter-runner`
+and `vitest-adapter-runner` as regular console scripts, alongside
+`outside-in-tdd-mcp` itself. Any consumer project can then set `adapterPath`
+to the bare command name — no absolute path, no Docker:
+
+```json
+{
+  "adapter": "pytest-adapter",
+  "adapterPath": "pytest-adapter-runner",
+  "defaultTestDir": "tests/"
+}
+```
+
+A bare `adapterPath` (no `/` in it) is resolved via a `PATH` lookup at
+config-load time, so this works from any project regardless of where this
+repo is checked out — the two are otherwise identical to the Docker case
+above, just backed by a real local Python/Node toolchain instead of a
+container's.
 
 ## Adding a new adapter
 

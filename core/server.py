@@ -12,6 +12,7 @@ import contextlib
 import json
 import os
 import shlex
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -670,9 +671,25 @@ class TDDServer:
 
     def _try_load_config(self) -> tuple[dict[str, Any] | None, str | None]:
         try:
-            return load_config(self.config_path), None
+            config = load_config(self.config_path)
         except (FileNotFoundError, ConfigError) as exc:
             return None, str(exc)
+
+        adapter_path = config["adapterPath"]
+        if not os.path.dirname(adapter_path):
+            # A bare name (no path separator at all) — a PATH-resolvable
+            # command, e.g. a console script installed by `pip install`.
+            # Left unresolved (falls through unchanged) if not found on
+            # PATH, so the existing "does not exist" error still fires.
+            resolved = shutil.which(adapter_path)
+            if resolved:
+                config = {**config, "adapterPath": resolved}
+        elif not Path(adapter_path).is_absolute():
+            config = {
+                **config,
+                "adapterPath": str(Path(self.project_root) / adapter_path),
+            }
+        return config, None
 
     def call_tool(
         self, name: str, arguments: dict[str, Any]

@@ -296,6 +296,69 @@ def test_init_feature_returns_status_via_call_tool(tmp_path):
     assert payload["phase"] == "red"
 
 
+def test_relative_adapter_path_resolves_against_project_root(tmp_path):
+    project_root = tmp_path / "project"
+    adapters_dir = project_root / "adapters"
+    adapters_dir.mkdir(parents=True)
+    adapter_path = adapters_dir / "run.sh"
+    adapter_path.write_text("#!/bin/sh\necho '{}'\n")
+    adapter_path.chmod(0o755)
+
+    config_path = project_root / ".tdd-config.json"
+    config_path.write_text(json.dumps({"adapterPath": "adapters/run.sh"}))
+
+    server = TDDServer(project_root=str(project_root), config_path=str(config_path))
+    payload = call(
+        server,
+        "init_feature",
+        featureName="f",
+        testFile="tests/test_x.py",
+        targetFiles=[],
+    )
+
+    assert "error" not in payload
+
+
+def test_absolute_adapter_path_passes_through_unchanged(tmp_path):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    other_dir = tmp_path / "elsewhere"
+    other_dir.mkdir()
+    adapter_path = other_dir / "run.sh"
+    adapter_path.write_text("#!/bin/sh\necho '{}'\n")
+    adapter_path.chmod(0o755)
+
+    config_path = project_root / ".tdd-config.json"
+    config_path.write_text(json.dumps({"adapterPath": str(adapter_path)}))
+
+    server = TDDServer(project_root=str(project_root), config_path=str(config_path))
+    config, error = server._try_load_config()
+
+    assert error is None
+    assert config["adapterPath"] == str(adapter_path)
+
+
+def test_bare_adapter_command_resolves_via_path_lookup(tmp_path, monkeypatch):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_adapter = bin_dir / "fake-adapter-runner"
+    fake_adapter.write_text("#!/bin/sh\necho '{}'\n")
+    fake_adapter.chmod(0o755)
+
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    config_path = project_root / ".tdd-config.json"
+    config_path.write_text(json.dumps({"adapterPath": "fake-adapter-runner"}))
+
+    server = TDDServer(project_root=str(project_root), config_path=str(config_path))
+    config, error = server._try_load_config()
+
+    assert error is None
+    assert config["adapterPath"] == str(fake_adapter)
+
+
 def test_init_feature_appends_session_log_entry(tmp_path):
     server = make_server(tmp_path)
     call(server, "init_feature", featureName="f", testFile="tests/test_x.py", targetFiles=[])

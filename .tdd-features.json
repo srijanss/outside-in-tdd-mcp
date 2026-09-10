@@ -450,5 +450,50 @@
     ],
     "recordedAt": "2026-09-09T04:39:44.767623+00:00",
     "cyclesCompleted": 1
+  },
+  {
+    "featureName": "relative-adapter-path-resolution",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/test_server.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-10T02:21:07.418287+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "adapter-path-absolute-passthrough-coverage",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/test_server.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-10T02:31:29.716008+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "adapter-console-script-entrypoints",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/test_adapter_entrypoints.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-10T02:44:00.760884+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "adapter-path-bare-command-path-lookup",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/test_server.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-10T02:50:21.918905+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "smoke-test-bare-adapter-command",
+    "dependsOn": [],
+    "status": "abandoned",
+    "testFile": "tests/test_config_validation.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-10T02:53:52.336489+00:00",
+    "cyclesCompleted": 0
   }
 ]
