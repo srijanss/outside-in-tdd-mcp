@@ -10,3 +10,4 @@ dist/
 *.lock
 node_modules
 .tdd-research.json
+**/worktrees
