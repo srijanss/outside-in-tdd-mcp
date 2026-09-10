@@ -1,0 +1,5 @@
+{
+  "adapter": "pytest-adapter",
+  "adapterPath": "pytest-adapter-runner",
+  "defaultTestDir": "tests/"
+}

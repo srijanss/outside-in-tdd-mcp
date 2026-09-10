@@ -6,7 +6,6 @@ __pycache__/
 *.egg-info/
 build/
 dist/
-.tdd-config.json
 .tdd-session.log
 *.lock
 node_modules
