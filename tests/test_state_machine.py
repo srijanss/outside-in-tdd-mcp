@@ -618,3 +618,43 @@ def test_status_shape():
     assert status["lastResult"]["failed"] == 1
     assert status["lastResult"]["durationMs"] == 42
     assert "verify" in sm.available_tools()
+
+
+def test_from_dict_preserves_valid_levels_up_to_first_malformed_entry():
+    # A corrupted on-disk state file shouldn't wipe an entire multi-level
+    # drill-down stack just because one entry (e.g. the newest, half-written
+    # one) is bad -- the levels below it are still trustworthy and should
+    # survive.
+    valid_level_1 = {
+        "testFile": "tests/test_x.py",
+        "targetFiles": [],
+        "phase": "implement",
+        "cycleCount": 0,
+        "lastError": None,
+        "lastResult": None,
+    }
+    valid_level_2 = {
+        "testFile": "views_test.py",
+        "targetFiles": ["views.py"],
+        "phase": "red",
+        "cycleCount": 0,
+        "lastError": None,
+        "lastResult": None,
+    }
+    malformed_level_3 = {
+        "testFile": "broken.py",
+        "targetFiles": [],
+        "phase": "not-a-real-phase",
+        "cycleCount": 0,
+    }
+    data = {
+        "featureName": "feature",
+        "stack": [valid_level_1, valid_level_2, malformed_level_3],
+    }
+
+    sm = TDDStateMachine.from_dict(data)
+
+    assert sm.feature_name == "feature"
+    assert sm.depth == 2
+    assert sm.test_file == "views_test.py"
+    assert sm.target_files == ("views.py",)

@@ -1061,6 +1061,7 @@ def test_run_tests_appends_session_log_entry_with_result(tmp_path):
     server = TDDServer(
         project_root=str(PROJECT_ROOT),
         config_path=str(config_path),
+        state_path=str(tmp_path / ".tdd-state.json"),
     )
     server.session_log_path = str(tmp_path / ".tdd-session.log")
     server.features_path = str(tmp_path / ".tdd-features.json")
@@ -1095,7 +1096,11 @@ def test_run_tests_uses_active_test_file_not_default_test_dir(tmp_path):
             }
         )
     )
-    server = TDDServer(project_root=str(PROJECT_ROOT), config_path=str(config_path))
+    server = TDDServer(
+        project_root=str(PROJECT_ROOT),
+        config_path=str(config_path),
+        state_path=str(tmp_path / ".tdd-state.json"),
+    )
     server.features_path = str(tmp_path / ".tdd-features.json")
     call(server, "init_feature", featureName="f", testFile="tests/test_state_machine.py", targetFiles=[])
 
@@ -1138,7 +1143,11 @@ def test_refactor_closing_cycle_also_checks_full_suite_for_regressions(tmp_path)
             }
         )
     )
-    server = TDDServer(project_root=str(PROJECT_ROOT), config_path=str(config_path))
+    server = TDDServer(
+        project_root=str(PROJECT_ROOT),
+        config_path=str(config_path),
+        state_path=str(tmp_path / ".tdd-state.json"),
+    )
     server.features_path = str(tmp_path / ".tdd-features.json")
     call(server, "init_feature", featureName="f", testFile="tests/test_state_machine.py", targetFiles=[])
 
@@ -1167,7 +1176,11 @@ def test_regression_check_merges_passed_counts_and_reports_accurate_error(tmp_pa
             }
         )
     )
-    server = TDDServer(project_root=str(PROJECT_ROOT), config_path=str(config_path))
+    server = TDDServer(
+        project_root=str(PROJECT_ROOT),
+        config_path=str(config_path),
+        state_path=str(tmp_path / ".tdd-state.json"),
+    )
     server.features_path = str(tmp_path / ".tdd-features.json")
     call(server, "init_feature", featureName="f", testFile="tests/test_state_machine.py", targetFiles=[])
 
@@ -1948,3 +1961,88 @@ def test_session_start_skips_session_log_lines_that_are_valid_json_but_not_objec
     payload = call(server, "session_start")
 
     assert [e["event"] for e in payload["sessionLog"]] == ["init_feature"]
+
+
+def test_mid_cycle_state_survives_a_new_server_instance(tmp_path):
+    # Simulates a server restart, or a handoff between separate MCP server
+    # processes on the same project (e.g. implementing in Claude Code, then
+    # switching to Codex mid-cycle): a second TDDServer pointed at the same
+    # project_root/config_path must see the same in-progress feature the
+    # first one left behind, instead of reporting no active feature.
+    server = make_server(tmp_path)
+    call(
+        server,
+        "init_feature",
+        featureName="cross-process-cycle-state-persistence",
+        testFile="tests/test_x.py",
+        targetFiles=[],
+    )
+    call(server, "run_tests")  # test file doesn't exist -> verify_red
+    call(server, "verify")  # -> implement
+    call(
+        server,
+        "drill_down",
+        testFile="views_test.py",
+        targetFiles=["views.py"],
+    )
+
+    before = call(server, "get_status")
+
+    restarted_server = make_server(tmp_path)
+    after = call(restarted_server, "get_status")
+
+    assert after == before
+
+
+def test_state_lock_provides_mutual_exclusion(tmp_path):
+    import threading
+    import time
+
+    server = make_server(tmp_path)
+    order = []
+
+    def worker(name):
+        with server._state_lock():
+            order.append(f"{name}-start")
+            time.sleep(0.05)
+            order.append(f"{name}-end")
+
+    t1 = threading.Thread(target=worker, args=("a",))
+    t2 = threading.Thread(target=worker, args=("b",))
+    t1.start()
+    time.sleep(0.01)
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert order in (
+        ["a-start", "a-end", "b-start", "b-end"],
+        ["b-start", "b-end", "a-start", "a-end"],
+    )
+
+
+def test_save_state_does_not_raise_on_non_serializable_field(tmp_path):
+    server = make_server(tmp_path)
+    call(server, "init_feature", featureName="f", testFile="tests/test_x.py", targetFiles=[])
+    # Bypass run_tests() (which always parses JSON-safe adapter output) to
+    # simulate the on-disk state ending up with a value _save_state() can't
+    # serialize -- "verify"'s own response doesn't touch lastResult, so this
+    # isolates the assertion to _save_state()'s handling rather than the
+    # tool response's.
+    server.sm.record_test_result(passed=0, failed=1, failures=[{"bad": object()}])
+
+    payload = call(server, "verify")  # must not raise
+
+    assert payload == {"ok": True, "featureName": "f", "depth": 1, "testFile": "tests/test_x.py", "targetFiles": [], "phase": "implement", "cycleCount": 0, "lastError": None}
+
+
+def test_save_state_swallows_oserror_when_state_path_unwritable(tmp_path):
+    server = make_server(tmp_path)
+    call(server, "init_feature", featureName="f", testFile="tests/test_x.py", targetFiles=[])
+    # Parent directory doesn't exist -> open(..., "w") raises OSError.
+    server.state_path = str(tmp_path / "no-such-dir" / ".tdd-state.json")
+
+    payload = call(server, "write_test", testName="t")  # must not raise
+
+    assert payload == {"ok": True}
+    assert not (tmp_path / "no-such-dir").exists()
