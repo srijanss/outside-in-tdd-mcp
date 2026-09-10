@@ -495,5 +495,11 @@
     "targetFiles": [],
     "recordedAt": "2026-09-10T02:53:52.336489+00:00",
     "cyclesCompleted": 0
+  },
+  {
+    "featureName": "cross-process-cycle-state-persistence",
+    "description": "Persist TDDStateMachine.stack (phase/depth/test file/target files/last result/error) to disk and load it on server start, so a mid-cycle feature survives a server restart or a handoff between separate MCP server processes (e.g. implementing in Claude Code, switching to Codex mid-cycle) instead of resetting to no active feature.",
+    "dependsOn": [],
+    "status": "pending"
   }
 ]
