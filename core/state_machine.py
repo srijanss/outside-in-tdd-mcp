@@ -377,6 +377,112 @@ class TDDStateMachine:
 
     # -- introspection ---------------------------------------------------
 
+    # -- persistence -----------------------------------------------------
+
+    def to_dict(self) -> dict[str, Any]:
+        """Full snapshot of feature_name + the entire stack, suitable for
+        writing to disk and reloading via from_dict() -- e.g. so a mid-cycle
+        feature survives a server restart or a handoff between separate MCP
+        server processes on the same project. Distinct from status(): this
+        keeps every field needed to reconstruct exact state (per-level
+        last_result/last_error, raw_output included) rather than the
+        trimmed response payload."""
+        return {
+            "featureName": self.feature_name,
+            "stack": [
+                {
+                    "testFile": lvl.test_file,
+                    "targetFiles": list(lvl.target_files),
+                    "phase": lvl.phase,
+                    "cycleCount": lvl.cycle_count,
+                    "lastError": lvl.last_error,
+                    "lastResult": (
+                        None
+                        if lvl.last_result is None
+                        else {
+                            "passed": lvl.last_result.passed,
+                            "failed": lvl.last_result.failed,
+                            "durationMs": lvl.last_result.duration_ms,
+                            "failures": lvl.last_result.failures,
+                            "rawOutput": lvl.last_result.raw_output,
+                        }
+                    ),
+                }
+                for lvl in self.stack
+            ],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "TDDStateMachine":
+        """Reconstruct a TDDStateMachine from to_dict() output. Best-effort,
+        matching this project's convention for on-disk state (see
+        TDDServer._load_features): any malformed/unexpected shape falls back
+        to a fresh, empty state machine rather than raising, since a corrupt
+        state file should never block starting a new feature. A malformed
+        entry partway through the stack (e.g. a half-written top-of-stack
+        level) only drops that level and anything above it -- the valid
+        levels below it are still trustworthy and are kept rather than
+        discarding the whole in-progress feature."""
+        sm = cls()
+        if not isinstance(data, dict):
+            return sm
+        feature_name = data.get("featureName")
+        stack_data = data.get("stack")
+        if not isinstance(feature_name, str) or not isinstance(stack_data, list) or not stack_data:
+            return sm
+        levels: list[_Level] = []
+        for entry in stack_data:
+            if not isinstance(entry, dict):
+                break
+            test_file = entry.get("testFile")
+            phase = entry.get("phase")
+            if not isinstance(test_file, str) or phase not in PHASES:
+                break
+            try:
+                target_files = _validate_target_files(entry.get("targetFiles") or [])
+            except InvalidTargetFilesError:
+                break
+            cycle_count = entry.get("cycleCount", 0)
+            if not isinstance(cycle_count, int):
+                cycle_count = 0
+            last_error = entry.get("lastError")
+            if not isinstance(last_error, str):
+                last_error = None
+            result_data = entry.get("lastResult")
+            last_result = None
+            if isinstance(result_data, dict):
+                failures = result_data.get("failures")
+                last_result = TestResult(
+                    passed=result_data.get("passed", 0)
+                    if isinstance(result_data.get("passed"), int)
+                    else 0,
+                    failed=result_data.get("failed", 0)
+                    if isinstance(result_data.get("failed"), int)
+                    else 0,
+                    duration_ms=result_data.get("durationMs", 0)
+                    if isinstance(result_data.get("durationMs"), int)
+                    else 0,
+                    failures=failures if isinstance(failures, list) else [],
+                    raw_output=result_data.get("rawOutput", "")
+                    if isinstance(result_data.get("rawOutput"), str)
+                    else "",
+                )
+            levels.append(
+                _Level(
+                    test_file=test_file,
+                    target_files=target_files,
+                    phase=phase,
+                    cycle_count=cycle_count,
+                    last_result=last_result,
+                    last_error=last_error,
+                )
+            )
+        if not levels:
+            return cls()
+        sm.feature_name = feature_name
+        sm.stack = levels
+        return sm
+
     def available_tools(self) -> tuple:
         if self.phase is None:
             return ("init_feature", "get_status")

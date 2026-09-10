@@ -401,7 +401,9 @@ def _require_string(
 
 
 class TDDServer:
-    def __init__(self, project_root: str, config_path: str) -> None:
+    def __init__(
+        self, project_root: str, config_path: str, state_path: str | None = None
+    ) -> None:
         self.project_root = project_root
         self.config_path = config_path
         self.sm = TDDStateMachine()
@@ -414,6 +416,47 @@ class TDDServer:
         self.research_path = os.environ.get(
             "TDD_RESEARCH_PATH", str(Path(project_root) / ".tdd-research.json")
         )
+        # Unlike the paths above, this one is also accepted as a
+        # constructor argument (not just an env var / post-construction
+        # attribute override): it's loaded eagerly right below, before a
+        # caller gets a chance to reassign the attribute, so a test that
+        # only overrides it after construction (as with features_path)
+        # would still load real leftover state from project_root first.
+        self.state_path = state_path or os.environ.get(
+            "TDD_STATE_PATH", str(Path(project_root) / ".tdd-state.json")
+        )
+        self._load_state()
+
+    def _load_state(self) -> None:
+        path = Path(self.state_path)
+        if not path.exists():
+            return
+        try:
+            with self._state_lock(), path.open() as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return
+        self.sm = TDDStateMachine.from_dict(data)
+
+    def _save_state(self) -> None:
+        # Same write-to-temp-then-rename pattern as _save_features, so a
+        # crash mid-write never leaves .tdd-state.json truncated/partial.
+        # Serialization and the write are guarded separately (matching
+        # _log_event): a non-serializable field (TypeError) must never
+        # block the TDD cycle any more than an unwritable path (OSError)
+        # does.
+        try:
+            content = json.dumps(self.sm.to_dict(), indent=2) + "\n"
+        except TypeError:
+            return
+        tmp_path = f"{self.state_path}.tmp"
+        try:
+            with self._state_lock():
+                with open(tmp_path, "w") as f:
+                    f.write(content)
+                os.replace(tmp_path, self.state_path)
+        except OSError:
+            pass  # persisted cycle state is best-effort; never block the TDD cycle
 
     def _load_features(self) -> list[dict[str, Any]]:
         path = Path(self.features_path)
@@ -469,6 +512,9 @@ class TDDServer:
 
     def _research_lock(self):
         return self._file_lock(self.research_path)
+
+    def _state_lock(self):
+        return self._file_lock(self.state_path)
 
     def _find_feature(
         self, features: list[dict[str, Any]], feature_name: str
@@ -692,6 +738,14 @@ class TDDServer:
         return config, None
 
     def call_tool(
+        self, name: str, arguments: dict[str, Any]
+    ) -> list[types.TextContent]:
+        try:
+            return self._call_tool(name, arguments)
+        finally:
+            self._save_state()
+
+    def _call_tool(
         self, name: str, arguments: dict[str, Any]
     ) -> list[types.TextContent]:
         try:
