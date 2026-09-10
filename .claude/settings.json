@@ -8,6 +8,19 @@
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR/.agents/hooks/block-direct-test-runs.sh\""
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.agents/hooks/danger-guard.sh\""
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.agents/hooks/protect-sensitive-files.sh\""
           }
         ]
       }
