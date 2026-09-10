@@ -18,10 +18,22 @@ concrete findings:
 - **Missing tests/edge cases** and **Bugs** — spawn the `review-finder`
   subagent (a fast, cheap model — an unverified first pass) scoped to
   exactly the files in scope, once per category or combined in one call.
-  Its output is candidates only; verify each one yourself (read the actual
-  code/line) before reporting it as a finding — drop anything that doesn't
-  hold up. Fall back to the `code-review` skill or a manual read if the
-  subagent is unavailable.
+  Its output is candidates only and must be verified before being reported
+  as a finding — drop anything that doesn't hold up. Fall back to the
+  `code-review` skill or a manual read if the subagent is unavailable.
+
+  If there are candidates to verify, ask (structured choice if available,
+  otherwise plain text) whether to run that verification with Opus 5
+  instead of doing it yourself:
+  - **Verify it yourself** (default) — read the actual code/line for each
+    candidate and confirm or drop it, same as before.
+  - **Verify with Opus 5** — spawn a general-purpose subagent with
+    `model: "opus"`, give it the candidate list plus the files in scope,
+    and have it independently confirm or reject each one against the real
+    code before you report anything. Costs more per run (Opus 5 is priced
+    above Sonnet), but is a one-time cost per feature, not per commit, so
+    it's optional and worth it when you want a second, stronger opinion on
+    the candidates rather than trusting your own read.
 - **Security issues or leaks** — use the `security-review` skill if
   available; otherwise check manually (injection, secret/credential
   leakage, unsafe subprocess or file-path handling).
