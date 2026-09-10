@@ -221,6 +221,13 @@ pip install -e .[dev]  # or: pip install pytest
 pytest tests/
 ```
 
+## Working in a git worktree
+
+Both `.mcp.json` (Claude Code) and `.codex/config.toml` (Codex) resolve
+paths from their own file location, so a `git worktree add` checkout works
+unmodified — it just needs its own `.venv`, since that's gitignored. See
+[`.agents/docs/worktree-workflow.md`](.agents/docs/worktree-workflow.md).
+
 ## Installing and running locally (no Docker)
 
 ```bash

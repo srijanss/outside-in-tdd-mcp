@@ -18,6 +18,8 @@ export TDD_CONFIG_PATH="$PROJECT_ROOT/.tdd-config.json"
 # this with.
 export PATH="$PROJECT_ROOT/.venv/bin:$HOME/.local/bin:$PATH"
 
-# $HOME expands at runtime (real shell var, not a baked-in username), so
-# this doesn't depend on Codex's subprocess PATH containing ~/.local/bin.
-exec "$HOME/.local/bin/outside-in-tdd-mcp" "$@"
+# Resolved via PATH (not a hardcoded ~/.local/bin path) so a worktree with
+# its own .venv (see .agents/scripts/setup-worktree.sh) runs its own code;
+# only a worktree with no .venv of its own falls through to the global
+# ~/.local/bin install.
+exec outside-in-tdd-mcp "$@"
