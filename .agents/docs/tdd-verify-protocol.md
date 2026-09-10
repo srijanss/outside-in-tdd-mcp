@@ -4,10 +4,11 @@ At VERIFY_RED or VERIFY_GREEN, before calling `verify()`:
 
 1. Show what needs judging: the failing test + output (RED), or the
    implementation + passing output (GREEN).
-2. Ask via `AskUserQuestion` — options like "Looks right, continue" /
-   "Not right, let me fix it" / "Cancel this feature". If that tool is
-   unavailable or the prompt doesn't resolve, fall back to plain text
-   asking for a "go ahead" reply. Always wait for an answer either way.
+2. Ask, via a structured choice tool if one is available — options like
+   "Looks right, continue" / "Not right, let me fix it" / "Cancel this
+   feature". If no such tool is available or the prompt doesn't resolve,
+   fall back to plain text asking for a "go ahead" reply. Always wait for
+   an answer either way.
 3. Act on it:
    - **Confirmed** → call `verify()`, continue.
    - **Needs a fix** → don't call `verify()`; go fix the test (RED) or the

@@ -3,9 +3,7 @@ description: Run the current test target N times back-to-back to check for flaky
 argument-hint: [n]
 ---
 
-Call `run_tests()` "$1" times (default 5 if not given), back-to-back, at
-whatever test target is currently active per `get_status()`.
+N given (if any): "$1" (default 5 if not given).
 
-Report only: any test whose pass/fail result changed between runs (name +
-how many times it failed out of N). If nothing flaked, say "no flakes in N
-runs" and stop. Don't restate passing output or explain the tests.
+Read and follow `.agents/skills/flaky-check/SKILL.md` for the full
+procedure, using N above as the N it refers to.

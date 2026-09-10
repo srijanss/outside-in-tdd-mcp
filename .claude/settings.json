@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/block-direct-test-runs.sh\""
+            "command": "\"$CLAUDE_PROJECT_DIR/.agents/hooks/block-direct-test-runs.sh\""
           }
         ]
       }

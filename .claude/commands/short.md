@@ -3,6 +3,5 @@ description: Answer the following in 2 sentences max
 argument-hint: [your question]
 ---
 
-Answer this in 2 sentences maximum, no caveats, no "it depends":
-
-$ARGUMENTS
+Read and follow `.agents/skills/short/SKILL.md` for the full procedure,
+answering this question: $ARGUMENTS
