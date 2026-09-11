@@ -75,6 +75,51 @@ def _validate_target_files(target_files: Any) -> tuple[str, ...]:
     return tuple(target_files)
 
 
+# Substrings that show up in a test-runner failure message when the test
+# fails purely because a name doesn't exist yet (missing class/function/
+# module) rather than because its behavior is wrong. These are cheap,
+# language-agnostic signatures — no AST/source parsing — used to tell a
+# "create this" failure from a "fix this logic" failure so write_code can be
+# nudged toward a stub instead of a full implementation.
+_MISSING_SYMBOL_SIGNATURES = (
+    "modulenotfounderror",
+    "importerror",
+    "cannot import name",
+    "is not defined",
+    "has no attribute",
+    "cannot find module",
+    "has no exported member",
+    "is not a constructor",
+    "is not a function",
+)
+
+
+def _looks_like_missing_symbol(failures: list) -> bool:
+    """True if every failure's message matches a missing-symbol signature
+    (see _MISSING_SYMBOL_SIGNATURES) rather than a behavioral assertion
+    failure. Empty failures list is not a match."""
+    if not failures:
+        return False
+    for entry in failures:
+        message = entry.get("message", "") if isinstance(entry, dict) else ""
+        if not isinstance(message, str):
+            return False
+        lowered = message.lower()
+        if not any(sig in lowered for sig in _MISSING_SYMBOL_SIGNATURES):
+            return False
+    return True
+
+
+_STUB_ONLY_HINT = (
+    "This failure looks like a missing name (import/attribute/reference "
+    "error), not a behavioral assertion — write only a minimal stub to "
+    "satisfy it (e.g. an empty class, or a method that raises "
+    "NotImplementedError / returns a hardcoded value), not its real logic. "
+    "Real behavior should be driven by its own failing test in a later "
+    "cycle."
+)
+
+
 @dataclass
 class TestResult:
     passed: int = 0
@@ -347,6 +392,8 @@ class TDDStateMachine:
         if level.phase == "red":
             if failed > 0:
                 level.phase = "verify_red"
+                if _looks_like_missing_symbol(level.last_result.failures):
+                    level.last_error = _STUB_ONLY_HINT
             elif passed > 0:
                 # Test already passes with no implementation change: skip
                 # straight to verifying green.
@@ -355,7 +402,9 @@ class TDDStateMachine:
 
         elif level.phase == "implement":
             if failed > 0:
-                pass  # stay IMPLEMENT, keep fixing
+                if _looks_like_missing_symbol(level.last_result.failures):
+                    level.last_error = _STUB_ONLY_HINT
+                # else: stay IMPLEMENT, keep fixing (real assertion failure)
             elif passed > 0:
                 level.phase = "verify_green"
 

@@ -117,7 +117,19 @@ TOOLS = [
             "one of the current level's declared targetFiles (see "
             "init_feature/drill_down) — new file or existing one. If the "
             "content you need belongs in a different file, drill_down into "
-            "it with a test first instead of writing it here directly."
+            "it with a test first instead of writing it here directly.\n\n"
+            "Minimal-diff rule: before calling this, check every line "
+            "you're about to write against the CURRENTLY FAILING test "
+            "only. If a line isn't needed to turn that one test green, "
+            "delete it — even if you can see it will obviously be needed "
+            "later. If the failing test creates or references a NEW "
+            "collaborator class/object only to check it exists, gets "
+            "called, or gets passed around (its own logic isn't asserted "
+            "on), implement that collaborator as a stub only (hardcoded "
+            "return / NotImplementedError) — its real logic gets its own "
+            "drill_down with its own failing test later. Gut-check: if "
+            "removing a chunk of what you wrote wouldn't make the current "
+            "failing test fail again, don't write that chunk yet."
         ),
         inputSchema={
             "type": "object",

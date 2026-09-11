@@ -532,5 +532,23 @@
     "targetFiles": [],
     "recordedAt": "2026-09-10T05:06:15.839218+00:00",
     "cyclesCompleted": 1
+  },
+  {
+    "featureName": "verify-stub-only-hint",
+    "dependsOn": [],
+    "status": "abandoned",
+    "testFile": "tests/test_state_machine.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-11T03:13:19.376066+00:00",
+    "cyclesCompleted": 0
+  },
+  {
+    "featureName": "verify-full-suite",
+    "dependsOn": [],
+    "status": "abandoned",
+    "testFile": "tests/",
+    "targetFiles": [],
+    "recordedAt": "2026-09-11T03:13:56.661356+00:00",
+    "cyclesCompleted": 0
   }
 ]

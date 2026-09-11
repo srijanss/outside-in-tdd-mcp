@@ -620,6 +620,52 @@ def test_status_shape():
     assert "verify" in sm.available_tools()
 
 
+def test_missing_symbol_failure_sets_stub_only_hint_through_implement():
+    sm = make_sm()
+    sm.record_test_result(
+        passed=0,
+        failed=1,
+        failures=[
+            {"name": "t", "message": "ImportError: cannot import name 'Foo'"}
+        ],
+    )  # red -> verify_red
+    assert sm.last_error is not None
+    assert "stub" in sm.last_error.lower()
+
+    sm.verify()  # verify_red -> implement
+    assert sm.phase == "implement"
+    assert sm.last_error is not None  # hint survives the verify() checkpoint
+
+
+def test_real_assertion_failure_does_not_set_stub_only_hint():
+    sm = to_implement(make_sm())
+    sm.record_test_result(
+        passed=0,
+        failed=1,
+        failures=[{"name": "t", "message": "AssertionError: expected True"}],
+    )
+    assert sm.phase == "implement"
+    assert sm.last_error is None
+
+
+def test_stub_only_hint_clears_once_a_later_run_reports_a_real_failure():
+    sm = make_sm()
+    sm.record_test_result(
+        passed=0,
+        failed=1,
+        failures=[{"name": "t", "message": "NameError: name 'Foo' is not defined"}],
+    )
+    sm.verify()
+    assert sm.last_error is not None
+
+    sm.record_test_result(
+        passed=0,
+        failed=1,
+        failures=[{"name": "t", "message": "AssertionError: expected True"}],
+    )
+    assert sm.last_error is None
+
+
 def test_from_dict_preserves_valid_levels_up_to_first_malformed_entry():
     # A corrupted on-disk state file shouldn't wipe an entire multi-level
     # drill-down stack just because one entry (e.g. the newest, half-written
