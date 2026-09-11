@@ -245,6 +245,23 @@ must stay absolute (`/adapters/...`, a container-root path baked into the
 image) — a relative path there would incorrectly resolve against the
 *mounted* project instead.
 
+### Scaffolding a consumer project
+
+`pip install -e .` also puts `outside-in-tdd-mcp-install` on PATH. Run it
+from inside any other local project to copy `.agents/`, `.claude/`,
+`.codex/`, `.mcp.json`, and `.tdd-config.json` there (an existing config
+in the target is never overwritten):
+
+```bash
+cd /path/to/other/project
+outside-in-tdd-mcp-install
+```
+
+Only works with an editable install of this repo (`pip install -e .`) —
+it resolves the source files to copy from its own installed location,
+and a non-editable install doesn't ship `.agents/`/`.claude/`/`.codex/`
+as package data.
+
 ## Building the image
 
 ```bash
