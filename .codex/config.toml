@@ -13,7 +13,7 @@
 # (.codex/), not the project root or runtime cwd.
 
 [mcp_servers.outside-in-tdd]
-command = "../.agents/mcp/launch-outside-in-tdd.sh"
+command = ".agents/mcp/launch-outside-in-tdd.sh"
 args = []
 
 # Counterpart to the .claude/settings.json PreToolUse hook — blocks direct
@@ -23,4 +23,22 @@ matcher = "Bash"
 
   [[hooks.PreToolUse.hooks]]
   type = "command"
-  command = "../.agents/hooks/block-direct-test-runs.sh"
+  command = ".agents/hooks/block-direct-test-runs.sh"
+
+# Match Claude's command safety guard: block autonomous destructive commands,
+# commits, pushes, branch creation, and shell writes to protected files.
+[[hooks.PreToolUse]]
+matcher = "Bash"
+
+  [[hooks.PreToolUse.hooks]]
+  type = "command"
+  command = ".agents/hooks/danger-guard.sh"
+
+# Match Claude's direct-file-edit protection for secrets and infrastructure
+# manifests. The shared script reads the tool's file_path input.
+[[hooks.PreToolUse]]
+matcher = "Edit|Write"
+
+  [[hooks.PreToolUse.hooks]]
+  type = "command"
+  command = ".agents/hooks/protect-sensitive-files.sh"
