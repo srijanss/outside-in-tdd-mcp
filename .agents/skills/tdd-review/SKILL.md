@@ -20,10 +20,16 @@ text (and wait for the reply), what to review:
 If "a specific file or directory" is picked, ask for the path before
 continuing.
 
+Derive a `scope` key from the choice, for the shared findings store:
+- Uncommitted changes -> `diff:uncommitted`
+- The most recent commit -> `diff:last-commit`
+- Everything since branching -> `diff:since-main`
+- A specific file/directory -> `file:<path>` (the path as given)
+
 ## Run the check
 
 Once the scope is settled, read `.agents/docs/tdd-review-checklist.md` and
 follow it, scoped to what was determined above (the whole repo only if
-that's genuinely what was picked). A chosen finding becomes the next
-`tdd-start` feature — hand it off as the feature name; don't start writing
-code in this skill.
+that's genuinely what was picked), passing the `scope` key derived above.
+A chosen finding becomes the next `tdd-start` feature — hand it off as the
+feature name; don't start writing code in this skill.

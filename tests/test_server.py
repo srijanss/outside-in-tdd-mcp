@@ -31,6 +31,32 @@ def call(server, name, **arguments):
     return json.loads(result[0].text)
 
 
+def test_review_finding_tools_are_advertised():
+    tools = {tool.name: tool for tool in TOOLS}
+
+    assert tools["record_review_finding"].inputSchema["required"] == [
+        "scope",
+        "finding",
+    ]
+    assert "list_review_findings" in tools
+
+
+def test_review_finding_tools_route_through_the_project_scoped_store(tmp_path):
+    server = make_server(tmp_path)
+    finding = {"id": "missing-lock", "status": "candidate"}
+
+    assert call(
+        server,
+        "record_review_finding",
+        scope="feature:checkout",
+        finding=finding,
+    )["ok"] is True
+    assert call(server, "list_review_findings", scope="feature:checkout") == {
+        "scope": "feature:checkout",
+        "findings": [finding],
+    }
+
+
 def test_unknown_tool_returns_error_without_raising(tmp_path):
     server = make_server(tmp_path)
     payload = call(server, "not_a_real_tool")

@@ -1,5 +1,12 @@
 # End-of-feature review checklist
 
+Takes a `scope` key (from the calling skill). Call `list_review_findings`
+for that scope first — it's shared across agents/tools (Claude, Codex), so
+another session may have already recorded candidates or confirmed findings
+for this exact scope. Show anything returned before running a fresh check;
+don't re-verify a finding already marked `confirmed` unless the code at
+its `file`/`line` has visibly changed since.
+
 Ask, via a structured multi-select choice tool if one is available
 (otherwise plain text), which to check, within the given scope. If using
 such a tool and it caps options per question (e.g. at 4), offer exactly
@@ -49,6 +56,18 @@ concrete findings:
 If nothing was picked (declined via "Other"), stop here.
 
 Present findings as a numbered list, one line each, `file:line` where it
-applies. Don't fix anything yet. Then ask which finding, if any, should
-become the next TDD feature or bugfix — that's the feature name (and test
-target) for a new cycle.
+applies. Don't fix anything yet.
+
+Persist every finding via `record_review_finding(scope, finding)` — one
+call per finding, each `finding` an object with at least `id` (a short
+stable slug, e.g. `missing-lock`), `status` (`candidate` if unverified,
+`confirmed` if verified this run, `rejected` if a carried-forward
+candidate didn't hold up), `severity`, `file`, `line`, and `summary`. This
+is what lets a review started by one tool/model be picked up and
+continued by another — do this even if the user declines to act on any
+finding right now.
+
+Then ask which finding, if any, should become the next TDD feature or
+bugfix — that's the feature name (and test target) for a new cycle. If one
+is picked, update its persisted `status` to `fixed` once that cycle
+completes (via `record_review_finding` again with the same `id`).

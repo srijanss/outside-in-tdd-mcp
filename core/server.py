@@ -28,6 +28,8 @@ from mcp.server import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
 
 from core.adapter_contract import AdapterError, run_adapter
+from core.review_findings import list_review_findings as _list_review_findings
+from core.review_findings import record_review_finding as _record_review_finding
 from core.research_log import list_research as _list_research_entries
 from core.research_log import record_research as _record_research_entry
 from core.state_machine import (
@@ -290,6 +292,27 @@ TOOLS = [
         inputSchema={"type": "object", "properties": {}},
     ),
     types.Tool(
+        name="record_review_finding",
+        description="Persist a review finding under a shared feature or diff scope.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "scope": {"type": "string"},
+                "finding": {"type": "object"},
+            },
+            "required": ["scope", "finding"],
+        },
+    ),
+    types.Tool(
+        name="list_review_findings",
+        description="List persisted review findings for a feature or diff scope.",
+        inputSchema={
+            "type": "object",
+            "properties": {"scope": {"type": "string"}},
+            "required": ["scope"],
+        },
+    ),
+    types.Tool(
         name="record_research",
         description=(
             "Append an entry to the durable research log "
@@ -428,6 +451,9 @@ class TDDServer:
         self.research_path = os.environ.get(
             "TDD_RESEARCH_PATH", str(Path(project_root) / ".tdd-research.json")
         )
+        self.review_findings_path = str(
+            Path(project_root) / ".tdd-review-findings.json"
+        )
         # Unlike the paths above, this one is also accepted as a
         # constructor argument (not just an env var / post-construction
         # attribute override): it's loaded eagerly right below, before a
@@ -524,6 +550,9 @@ class TDDServer:
 
     def _research_lock(self):
         return self._file_lock(self.research_path)
+
+    def _review_findings_lock(self):
+        return self._file_lock(self.review_findings_path)
 
     def _state_lock(self):
         return self._file_lock(self.state_path)
@@ -987,6 +1016,24 @@ class TDDServer:
                     )
                 self._log_event("record_research", source=arguments["source"])
                 return self._text({"ok": True, "entry": entry})
+
+            if name == "record_review_finding":
+                with self._review_findings_lock():
+                    finding = _record_review_finding(
+                        arguments["scope"],
+                        arguments["finding"],
+                        path=self.review_findings_path,
+                    )
+                return self._text({"ok": True, "finding": finding})
+
+            if name == "list_review_findings":
+                with self._review_findings_lock():
+                    findings = _list_review_findings(
+                        arguments["scope"], path=self.review_findings_path
+                    )
+                return self._text(
+                    {"scope": arguments["scope"], "findings": findings}
+                )
 
             if name == "list_research":
                 with self._research_lock():

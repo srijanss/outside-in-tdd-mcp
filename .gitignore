@@ -11,4 +11,5 @@ dist/
 node_modules
 .tdd-research.json
 .tdd-state.json
+.tdd-review-findings.json
 **/worktrees

@@ -550,5 +550,33 @@
     "targetFiles": [],
     "recordedAt": "2026-09-11T03:13:56.661356+00:00",
     "cyclesCompleted": 0
+  },
+  {
+    "featureName": "cross-agent-review-findings-handoff",
+    "description": "Persist review-finder/review-verifier output (candidate + CONFIRMED/REJECTED findings) to a shared JSON file (e.g. .tdd-review-findings.json, keyed by feature/diff scope, same locking pattern as core/research_log.py) so a review started by one tool/model (Claude, Codex) can be picked up and continued by the other instead of only living in that session's conversation text.",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/test_review_findings.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-14T23:23:42.577814+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "review-findings-store-hardening",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/test_review_finding_store.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-14T23:49:07.407389+00:00",
+    "cyclesCompleted": 4
+  },
+  {
+    "featureName": "review-finding-auto-close-on-complete",
+    "description": "Right now a fixed review finding only gets marked status:fixed in .tdd-review-findings.json if the agent remembers the manual record_review_finding step documented in .agents/docs/tdd-review-checklist.md — nothing enforces it. Let init_feature optionally accept a reviewFindingId (plus the scope it came from), stash it on the active feature's state, and have complete_feature auto-call record_review_finding(scope, {id: reviewFindingId, status: 'fixed', ...}) when that's set, so closing the loop is guaranteed instead of best-effort.",
+    "dependsOn": [
+      "cross-agent-review-findings-handoff",
+      "review-findings-store-hardening"
+    ],
+    "status": "pending"
   }
 ]

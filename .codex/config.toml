@@ -16,6 +16,40 @@
 command = ".agents/mcp/launch-outside-in-tdd.sh"
 args = []
 
+[mcp_servers.outside-in-tdd.tools.init_feature]
+approval_mode = "approve"
+
+[mcp_servers.outside-in-tdd.tools.get_status]
+approval_mode = "approve"
+
+[mcp_servers.outside-in-tdd.tools.list_features]
+approval_mode = "approve"
+
+[mcp_servers.outside-in-tdd.tools.run_tests]
+approval_mode = "approve"
+
+[mcp_servers.outside-in-tdd.tools.verify]
+approval_mode = "approve"
+
+[mcp_servers.outside-in-tdd.tools.drill_down]
+approval_mode = "approve"
+
+[mcp_servers.outside-in-tdd.tools.write_test]
+approval_mode = "approve"
+
+[mcp_servers.outside-in-tdd.tools.write_code]
+approval_mode = "approve"
+
+[mcp_servers.outside-in-tdd.tools.refactor_code]
+approval_mode = "approve"
+
+[mcp_servers.outside-in-tdd.tools.return_to_parent]
+approval_mode = "approve"
+
+[mcp_servers.outside-in-tdd.tools.complete_feature]
+approval_mode = "approve"
+
+
 # Counterpart to the .claude/settings.json PreToolUse hook — blocks direct
 # pytest/vitest/etc. invocations so agents go through run_tests() instead.
 [[hooks.PreToolUse]]
