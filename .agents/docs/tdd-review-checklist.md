@@ -1,11 +1,24 @@
 # End-of-feature review checklist
 
-Takes a `scope` key (from the calling skill). Call `list_review_findings`
-for that scope first — it's shared across agents/tools (Claude, Codex), so
-another session may have already recorded candidates or confirmed findings
-for this exact scope. Show anything returned before running a fresh check;
-don't re-verify a finding already marked `confirmed` unless the code at
-its `file`/`line` has visibly changed since.
+STOP. Before doing anything else — before reading diffs, before spawning
+`review-finder`, before any other step in this checklist — call
+`list_review_findings(scope)` for the `scope` key given by the calling
+skill. This is not optional and not a "nice to check first": the findings
+store is shared across agents/tools (Claude, Codex), so another session may
+have already recorded candidates or confirmed findings for this exact
+scope, and re-deriving them from scratch wastes a full diff re-scan.
+
+Show anything returned before running a fresh check. Don't re-verify a
+finding already marked `confirmed` unless the code at its `file`/`line` has
+visibly changed since.
+
+If `list_review_findings` returned any findings, skip the category
+question below by default and go straight to reusing them: present the
+list and move on to "which finding, if any, should become the next TDD
+feature" near the end of this checklist. Only fall through to asking the
+category question (and running a fresh check) if the user explicitly asks
+for one — e.g. "also check security", "re-scan", "run it again" — or if
+none were returned.
 
 Ask, via a structured multi-select choice tool if one is available
 (otherwise plain text), which to check, within the given scope. If using

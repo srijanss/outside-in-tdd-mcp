@@ -101,6 +101,99 @@ print(json.dumps({"passed": 1, "failed": 0, "failures": []}))
     assert findings["findings"] == []
 
 
+def test_completing_a_feature_whose_linked_review_finding_was_removed_meanwhile_is_a_noop(
+    tmp_path,
+):
+    fake_adapter = tmp_path / "fake_adapter.py"
+    fake_adapter.write_text(
+        '''#!/usr/bin/env python3
+import json
+print(json.dumps({"passed": 1, "failed": 0, "failures": []}))
+'''
+    )
+    fake_adapter.chmod(0o755)
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
+    server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
+
+    call(
+        server,
+        "record_review_finding",
+        scope="diff:uncommitted",
+        finding={
+            "id": "missing-lock",
+            "status": "confirmed",
+            "summary": "Concurrent writes can lose findings",
+        },
+    )
+    call(
+        server,
+        "init_feature",
+        featureName="f",
+        testFile="t.py",
+        targetFiles=[],
+        reviewFindingId="missing-lock",
+        reviewFindingScope="diff:uncommitted",
+    )
+    # Another session/tool removes the finding from the shared store (e.g.
+    # already marked fixed elsewhere) before this cycle completes.
+    call(
+        server,
+        "record_review_finding",
+        scope="diff:uncommitted",
+        finding={"id": "missing-lock", "status": "fixed"},
+    )
+
+    call(server, "write_test", testName="t")
+    call(server, "run_tests")  # passed=1, no impl yet -> verify_green (skip)
+    call(server, "verify")  # -> refactor
+    call(server, "refactor_code", description="tidy up")
+    call(server, "run_tests")  # passed=1 -> red, cycle 1
+    payload = call(server, "complete_feature")
+
+    assert payload["ok"] is True
+    findings = call(server, "list_review_findings", scope="diff:uncommitted")
+    assert findings["findings"] == []
+
+
+def test_init_feature_rejects_unknown_linked_review_finding(tmp_path):
+    server = make_server(tmp_path)
+
+    payload = call(
+        server,
+        "init_feature",
+        featureName="f",
+        testFile="t.py",
+        targetFiles=[],
+        reviewFindingId="typoed-id",
+        reviewFindingScope="diff:uncommitted",
+    )
+
+    assert payload == {
+        "error": (
+            "Review finding 'typoed-id' does not exist in scope "
+            "'diff:uncommitted'."
+        )
+    }
+    assert call(server, "get_status")["featureName"] is None
+
+
+def test_init_feature_requires_scope_for_linked_review_finding(tmp_path):
+    server = make_server(tmp_path)
+
+    payload = call(
+        server,
+        "init_feature",
+        featureName="f",
+        testFile="t.py",
+        targetFiles=[],
+        reviewFindingId="missing-lock",
+    )
+
+    assert payload == {"error": "Missing required argument: 'reviewFindingScope'"}
+    assert call(server, "get_status")["featureName"] is None
+
+
 def test_unknown_tool_returns_error_without_raising(tmp_path):
     server = make_server(tmp_path)
     payload = call(server, "not_a_real_tool")

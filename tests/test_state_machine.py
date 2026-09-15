@@ -440,6 +440,18 @@ def test_reset_feature_clears_state():
     assert sm.cycle_count == 0
 
 
+def test_reset_feature_clears_review_finding_without_marking_it_fixed():
+    sm = TDDStateMachine()
+    sm.init_feature(
+        "feature",
+        "tests/test_x.py",
+        [],
+        review_finding={"id": "missing-lock", "scope": "diff:uncommitted"},
+    )
+    sm.reset_feature()
+    assert sm.review_finding is None
+
+
 def test_drill_down_only_allowed_in_implement():
     sm = make_sm()
     with pytest.raises(PhaseError):
@@ -707,6 +719,17 @@ def test_from_dict_ignores_a_malformed_review_finding_instead_of_crashing():
     sm.init_feature("feature", "tests/test_x.py", [])
     data = sm.to_dict()
     data["reviewFinding"] = {"id": "missing-lock"}  # missing "scope"
+
+    restored = TDDStateMachine.from_dict(data)
+
+    assert restored.review_finding is None
+
+
+def test_from_dict_ignores_a_review_finding_with_wrong_typed_fields():
+    sm = TDDStateMachine()
+    sm.init_feature("feature", "tests/test_x.py", [])
+    data = sm.to_dict()
+    data["reviewFinding"] = {"id": 123, "scope": "diff:uncommitted"}
 
     restored = TDDStateMachine.from_dict(data)
 

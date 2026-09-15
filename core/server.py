@@ -850,10 +850,29 @@ class TDDServer:
                         return self._error(plan_error)
 
                     review_finding_id = arguments.get("reviewFindingId")
+                    review_finding_scope = (
+                        arguments["reviewFindingScope"]
+                        if review_finding_id
+                        else None
+                    )
+                    if review_finding_id:
+                        with self._review_findings_lock():
+                            findings = _list_review_findings(
+                                review_finding_scope,
+                                path=self.review_findings_path,
+                            )
+                        if not any(
+                            finding.get("id") == review_finding_id
+                            for finding in findings
+                        ):
+                            return self._error(
+                                f"Review finding '{review_finding_id}' does not "
+                                f"exist in scope '{review_finding_scope}'."
+                            )
                     review_finding = (
                         {
                             "id": review_finding_id,
-                            "scope": arguments["reviewFindingScope"],
+                            "scope": review_finding_scope,
                         }
                         if review_finding_id
                         else None

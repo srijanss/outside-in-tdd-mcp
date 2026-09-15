@@ -600,5 +600,50 @@
     "targetFiles": [],
     "recordedAt": "2026-09-15T00:32:07.945014+00:00",
     "cyclesCompleted": 1
+  },
+  {
+    "featureName": "Reject unknown linked review finding IDs",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/test_server.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-15T01:31:40.274839+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "Cover missing review finding scope argument",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/test_server.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-15T01:34:56.732656+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "Cover reset_feature clearing review_finding",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/test_state_machine.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-15T02:01:31.415542+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "Cover from_dict rejecting wrong-typed review finding fields",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/test_state_machine.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-15T02:02:40.755066+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "Cover completing a feature whose linked review finding was removed meanwhile",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/test_server.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-15T02:04:41.600130+00:00",
+    "cyclesCompleted": 1
   }
 ]
