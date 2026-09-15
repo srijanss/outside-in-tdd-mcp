@@ -4,7 +4,10 @@ description: Start a new Outside-In TDD feature (skeleton-first) via the outside
 ---
 
 You have been given a feature name and a test target (the caller resolves
-these before invoking this skill — see below if either is missing).
+these before invoking this skill — see below if either is missing). You may
+also have been given a `reviewFindingId`/`reviewFindingScope` pair — that
+means this feature is the fix for a finding handed off by
+`tdd-review`/`diff-review`.
 
 Before calling `init_feature`, resolve both — don't guess silently:
 
@@ -33,7 +36,9 @@ Before calling `init_feature`, resolve both — don't guess silently:
 Once the feature name and test file are settled and `targetFiles` inferred,
 using the outside-in-tdd MCP server's tools (not other file-editing tools in
 place of them), start the feature with
-`init_feature(featureName, testFile, targetFiles)`. `targetFiles` is the
+`init_feature(featureName, testFile, targetFiles)` — also passing
+`reviewFindingId`/`reviewFindingScope` if given (see above), so
+`complete_feature` can auto-close that finding later. `targetFiles` is the
 implementation file(s) the base-level cycle will write directly —
 `write_code` will be blocked for anything outside that set (see IMPLEMENT
 below).
@@ -85,8 +90,11 @@ allowed.
 
 ## After the feature completes
 
-Once `complete_feature()` succeeds, briefly summarize what was built, then
-read `.agents/docs/tdd-review-checklist.md` and follow it, scoped to the
-files/tests touched this cycle (not the whole repo). A chosen finding
-becomes the next `tdd-start-skeleton` feature (test target resolved as
-above).
+Once `complete_feature()` succeeds, briefly summarize what was built (if
+`reviewFindingId` was set, `complete_feature`'s response already reflects
+that finding being auto-removed from the shared store — no extra step
+needed), then read `.agents/docs/tdd-review-checklist.md` and follow it,
+scoped to the files/tests touched this cycle (not the whole repo). A chosen
+finding becomes the next `tdd-start-skeleton` feature (test target resolved
+as above, plus that finding's `id`/scope per the checklist's handoff
+step).

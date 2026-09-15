@@ -35,7 +35,8 @@ def record_review_finding(
     findings_by_scope = _load(path)
     findings = findings_by_scope.setdefault(scope, [])
     findings[:] = [existing for existing in findings if existing["id"] != finding["id"]]
-    findings.append(finding)
+    if finding.get("status") != "fixed":
+        findings.append(finding)
 
     review_path = Path(path)
     fd, tmp_path = tempfile.mkstemp(

@@ -572,11 +572,33 @@
   },
   {
     "featureName": "review-finding-auto-close-on-complete",
-    "description": "Right now a fixed review finding only gets marked status:fixed in .tdd-review-findings.json if the agent remembers the manual record_review_finding step documented in .agents/docs/tdd-review-checklist.md — nothing enforces it. Let init_feature optionally accept a reviewFindingId (plus the scope it came from), stash it on the active feature's state, and have complete_feature auto-call record_review_finding(scope, {id: reviewFindingId, status: 'fixed', ...}) when that's set, so closing the loop is guaranteed instead of best-effort.",
+    "description": "Right now a fixed review finding only gets marked status:fixed in .tdd-review-findings.json if the agent remembers the manual record_review_finding step documented in .agents/docs/tdd-review-checklist.md \u2014 nothing enforces it. Let init_feature optionally accept a reviewFindingId (plus the scope it came from), stash it on the active feature's state, and have complete_feature auto-call record_review_finding(scope, {id: reviewFindingId, status: 'fixed', ...}) when that's set, so closing the loop is guaranteed instead of best-effort.",
     "dependsOn": [
       "cross-agent-review-findings-handoff",
       "review-findings-store-hardening"
     ],
-    "status": "pending"
+    "status": "completed",
+    "testFile": "tests/test_server.py -k test_completing_a_feature_linked_to_a_review_finding_marks_it_fixed",
+    "targetFiles": [],
+    "recordedAt": "2026-09-15T00:11:20.322777+00:00",
+    "cyclesCompleted": 2
+  },
+  {
+    "featureName": "review-finding-lost-on-state-persistence",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/test_state_machine.py -k test_from_dict_round_trip_preserves_review_finding",
+    "targetFiles": [],
+    "recordedAt": "2026-09-15T00:28:56.820160+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "prune-fixed-review-findings",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/test_review_finding_store.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-15T00:32:07.945014+00:00",
+    "cyclesCompleted": 1
   }
 ]

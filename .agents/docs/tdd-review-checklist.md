@@ -68,6 +68,12 @@ continued by another — do this even if the user declines to act on any
 finding right now.
 
 Then ask which finding, if any, should become the next TDD feature or
-bugfix — that's the feature name (and test target) for a new cycle. If one
-is picked, update its persisted `status` to `fixed` once that cycle
-completes (via `record_review_finding` again with the same `id`).
+bugfix — that's the feature name (and test target) for a new cycle. When
+handing off to `tdd-start`/`tdd-start-verify`/`tdd-start-skeleton`, also
+pass along that finding's `id` and this review's `scope` — the skill
+passes them through as `reviewFindingId`/`reviewFindingScope` on
+`init_feature`, and `complete_feature` then automatically records it as
+`fixed` (which removes it from the store) once the cycle finishes. No
+manual `record_review_finding` call needed in that case — only fall back
+to calling it by hand if the fix wasn't done through a linked
+`tdd-start`-family cycle.

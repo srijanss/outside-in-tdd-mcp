@@ -57,6 +57,50 @@ def test_review_finding_tools_route_through_the_project_scoped_store(tmp_path):
     }
 
 
+def test_completing_a_feature_linked_to_a_review_finding_marks_it_fixed(tmp_path):
+    fake_adapter = tmp_path / "fake_adapter.py"
+    fake_adapter.write_text(
+        '''#!/usr/bin/env python3
+import json
+print(json.dumps({"passed": 1, "failed": 0, "failures": []}))
+'''
+    )
+    fake_adapter.chmod(0o755)
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
+    server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
+
+    call(
+        server,
+        "record_review_finding",
+        scope="diff:uncommitted",
+        finding={
+            "id": "missing-lock",
+            "status": "confirmed",
+            "summary": "Concurrent writes can lose findings",
+        },
+    )
+
+    call(
+        server,
+        "init_feature",
+        featureName="f",
+        testFile="t.py",
+        targetFiles=[],
+        reviewFindingId="missing-lock",
+        reviewFindingScope="diff:uncommitted",
+    )
+    call(server, "write_test", testName="t")
+    call(server, "run_tests")  # passed=1, no impl yet -> verify_green (skip)
+    call(server, "verify")  # -> refactor
+    call(server, "refactor_code", description="tidy up")
+    call(server, "run_tests")  # passed=1 -> red, cycle 1
+    call(server, "complete_feature")
+
+    findings = call(server, "list_review_findings", scope="diff:uncommitted")
+    assert findings["findings"] == []
+
+
 def test_unknown_tool_returns_error_without_raising(tmp_path):
     server = make_server(tmp_path)
     payload = call(server, "not_a_real_tool")

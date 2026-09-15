@@ -44,6 +44,23 @@ def test_a_failed_write_does_not_corrupt_the_existing_file(tmp_path, monkeypatch
     assert path.read_text() == original_content
 
 
+def test_recording_a_finding_as_fixed_removes_it_from_the_store(tmp_path):
+    path = str(tmp_path / ".tdd-review-findings.json")
+    record_review_finding(
+        "feature:checkout",
+        {"id": "missing-lock", "status": "candidate"},
+        path=path,
+    )
+
+    record_review_finding(
+        "feature:checkout",
+        {"id": "missing-lock", "status": "fixed"},
+        path=path,
+    )
+
+    assert list_review_findings("feature:checkout", path=path) == []
+
+
 def test_recording_the_same_finding_id_replaces_it_within_a_shared_scope(tmp_path):
     path = str(tmp_path / ".tdd-review-findings.json")
 

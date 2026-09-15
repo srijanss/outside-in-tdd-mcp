@@ -81,6 +81,22 @@ TOOLS = [
                         "target files."
                     ),
                 },
+                "reviewFindingId": {
+                    "type": "string",
+                    "description": (
+                        "Set when this feature is the fix for a persisted "
+                        "review finding (see record_review_finding) — its "
+                        "'id'. Requires reviewFindingScope too. On "
+                        "complete_feature, that finding is automatically "
+                        "re-recorded with status 'fixed'."
+                    ),
+                },
+                "reviewFindingScope": {
+                    "type": "string",
+                    "description": (
+                        "The scope the reviewFindingId was recorded under."
+                    ),
+                },
             },
             "required": ["featureName", "testFile", "targetFiles"],
         },
@@ -293,7 +309,12 @@ TOOLS = [
     ),
     types.Tool(
         name="record_review_finding",
-        description="Persist a review finding under a shared feature or diff scope.",
+        description=(
+            "Persist a review finding under a shared feature or diff "
+            "scope. A finding recorded with status 'fixed' is removed "
+            "from the store rather than kept — the store only ever holds "
+            "live (unaddressed) findings."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
@@ -554,6 +575,23 @@ class TDDServer:
     def _review_findings_lock(self):
         return self._file_lock(self.review_findings_path)
 
+    def _mark_review_finding_fixed(self, review_finding: dict[str, Any]) -> None:
+        with self._review_findings_lock():
+            existing = {
+                finding["id"]: finding
+                for finding in _list_review_findings(
+                    review_finding["scope"], path=self.review_findings_path
+                )
+            }
+            fixed = {
+                **existing.get(review_finding["id"], {}),
+                "id": review_finding["id"],
+                "status": "fixed",
+            }
+            _record_review_finding(
+                review_finding["scope"], fixed, path=self.review_findings_path
+            )
+
     def _state_lock(self):
         return self._file_lock(self.state_path)
 
@@ -811,10 +849,20 @@ class TDDServer:
                     if plan_error:
                         return self._error(plan_error)
 
+                    review_finding_id = arguments.get("reviewFindingId")
+                    review_finding = (
+                        {
+                            "id": review_finding_id,
+                            "scope": arguments["reviewFindingScope"],
+                        }
+                        if review_finding_id
+                        else None
+                    )
                     self.sm.init_feature(
                         feature_name,
                         arguments["testFile"],
                         arguments["targetFiles"],
+                        review_finding=review_finding,
                     )
                     self._log_event(
                         "init_feature", targetFiles=arguments["targetFiles"]
@@ -937,6 +985,8 @@ class TDDServer:
                     target_files=target_files,
                     cycles_completed=summary["cyclesCompleted"],
                 )
+                if summary.get("reviewFinding"):
+                    self._mark_review_finding_fixed(summary["reviewFinding"])
                 return self._text(
                     {
                         "ok": True,

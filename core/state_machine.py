@@ -143,6 +143,7 @@ class TDDStateMachine:
     def __init__(self) -> None:
         self.feature_name: str | None = None
         self.stack: list[_Level] = []
+        self.review_finding: dict[str, Any] | None = None
 
     # -- current (top-of-stack) level, exposed as plain attributes -----
 
@@ -177,7 +178,11 @@ class TDDStateMachine:
     # -- lifecycle -----------------------------------------------------
 
     def init_feature(
-        self, name: str, test_file: str, target_files: list[str]
+        self,
+        name: str,
+        test_file: str,
+        target_files: list[str],
+        review_finding: dict[str, Any] | None = None,
     ) -> None:
         if self.stack:
             raise PhaseError(
@@ -197,10 +202,12 @@ class TDDStateMachine:
             )
         self.feature_name = name
         self.stack = [_Level(test_file=test_file, target_files=validated)]
+        self.review_finding = review_finding
 
     def reset_feature(self) -> None:
         self.feature_name = None
         self.stack = []
+        self.review_finding = None
 
     def complete_feature(self) -> dict[str, Any]:
         """Mark the current feature done. Requires being back at the base
@@ -231,6 +238,7 @@ class TDDStateMachine:
             "featureName": self.feature_name,
             "testFile": base.test_file,
             "cyclesCompleted": base.cycle_count,
+            "reviewFinding": self.review_finding,
         }
         self.reset_feature()
         return summary
@@ -459,6 +467,7 @@ class TDDStateMachine:
                 }
                 for lvl in self.stack
             ],
+            "reviewFinding": self.review_finding,
         }
 
     @classmethod
@@ -530,6 +539,13 @@ class TDDStateMachine:
             return cls()
         sm.feature_name = feature_name
         sm.stack = levels
+        review_finding = data.get("reviewFinding")
+        if (
+            isinstance(review_finding, dict)
+            and isinstance(review_finding.get("id"), str)
+            and isinstance(review_finding.get("scope"), str)
+        ):
+            sm.review_finding = review_finding
         return sm
 
     def available_tools(self) -> tuple:

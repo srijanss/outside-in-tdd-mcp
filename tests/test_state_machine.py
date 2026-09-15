@@ -586,10 +586,29 @@ def test_complete_feature_allowed_after_full_cycle_and_clears_state():
         "featureName": "feature",
         "testFile": "tests/test_x.py",
         "cyclesCompleted": 1,
+        "reviewFinding": None,
     }
     assert sm.phase is None
     assert sm.feature_name is None
     assert sm.cycle_count == 0
+
+
+def test_complete_feature_returns_the_linked_review_finding():
+    sm = TDDStateMachine()
+    sm.init_feature(
+        "feature",
+        "tests/test_x.py",
+        [],
+        review_finding={"id": "missing-lock", "scope": "diff:uncommitted"},
+    )
+    to_red_after_one_cycle(sm)
+
+    summary = sm.complete_feature()
+
+    assert summary["reviewFinding"] == {
+        "id": "missing-lock",
+        "scope": "diff:uncommitted",
+    }
 
 
 def test_available_tools_per_phase():
@@ -664,6 +683,34 @@ def test_stub_only_hint_clears_once_a_later_run_reports_a_real_failure():
         failures=[{"name": "t", "message": "AssertionError: expected True"}],
     )
     assert sm.last_error is None
+
+
+def test_from_dict_round_trip_preserves_review_finding():
+    sm = TDDStateMachine()
+    sm.init_feature(
+        "feature",
+        "tests/test_x.py",
+        [],
+        review_finding={"id": "missing-lock", "scope": "diff:uncommitted"},
+    )
+
+    restored = TDDStateMachine.from_dict(sm.to_dict())
+
+    assert restored.review_finding == {
+        "id": "missing-lock",
+        "scope": "diff:uncommitted",
+    }
+
+
+def test_from_dict_ignores_a_malformed_review_finding_instead_of_crashing():
+    sm = TDDStateMachine()
+    sm.init_feature("feature", "tests/test_x.py", [])
+    data = sm.to_dict()
+    data["reviewFinding"] = {"id": "missing-lock"}  # missing "scope"
+
+    restored = TDDStateMachine.from_dict(data)
+
+    assert restored.review_finding is None
 
 
 def test_from_dict_preserves_valid_levels_up_to_first_malformed_entry():
