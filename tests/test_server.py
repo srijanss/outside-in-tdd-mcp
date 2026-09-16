@@ -2209,3 +2209,95 @@ def test_save_state_swallows_oserror_when_state_path_unwritable(tmp_path):
 
     assert payload == {"ok": True}
     assert not (tmp_path / "no-such-dir").exists()
+
+
+def test_remove_completed_features_prunes_ledger_and_dependencies(tmp_path):
+    server = make_server(tmp_path)
+    (tmp_path / ".tdd-features.json").write_text(
+        json.dumps(
+            [
+                {"featureName": "done", "status": "completed", "dependsOn": []},
+                {
+                    "featureName": "next",
+                    "status": "pending",
+                    "dependsOn": ["done", "other"],
+                },
+                {"featureName": "other", "status": "pending", "dependsOn": []},
+            ]
+        )
+    )
+
+    payload = call(server, "remove_completed_features")
+
+    assert payload["ok"] is True
+    assert payload["removed"] == ["done"]
+    assert [entry["featureName"] for entry in payload["remaining"]] == [
+        "next",
+        "other",
+    ]
+    assert payload["remaining"][0]["dependsOn"] == ["other"]
+    assert json.loads((tmp_path / ".tdd-features.json").read_text()) == payload[
+        "remaining"
+    ]
+
+
+def test_remove_completed_features_is_noop_for_empty_ledger(tmp_path):
+    server = make_server(tmp_path)
+
+    assert call(server, "remove_completed_features") == {
+        "ok": True,
+        "removed": [],
+        "remaining": [],
+    }
+
+
+def test_remove_completed_features_removes_multiple_completed_entries(tmp_path):
+    server = make_server(tmp_path)
+    (tmp_path / ".tdd-features.json").write_text(
+        json.dumps(
+            [
+                {"featureName": "done-a", "status": "completed", "dependsOn": []},
+                {"featureName": "done-b", "status": "completed", "dependsOn": []},
+                {
+                    "featureName": "next",
+                    "status": "pending",
+                    "dependsOn": ["done-a", "done-b", "other"],
+                },
+                {"featureName": "other", "status": "pending", "dependsOn": []},
+            ]
+        )
+    )
+
+    payload = call(server, "remove_completed_features")
+
+    assert payload["ok"] is True
+    assert payload["removed"] == ["done-a", "done-b"]
+    assert [entry["featureName"] for entry in payload["remaining"]] == [
+        "next",
+        "other",
+    ]
+    assert payload["remaining"][0]["dependsOn"] == ["other"]
+    assert json.loads((tmp_path / ".tdd-features.json").read_text()) == payload[
+        "remaining"
+    ]
+
+
+def test_remove_completed_features_preserves_malformed_non_dict_entries(tmp_path):
+    server = make_server(tmp_path)
+    (tmp_path / ".tdd-features.json").write_text(
+        json.dumps(
+            [
+                {"featureName": "done", "status": "completed", "dependsOn": []},
+                "a stray non-dict entry",
+            ]
+        )
+    )
+
+    payload = call(server, "remove_completed_features")
+
+    assert payload["ok"] is True
+    assert payload["removed"] == ["done"]
+    assert payload["remaining"] == ["a stray non-dict entry"]
+    assert json.loads((tmp_path / ".tdd-features.json").read_text()) == payload[
+        "remaining"
+    ]

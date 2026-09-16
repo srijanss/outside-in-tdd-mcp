@@ -224,6 +224,16 @@ TOOLS = [
         inputSchema={"type": "object", "properties": {}},
     ),
     types.Tool(
+        name="remove_completed_features",
+        description=(
+            "Remove all completed entries from .tdd-features.json. Also "
+            "removes those names from dependsOn on retained entries so "
+            "pruning does not block pending features. Does not affect the "
+            "active TDD state."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    types.Tool(
         name="approve_plan",
         description=(
             "Human-only checkpoint (no auto-approval, mirroring verify()) "
@@ -943,6 +953,42 @@ class TDDServer:
 
             if name == "list_features":
                 return self._text({"features": self._load_features()})
+
+            if name == "remove_completed_features":
+                with self._features_lock():
+                    features = self._load_features()
+                    removed = {
+                        entry.get("featureName")
+                        for entry in features
+                        if isinstance(entry, dict)
+                        and entry.get("status") == "completed"
+                        and isinstance(entry.get("featureName"), str)
+                    }
+                    retained = []
+                    for entry in features:
+                        if not isinstance(entry, dict):
+                            retained.append(entry)
+                            continue
+                        if entry.get("featureName") in removed:
+                            continue
+                        if isinstance(entry.get("dependsOn"), list):
+                            entry["dependsOn"] = [
+                                dependency
+                                for dependency in entry["dependsOn"]
+                                if dependency not in removed
+                            ]
+                        retained.append(entry)
+                    self._save_features(retained)
+                self._log_event(
+                    "remove_completed_features", removed=sorted(removed)
+                )
+                return self._text(
+                    {
+                        "ok": True,
+                        "removed": sorted(removed),
+                        "remaining": retained,
+                    }
+                )
 
             if name == "approve_plan":
                 feature_names = arguments.get("featureNames")

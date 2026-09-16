@@ -645,5 +645,32 @@
     "targetFiles": [],
     "recordedAt": "2026-09-15T02:04:41.600130+00:00",
     "cyclesCompleted": 1
+  },
+  {
+    "featureName": "prune completed features from ledger",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/test_server.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-16T05:34:01.495228+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "preserve non-dict ledger entries when pruning completed features",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/test_server.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-16T05:49:21.359255+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "cover removing multiple completed features in one prune call",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/test_server.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-16T05:50:43.347122+00:00",
+    "cyclesCompleted": 1
   }
 ]
