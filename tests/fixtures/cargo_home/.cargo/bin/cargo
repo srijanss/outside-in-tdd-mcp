@@ -1,0 +1,6 @@
+#!/bin/sh
+
+printf '%s\n' 'running 1 test'
+printf '%s\n' 'test tests::passing ... ok'
+printf '%s\n' ''
+printf '%s\n' 'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s'

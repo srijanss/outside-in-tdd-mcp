@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -8,15 +9,21 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ADAPTER = PROJECT_ROOT / "adapters" / "cargo-adapter" / "run.sh"
 FIXTURE_PROJECT = PROJECT_ROOT / "tests" / "fixtures" / "cargo_project"
 FAKE_CARGO_BIN = PROJECT_ROOT / "tests" / "fixtures" / "cargo_bin"
+FAKE_CARGO_HOME = PROJECT_ROOT / "tests" / "fixtures" / "cargo_home"
 
 
-def run_adapter(test_target: str) -> dict:
-    environment = {**os.environ, "PATH": f"{FAKE_CARGO_BIN}{os.pathsep}{os.environ.get('PATH', '')}"}
+def run_adapter(test_target: str, environment: dict | None = None) -> dict:
+    adapter_environment = {
+        **os.environ,
+        "PATH": f"{FAKE_CARGO_BIN}{os.pathsep}{os.environ.get('PATH', '')}",
+    }
+    if environment is not None:
+        adapter_environment.update(environment)
     proc = subprocess.run(
-        [str(ADAPTER), test_target, str(FIXTURE_PROJECT)],
+        [sys.executable, str(ADAPTER), test_target, str(FIXTURE_PROJECT)],
         capture_output=True,
         text=True,
-        env=environment,
+        env=adapter_environment,
     )
     return json.loads(proc.stdout)
 
@@ -38,3 +45,13 @@ def test_adapter_reports_failing_cargo_tests():
     assert len(result["failures"]) == 1
     assert result["failures"][0]["name"] == "tests::failing"
     assert "assertion" in result["failures"][0]["message"]
+
+
+def test_adapter_finds_cargo_in_the_standard_rust_home_when_path_omits_it():
+    result = run_adapter(
+        "passing",
+        {"PATH": "", "HOME": str(FAKE_CARGO_HOME)},
+    )
+
+    assert result["passed"] == 1
+    assert result["failed"] == 0

@@ -7,17 +7,32 @@ failures, raw_output}. ``test_target`` uses shell-word parsing so callers can
 pass Cargo flags and a test-name filter just as they would to ``cargo test``.
 """
 import json
+import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 
 SUMMARY_RE = re.compile(
     r"test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed;",
 )
 FAILED_TEST_RE = re.compile(r"^---- (.+) stdout ----$", re.MULTILINE)
+
+
+def _cargo_command() -> str:
+    """Find Cargo even when an MCP client starts with a minimal PATH."""
+    configured = os.environ.get("CARGO")
+    if configured:
+        return configured
+    discovered = shutil.which("cargo")
+    if discovered:
+        return discovered
+    standard_install = Path.home() / ".cargo" / "bin" / "cargo"
+    return str(standard_install) if standard_install.is_file() else "cargo"
 
 
 def _failure_messages(raw_output: str) -> list[dict[str, str]]:
@@ -41,7 +56,7 @@ def main() -> int:
     start = time.monotonic()
     try:
         proc = subprocess.run(
-            ["cargo", "test", *shlex.split(test_target)],
+            [_cargo_command(), "test", *shlex.split(test_target)],
             cwd=project_root,
             capture_output=True,
             text=True,
