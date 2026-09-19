@@ -20,6 +20,10 @@ def _run(adapter_dir_name: str) -> int:
     return subprocess.call([str(script), *sys.argv[1:]])
 
 
+def cargo_adapter_main() -> None:
+    sys.exit(_run("cargo-adapter"))
+
+
 def pytest_adapter_main() -> None:
     sys.exit(_run("pytest-adapter"))
 

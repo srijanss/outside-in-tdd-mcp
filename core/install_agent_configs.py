@@ -10,6 +10,7 @@ editable install even if the checkout moves. Only works for an editable
 install: a real (non-editable) install doesn't ship these dirs as package
 data, since they live outside the `core` package.
 """
+import json
 import shutil
 import sys
 from pathlib import Path
@@ -49,9 +50,21 @@ def main() -> None:
         else:
             print(f"Copying {name} -> {dst}")
             shutil.copyfile(src, dst)
+            if name == ".tdd-config.json" and (target / "Cargo.toml").exists():
+                dst.write_text(
+                    json.dumps(
+                        {
+                            "adapter": "cargo-adapter",
+                            "adapterPath": "cargo-adapter-runner",
+                            "defaultTestDir": "--workspace",
+                        },
+                        indent=2,
+                    )
+                    + "\n"
+                )
 
     print()
     print(f"Done. Next steps in {target}:")
-    print(f"  1. If this project isn't pytest-based, update {target / '.tdd-config.json'}")
+    print(f"  1. If this project isn't pytest- or Cargo-based, update {target / '.tdd-config.json'}")
     print("     (adapter/adapterPath/defaultTestDir — e.g. vitest-adapter-runner for JS/TS).")
     print("  2. Run '/mcp' in Claude Code (or open Codex) here to confirm outside-in-tdd is registered.")

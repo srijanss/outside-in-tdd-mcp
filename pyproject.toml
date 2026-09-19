@@ -15,6 +15,7 @@ dev = ["pytest", "pytest-json-report"]
 [project.scripts]
 outside-in-tdd-mcp = "core.server:run"
 outside-in-tdd-mcp-install = "core.install_agent_configs:main"
+cargo-adapter-runner = "core.adapter_entrypoints:cargo_adapter_main"
 pytest-adapter-runner = "core.adapter_entrypoints:pytest_adapter_main"
 vitest-adapter-runner = "core.adapter_entrypoints:vitest_adapter_main"
 

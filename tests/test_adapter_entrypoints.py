@@ -43,7 +43,25 @@ def test_vitest_adapter_main_execs_the_vitest_adapter_script(monkeypatch):
     assert exc_info.value.code == 1
 
 
+def test_cargo_adapter_main_execs_the_cargo_adapter_script(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["cargo-adapter-runner", "filter", "/some/project"])
+
+    with patch("core.adapter_entrypoints.subprocess.call", return_value=0) as mock_call:
+        with pytest.raises(SystemExit) as exc_info:
+            adapter_entrypoints.cargo_adapter_main()
+
+    mock_call.assert_called_once_with(
+        [
+            str(adapter_entrypoints.ADAPTERS_DIR / "cargo-adapter" / "run.sh"),
+            "filter",
+            "/some/project",
+        ]
+    )
+    assert exc_info.value.code == 0
+
+
 def test_adapters_dir_resolves_to_the_real_adapters_directory():
     assert adapter_entrypoints.ADAPTERS_DIR.name == "adapters"
     assert (adapter_entrypoints.ADAPTERS_DIR / "pytest-adapter" / "run.sh").exists()
     assert (adapter_entrypoints.ADAPTERS_DIR / "vitest-adapter" / "run.sh").exists()
+    assert (adapter_entrypoints.ADAPTERS_DIR / "cargo-adapter" / "run.sh").exists()
