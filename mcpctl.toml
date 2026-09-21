@@ -1,8 +1,48 @@
 name = "outside-in-tdd-mcp"
-version = "0.1.1"
+version = "0.1.2"
 [runtime]
 type = "python"
 python = ">=3.10"
 [install]
 strategy = "uv"
 entrypoint = "outside-in-tdd-mcp"
+
+# What `mcpctl init outside-in-tdd-mcp [project]` copies into a consumer
+# project. This repo's own .mcp.json and .codex/config.toml run the server
+# from the checkout via `uv run`, so consumers get the mcpctl-based
+# .example versions instead, and the uv ones are excluded from the dir copy.
+[scaffold]
+dirs = [".agents", ".claude", ".codex"]
+exclude = [
+  ".codex/config.toml",
+  ".codex/config.toml.example",
+  ".claude/settings.local.json",
+  ".claude/scheduled_tasks.lock",
+  ".claude/worktrees",
+]
+
+[[scaffold.files]]
+from = ".mcp.json.example"
+to = ".mcp.json"
+
+[[scaffold.files]]
+from = ".codex/config.toml.example"
+to = ".codex/config.toml"
+
+[[scaffold.files]]
+from = ".tdd-config.json"
+to = ".tdd-config.json"
+
+[[scaffold.hints]]
+message = ".tdd-config.json defaults to pytest (pytest-adapter-runner). pytest and pytest-json-report must be installed in the project's own .venv."
+
+[[scaffold.hints]]
+when_exists = "Cargo.toml"
+message = "Rust project detected: in .tdd-config.json set adapter to \"cargo-adapter\", adapterPath to \"cargo-adapter-runner\" and defaultTestDir to \"--workspace\"."
+
+[[scaffold.hints]]
+when_exists = "package.json"
+message = "JS/TS project detected: in .tdd-config.json set adapter to \"vitest-adapter\" and adapterPath to \"vitest-adapter-runner\" (vitest must be a devDependency; node/npx on PATH)."
+
+[[scaffold.hints]]
+message = "Restart your client here and run /mcp (Claude Code) to confirm outside-in-tdd is connected."

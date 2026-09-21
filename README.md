@@ -197,7 +197,7 @@ verified before clearing and what the response tells Claude happened.
   import ...`), which only resolve if `core` is either installed or the repo
   root is on `sys.path` — a bare `python3 core/server.py` doesn't give you
   that. Packaging it properly means the same install works locally
-  (`pip install -e .` then `outside-in-tdd-mcp`) or inside Docker.
+  (`uv sync` then `uv run outside-in-tdd-mcp`, or `mcpctl run`) or inside Docker.
 - `Dockerfile` is "Option A" from `SPEC.md`: one self-contained image with
   the language runtime baked in (pytest here), simplest to start with. It
   installs the `core` package via `pyproject.toml` and sets
@@ -217,119 +217,117 @@ Dockerfile           bakes core + pytest adapter + pytest itself into one image
 ## Running the unit tests
 
 ```bash
-pip install -e .[dev]  # or: pip install pytest
-pytest tests/
+uv sync --extra dev
+uv run pytest tests/
 ```
 
 ## Working in a git worktree
 
-Both `.mcp.json` (Claude Code) and `.codex/config.toml` (Codex) resolve
-paths from their own file location, so a `git worktree add` checkout works
-unmodified — it just needs its own `.venv`, since that's gitignored. See
+This repo's own `.mcp.json` and `.codex/config.toml` run
+`uv run --quiet outside-in-tdd-mcp` from the checkout, so a `git worktree
+add` checkout runs its own code unmodified (each worktree needs `uv` on
+`PATH`; `.agents/scripts/setup-worktree.sh` provisions its `.venv`). See
 [`.agents/docs/worktree-workflow.md`](.agents/docs/worktree-workflow.md).
 
-## Installing and running locally (no Docker)
+## Running it locally from this repo
 
 ```bash
-pip install -e .
-outside-in-tdd-mcp   # starts the MCP server on stdio
+uv sync --extra dev
+uv run outside-in-tdd-mcp   # starts the MCP server on stdio
+uv run pytest tests/
 ```
 
-`.tdd-config.json`'s `adapterPath` may be relative here — it resolves
-against `TDD_PROJECT_ROOT` (the env var passed to the server), which is
-only meaningful when the adapter script actually lives inside the project
-being tested, as it does for this repo's own `.tdd-config.json`
-(self-hosted: this repo is both the tool and a project developed with it).
-This is unrelated to the Docker consumer flow below, where `adapterPath`
-must stay absolute (`/adapters/...`, a container-root path baked into the
-image) — a relative path there would incorrectly resolve against the
-*mounted* project instead.
+`TDD_PROJECT_ROOT` defaults to the current directory, so run it (or let your
+client start it) from the project you are developing. `.tdd-config.json`'s
+`adapterPath` may be relative here — it resolves against the project root,
+which suits this repo's own self-hosted `.tdd-config.json`.
 
-## Using in a consumer project
+## Using in a consumer project (mcpctl)
 
-There are two ways to run the server against a project other than this
-one: **Docker** (a prebuilt image, nothing installed on the host) or
-**no Docker** (`pip install -e .` from this repo, console scripts on
-`PATH`). Pick one — the two are not mixed within a single project.
+Other projects run a single installed copy of this server through
+[mcpctl](../mcp-cli), which gives it its own isolated Python runtime
+(nothing goes into your pyenv, pipx or the project's `.venv`).
 
-### Docker workflow
-
-1. Build the image once, from this repo:
+1. **Install mcpctl** (once) and check it: `mcpctl --version`. Python MCPs
+   need [`uv`](https://docs.astral.sh/uv/) on `PATH`.
+2. **Install this server** (once, and again after each release):
    ```bash
-   docker build -t outside-in-tdd-mcp:pytest .
+   mcpctl install /path/to/outside-in-tdd-mcp
+   mcpctl doctor
    ```
-2. In your target project's root, copy `.tdd-config.json.example` (from
-   this repo) to `.tdd-config.json`:
-   ```json
-   {
-     "adapter": "pytest-adapter",
-     "adapterPath": "/adapters/pytest-adapter/run.sh",
-     "defaultTestDir": "tests/"
-   }
-   ```
-   `adapterPath` here is a **container-root path** — the adapter script
-   lives inside the image, not in your project — so it must stay absolute
-   and must not be edited to point at anything on the host.
-3. Copy `.mcp.json.example` (from this repo) to `.mcp.json`:
-   ```json
-   {
-     "mcpServers": {
-       "outside-in-tdd": {
-         "command": "docker",
-         "args": ["run", "-i", "--rm", "-v", "${CLAUDE_PROJECT_DIR:-.}:/app", "-w", "/app", "outside-in-tdd-mcp:pytest"]
-       }
-     }
-   }
-   ```
-   `-v ${CLAUDE_PROJECT_DIR:-.}:/app` is what lets the containerized adapter
-   reach the real project's test files and source, mounted at `/app`
-   (matching `adapterPath`'s working directory above).
-4. Open the project in Claude Code / claudecode.nvim — `/mcp` should show
-   `outside-in-tdd` as connected, with all 12 tools listed. Claude then
-   calls `init_feature` to start a feature, and the phase gating takes
-   over from there.
-
-Note: `outside-in-tdd-mcp-install` (below) does **not** produce this
-Docker config — it always scaffolds the non-Docker setup. For Docker, copy
-the two `.example` files by hand as shown above.
-
-### Non-Docker workflow
-
-1. From this repo, install it in editable mode so its console scripts
-   land on `PATH`:
-   ```bash
-   pip install -e .
-   ```
-   This installs `outside-in-tdd-mcp` (the server itself) plus
-   `pytest-adapter-runner` and `vitest-adapter-runner` (adapters as plain
-   console scripts — no absolute paths, no container).
-2. Scaffold your target project. Run this from inside it (not from this
-   repo):
+3. **Scaffold the project.** Run this from inside it:
    ```bash
    cd /path/to/other/project
-   outside-in-tdd-mcp-install
+   mcpctl init outside-in-tdd-mcp
    ```
-   This copies `.agents/`, `.claude/`, `.codex/`, `.mcp.json`, and
-   `.tdd-config.json` from this repo's own checkout into the target
-   project (an existing config already there is never overwritten). Only
-   works against an editable install (`pip install -e .`) — a non-editable
-   install doesn't ship `.agents/`/`.claude/`/`.codex/` as package data.
-3. If the target project isn't pytest-based, edit the `.tdd-config.json`
-   it just copied — swap `adapter`/`adapterPath` (e.g.
-   `vitest-adapter-runner` for JS/TS) and `defaultTestDir`:
-   ```json
-   {
-     "adapter": "pytest-adapter",
-     "adapterPath": "pytest-adapter-runner",
-     "defaultTestDir": "tests/"
-   }
-   ```
-   A bare `adapterPath` (no `/` in it) is resolved via a `PATH` lookup at
-   config-load time, so this works regardless of where this repo is
-   checked out.
-4. Open the project in Claude Code / claudecode.nvim — `/mcp` should show
+   This copies, from the *installed* package (not from your checkout),
+   `.agents/`, `.claude/`, `.codex/` (with an mcpctl-based `config.toml`),
+   `.mcp.json` (`mcpctl run outside-in-tdd-mcp`) and `.tdd-config.json`.
+   Files that already exist in the project are skipped, never overwritten,
+   so re-running it is safe. What gets copied is declared in the
+   `[scaffold]` section of this repo's `mcpctl.toml`.
+4. **Pick the adapter for the project's language.** `.tdd-config.json`
+   defaults to pytest. `mcpctl init` prints a hint when it sees a
+   `Cargo.toml` or `package.json`:
+
+   | Project | `adapter` | `adapterPath` | `defaultTestDir` |
+   |---|---|---|---|
+   | Python | `pytest-adapter` | `pytest-adapter-runner` | `tests/` |
+   | Rust | `cargo-adapter` | `cargo-adapter-runner` | `--workspace` |
+   | JS/TS | `vitest-adapter` | `vitest-adapter-runner` | your test dir |
+
+   A bare `adapterPath` (no `/`) is found next to the server's own
+   interpreter, inside mcpctl's runtime, so it works without anything on
+   `PATH`.
+5. **The tests run with the project's own tools, not mcpctl's.** The pytest
+   adapter uses `<project>/.venv/bin/pytest` when it exists (falling back
+   to `pytest` on `PATH`), so `pytest` and `pytest-json-report` must be
+   installed in the project's own `.venv`. The vitest adapter runs
+   `npx vitest` in the project, and the cargo adapter runs `cargo`; both
+   need `node`/`cargo` on the `PATH` your client starts the server with.
+6. Open the project in Claude Code / Codex — `/mcp` should show
    `outside-in-tdd` as connected. Claude then calls `init_feature` to
    start a feature, and the phase gating takes over from there.
+
+**Releasing a change to this server:** bump `version` in both `mcpctl.toml`
+and `pyproject.toml`, run `uv lock`, then
+`mcpctl update outside-in-tdd-mcp --source /path/to/outside-in-tdd-mcp`.
+Installed versions are immutable; every project picks up the new version on
+its next start, and `mcpctl use outside-in-tdd-mcp@<old>` rolls back.
+
+### Docker
+
+The same `.mcp.json` works in a container that has mcpctl installed. In your
+image, install `mcpctl` and `uv`, set `MCPCTL_HOME` (for example
+`/state`), and run `mcpctl install` for this server at build time. Set the
+container's working directory to the project, and install `pytest` and
+`pytest-json-report` in the image (or use the project's own `.venv` built
+inside the container — a host `.venv` mounted from macOS won't run on
+Linux, and the pytest adapter falls back to `pytest` on `PATH` if it can't
+execute it; add `.venv` to `.dockerignore`).
+
+This repo's `Dockerfile` is a separate, self-contained image with the
+server and pytest baked in (`ENTRYPOINT ["outside-in-tdd-mcp"]`) that you
+can run without mcpctl:
+
+```bash
+docker build -t outside-in-tdd-mcp:pytest .
+```
+
+```json
+{
+  "mcpServers": {
+    "outside-in-tdd": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "-v", "${CLAUDE_PROJECT_DIR:-.}:/app", "-w", "/app", "outside-in-tdd-mcp:pytest"]
+    }
+  }
+}
+```
+
+For that image, copy `.tdd-config.json.example` to `.tdd-config.json`:
+its `adapterPath` is a container-root path (`/adapters/pytest-adapter/run.sh`)
+that must stay absolute.
 
 ## Adding a new adapter
 

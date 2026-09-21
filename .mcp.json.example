@@ -1,9 +1,8 @@
 {
-  "_comment": "Docker consumer flow — see README's 'Using in a consumer project' section. For a non-Docker setup (pip install -e ., adapterPath as a bare console-script name), see README's 'Without Docker' section instead — this repo's own .mcp.json uses that path.",
   "mcpServers": {
     "outside-in-tdd": {
-      "command": "docker",
-      "args": ["run", "-i", "--rm", "-v", "${CLAUDE_PROJECT_DIR:-.}:/app", "-w", "/app", "outside-in-tdd-mcp:pytest"]
+      "command": "/usr/local/bin/mcpctl",
+      "args": ["run", "outside-in-tdd-mcp"]
     }
   }
 }

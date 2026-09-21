@@ -29,7 +29,7 @@ with the worktree as cwd), so each worktree runs its own code and its own
 client's `PATH`.
 
 Other projects don't use this: they run the mcpctl-installed snapshot
-(`mcpctl run outside-in-tdd-mcp`, template in `.mcp.example.json`). To
+(`mcpctl run outside-in-tdd-mcp`, template in `.mcp.json.example`). To
 publish worktree changes to them, bump the version in `mcpctl.toml` and
 `pyproject.toml`, then `mcpctl update outside-in-tdd-mcp --source .`.
 

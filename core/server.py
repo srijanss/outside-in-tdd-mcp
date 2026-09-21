@@ -14,6 +14,7 @@ import os
 import shlex
 import shutil
 import sys
+from importlib.metadata import PackageNotFoundError, version as _package_version
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -1348,6 +1349,14 @@ def build_server() -> Server:
     return server
 
 
+def _server_version() -> str:
+    """The installed package version, so it can't drift from pyproject.toml."""
+    try:
+        return _package_version("outside-in-tdd-mcp")
+    except PackageNotFoundError:
+        return "unknown"
+
+
 async def main() -> None:
     server = build_server()
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
@@ -1356,7 +1365,7 @@ async def main() -> None:
             write_stream,
             InitializationOptions(
                 server_name="outside-in-tdd",
-                server_version="0.1.0",
+                server_version=_server_version(),
                 capabilities=server.get_capabilities(
                     notification_options=NotificationOptions(),
                     experimental_capabilities={},
@@ -1366,18 +1375,7 @@ async def main() -> None:
 
 
 def run() -> None:
-    """Sync entry point for the `outside-in-tdd-mcp` console script.
-
-    `outside-in-tdd-mcp install [target]` scaffolds a project instead of
-    starting the server, so it works through `mcpctl run` too (which can
-    only launch this one entrypoint).
-    """
-    if len(sys.argv) > 1 and sys.argv[1] == "install":
-        from core.install_agent_configs import main as install_main
-
-        sys.argv = [sys.argv[0], *sys.argv[2:]]
-        install_main()
-        return
+    """Sync entry point for the `outside-in-tdd-mcp` console script."""
     asyncio.run(main())
 
 

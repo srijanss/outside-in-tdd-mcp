@@ -1,18 +1,15 @@
-# Codex CLI project config. Counterpart to .mcp.json (Claude Code) and
-# .claude/settings.json.
-#
-# Portable and committed: the MCP server runs via `uv run` from the
-# checkout/worktree's own source and .venv (the server defaults its project
-# root to the cwd), so every worktree runs its own code. Other projects use
-# `mcpctl run outside-in-tdd-mcp` instead (see .codex/config.toml.example). The hooks below are scripts in .agents/ that resolve their own project
-# root from their own file location. See .agents/hooks/block-direct-test-runs.sh.
+# Codex CLI project config for consumer projects (copied to .codex/config.toml
+# by `mcpctl init outside-in-tdd-mcp`). The MCP server runs via `mcpctl run` (the
+# installed snapshot; the server defaults its project root to the cwd). The
+# hooks below are scripts in .agents/ that resolve their own project root
+# from their own file location.
 #
 # Relative paths here resolve relative to this file's own directory
 # (.codex/), not the project root or runtime cwd.
 
 [mcp_servers.outside-in-tdd]
-command = "uv"
-args = ["run", "--quiet", "outside-in-tdd-mcp"]
+command = "/usr/local/bin/mcpctl"
+args = ["run", "outside-in-tdd-mcp"]
 
 [mcp_servers.outside-in-tdd.tools.init_feature]
 approval_mode = "approve"
