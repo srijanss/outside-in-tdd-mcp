@@ -226,8 +226,7 @@ uv run pytest tests/
 This repo's own `.mcp.json` and `.codex/config.toml` run
 `uv run --quiet outside-in-tdd-mcp` from the checkout, so a `git worktree
 add` checkout runs its own code unmodified (each worktree needs `uv` on
-`PATH`; `.agents/scripts/setup-worktree.sh` provisions its `.venv`). See
-[`.agents/docs/worktree-workflow.md`](.agents/docs/worktree-workflow.md).
+`PATH`; run `uv sync --extra dev` in the worktree to create its `.venv`).
 
 ## Running it locally from this repo
 
