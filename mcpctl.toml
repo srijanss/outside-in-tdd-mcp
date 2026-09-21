@@ -18,7 +18,8 @@ entrypoint = "outside-in-tdd-mcp"
 # is already there is kept, and only missing entries are added. (Comments in
 # an existing .codex/config.toml are not preserved when it is merged.)
 [scaffold]
-dirs = [".agents", ".claude", ".codex"]
+requires = ["jq"]  # the hooks parse JSON with it; `mcpctl init` warns if it is missing
+dirs =[".agents", ".claude", ".codex"]
 exclude = [
   ".codex/config.toml",
   ".codex/config.toml.example",
