@@ -263,9 +263,14 @@ Other projects run a single installed copy of this server through
    This copies, from the *installed* package (not from your checkout),
    `.agents/`, `.claude/`, `.codex/` (with an mcpctl-based `config.toml`),
    `.mcp.json` (`mcpctl run outside-in-tdd-mcp`) and `.tdd-config.json`.
-   Files that already exist in the project are skipped, never overwritten,
-   so re-running it is safe. What gets copied is declared in the
-   `[scaffold]` section of this repo's `mcpctl.toml`.
+   Files that already exist in the project are skipped, never overwritten.
+   The three files other MCPs also write to are **merged** instead:
+   `.mcp.json`, `.claude/settings.json` and `.codex/config.toml` keep
+   everything already in them and only gain the missing servers and hooks
+   (existing values win; hook entries with the same `matcher` are combined),
+   so you can run `mcpctl init` for this server and for `project-mcp` in
+   either order. Re-running is safe. What gets copied and merged is declared
+   in the `[scaffold]` section of this repo's `mcpctl.toml`.
 4. **Pick the adapter for the project's language.** `.tdd-config.json`
    defaults to pytest. `mcpctl init` prints a hint when it sees a
    `Cargo.toml` or `package.json`:

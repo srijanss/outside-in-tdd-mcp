@@ -48,19 +48,20 @@ approval_mode = "approve"
 approval_mode = "approve"
 
 
-# Counterpart to the .claude/settings.json PreToolUse hook — blocks direct
-# pytest/vitest/etc. invocations so agents go through run_tests() instead.
+# One entry per matcher (`mcpctl init` merges hook entries by matcher, so a
+# matcher listed twice would be folded together and run its hooks twice).
+#
+# First hook: counterpart to the .claude/settings.json PreToolUse hook —
+# blocks direct pytest/vitest/etc. invocations so agents go through
+# run_tests() instead. Second hook: match Claude's command safety guard —
+# block autonomous destructive commands, commits, pushes, branch creation,
+# and shell writes to protected files.
 [[hooks.PreToolUse]]
 matcher = "Bash"
 
   [[hooks.PreToolUse.hooks]]
   type = "command"
   command = ".agents/hooks/block-direct-test-runs.sh"
-
-# Match Claude's command safety guard: block autonomous destructive commands,
-# commits, pushes, branch creation, and shell writes to protected files.
-[[hooks.PreToolUse]]
-matcher = "Bash"
 
   [[hooks.PreToolUse.hooks]]
   type = "command"
