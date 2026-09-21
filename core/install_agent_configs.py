@@ -76,3 +76,7 @@ def main() -> None:
     print(f"  1. If this project isn't pytest- or Cargo-based, update {target / '.tdd-config.json'}")
     print("     (adapter/adapterPath/defaultTestDir — e.g. vitest-adapter-runner for JS/TS).")
     print("  2. Run '/mcp' in Claude Code (or open Codex) here to confirm outside-in-tdd is registered.")
+
+
+if __name__ == "__main__":
+    main()
