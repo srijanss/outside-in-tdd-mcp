@@ -2301,3 +2301,40 @@ def test_remove_completed_features_preserves_malformed_non_dict_entries(tmp_path
     assert json.loads((tmp_path / ".tdd-features.json").read_text()) == payload[
         "remaining"
     ]
+
+
+def test_project_root_defaults_to_cwd_when_env_unset(tmp_path):
+    result = subprocess.run(
+        [sys.executable, "-c", "import core.server as s; print(s.PROJECT_ROOT)"],
+        cwd=tmp_path,
+        env={
+            **{k: v for k, v in os.environ.items() if k != "TDD_PROJECT_ROOT"},
+            "PYTHONPATH": str(PROJECT_ROOT),
+        },
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert Path(result.stdout.strip()).resolve() == tmp_path.resolve()
+
+
+def test_bare_adapter_falls_back_to_interpreter_bin_dir(tmp_path, monkeypatch):
+    bin_dir = tmp_path / "runtime" / "bin"
+    bin_dir.mkdir(parents=True)
+    adapter = bin_dir / "fake-adapter-runner"
+    adapter.write_text("#!/bin/sh\necho '{}'\n")
+    adapter.chmod(0o755)
+    monkeypatch.setattr(sys, "executable", str(bin_dir / "python"))
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    config_path = project_root / ".tdd-config.json"
+    config_path.write_text(json.dumps({"adapterPath": "fake-adapter-runner"}))
+
+    server = TDDServer(project_root=str(project_root), config_path=str(config_path))
+    config, error = server._try_load_config()
+
+    assert error is None
+    assert config["adapterPath"] == str(adapter)

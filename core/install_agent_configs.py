@@ -1,14 +1,16 @@
-"""Console-script entry point that scaffolds .agents/, .claude/, .codex/
-(and .mcp.json / .tdd-config.json) into the current directory.
+"""Scaffolds .agents/, .claude/, .codex/ (and .mcp.json / .tdd-config.json)
+into a consumer project.
 
-Lets `pip install -e .` put `outside-in-tdd-mcp-install` on PATH as a
-stable, project-independent executable — run it from inside any consumer
-project instead of reaching back into this repo's checkout. REPO_ROOT
-resolves relative to this file's own installed location (like
-ADAPTERS_DIR in adapter_entrypoints.py), so it stays correct for an
-editable install even if the checkout moves. Only works for an editable
-install: a real (non-editable) install doesn't ship these dirs as package
-data, since they live outside the `core` package.
+Run it through mcpctl from inside the project (or pass a target path):
+
+    mcpctl run outside-in-tdd-mcp install [target]
+
+(`outside-in-tdd-mcp-install` is the equivalent console script for a plain
+editable install.) REPO_ROOT resolves relative to this file's own installed
+location (like ADAPTERS_DIR in adapter_entrypoints.py), so it is correct for
+mcpctl's `uv sync` install and for an editable install. A real
+(non-editable) install doesn't ship these dirs as package data, since they
+live outside the `core` package.
 """
 import json
 import shutil
@@ -17,11 +19,17 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DIRS_TO_COPY = (".agents", ".claude", ".codex")
-# Both are generic as committed here: .mcp.json points at the self-locating
-# .agents/mcp/launch-outside-in-tdd.sh (copied above), and .tdd-config.json's
-# adapterPath is the bare "pytest-adapter-runner" console-script name
-# (PATH-resolved) rather than an absolute or repo-specific path.
-CONFIGS_TO_COPY = (".mcp.json", ".tdd-config.json")
+# (source in this repo, destination in the target). Both are generic as
+# committed here: .mcp.example.json runs the server through
+# `mcpctl run outside-in-tdd-mcp` (project root defaults to the cwd; the same
+# file works on the host and in Docker), and .tdd-config.json's adapterPath
+# is the bare "pytest-adapter-runner" console-script name (PATH-resolved,
+# falling back to the server interpreter's bin dir) rather than an absolute
+# or repo-specific path.
+CONFIGS_TO_COPY = (
+    (".mcp.example.json", ".mcp.json"),
+    (".tdd-config.json", ".tdd-config.json"),
+)
 
 
 def main() -> None:
@@ -42,13 +50,13 @@ def main() -> None:
         )
 
     # Never overwrite a config the target project already has of its own.
-    for name in CONFIGS_TO_COPY:
-        src = REPO_ROOT / name
+    for src_name, name in CONFIGS_TO_COPY:
+        src = REPO_ROOT / src_name
         dst = target / name
         if dst.exists():
             print(f"Skipping {name} (already exists in target)")
         else:
-            print(f"Copying {name} -> {dst}")
+            print(f"Copying {src_name} -> {dst}")
             shutil.copyfile(src, dst)
             if name == ".tdd-config.json" and (target / "Cargo.toml").exists():
                 dst.write_text(

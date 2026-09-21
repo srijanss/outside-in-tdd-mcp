@@ -31,6 +31,43 @@ def _trim_for_message(raw_output: str) -> str:
     return raw_output[: line_start if line_start != -1 else marker_index]
 
 
+def _pytest_commands(project_root: str) -> list[str]:
+    """Candidate pytest executables, in preference order: the target
+    project's own .venv pytest (so tests run against the project's own
+    dependencies, never the MCP server's mcpctl runtime), then whatever
+    `pytest` is on PATH.
+    """
+    project_pytest = Path(project_root) / ".venv" / "bin" / "pytest"
+    if project_pytest.is_file():
+        return [str(project_pytest), "pytest"]
+    return ["pytest"]
+
+
+def _run_pytest(project_root: str, args: list[str]) -> subprocess.CompletedProcess:
+    """Run the first candidate pytest that can actually be executed. A
+    .venv built on another platform (e.g. a macOS venv bind-mounted into a
+    Linux container) has a pytest whose shebang interpreter doesn't exist
+    here, which makes exec fail with OSError instead of running.
+    """
+    candidates = _pytest_commands(project_root)
+    for index, command in enumerate(candidates):
+        try:
+            return subprocess.run(
+                [command, *args],
+                cwd=project_root,
+                capture_output=True,
+                text=True,
+            )
+        except OSError as exc:
+            if index == len(candidates) - 1:
+                # No runnable pytest at all: report it as a collection-style
+                # failure (no JSON report is produced) instead of crashing.
+                return subprocess.CompletedProcess(
+                    [command, *args], 127, "", f"cannot execute {command}: {exc}"
+                )
+    raise AssertionError("unreachable")
+
+
 def main() -> int:
     test_target = sys.argv[1] if len(sys.argv) > 1 else ""
     project_root = sys.argv[2] if len(sys.argv) > 2 else "."
@@ -40,18 +77,15 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="tdd-adapter-") as tmpdir:
         report_file = Path(tmpdir) / "report.json"
 
-        proc = subprocess.run(
+        proc = _run_pytest(
+            project_root,
             [
-                "pytest",
                 *target_args,
                 "-v",
                 "--tb=short",
                 "--json-report",
                 f"--json-report-file={report_file}",
             ],
-            cwd=project_root,
-            capture_output=True,
-            text=True,
         )
         raw_output = proc.stdout + proc.stderr
 

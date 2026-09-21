@@ -672,5 +672,32 @@
     "targetFiles": [],
     "recordedAt": "2026-09-16T05:50:43.347122+00:00",
     "cyclesCompleted": 1
+  },
+  {
+    "featureName": "Add reusable Cargo test adapter",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/test_cargo_adapter.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-19T08:04:27.978725+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "Use workspace target for Cargo regression sweep",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/test_install_agent_configs.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-19T08:06:08.263841+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "Resolve Cargo outside inherited PATH",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/test_cargo_adapter.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-19T09:17:08.166790+00:00",
+    "cyclesCompleted": 1
   }
 ]

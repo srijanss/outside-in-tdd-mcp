@@ -1,0 +1,10 @@
+.git
+.venv
+venv_new
+**/__pycache__
+*.egg-info
+node_modules
+.pytest_cache
+.tdd-*.json
+.tdd-session.log
+worktrees

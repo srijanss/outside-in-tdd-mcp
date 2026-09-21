@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "outside-in-tdd-mcp"
-version = "0.1.0"
+version = "0.1.1"
 description = "Language-agnostic MCP server enforcing Outside-In TDD phases"
 requires-python = ">=3.10"
 dependencies = ["mcp>=1.2.0,<2"]
@@ -20,4 +20,7 @@ pytest-adapter-runner = "core.adapter_entrypoints:pytest_adapter_main"
 vitest-adapter-runner = "core.adapter_entrypoints:vitest_adapter_main"
 
 [tool.setuptools]
-packages = ["core"]
+packages = ["core", "adapters"]
+
+[tool.setuptools.package-data]
+adapters = ["*/run.sh"]

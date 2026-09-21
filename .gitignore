@@ -10,6 +10,8 @@ dist/
 *.lock
 node_modules
 .tdd-research.json
+.tdd-features.json
+.tdd-review-findings.json
 .tdd-state.json
 .tdd-review-findings.json
 **/worktrees

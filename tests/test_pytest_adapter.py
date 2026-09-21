@@ -107,3 +107,21 @@ def test_adapter_reports_failure_when_a_fixture_raises_during_setup():
     result = run_adapter(SETUP_ERROR_FIXTURE)
     assert result["passed"] == 0
     assert result["failed"] >= 1
+
+
+def test_adapter_falls_back_to_path_pytest_when_project_venv_pytest_is_unusable(tmp_path):
+    # e.g. a macOS .venv bind-mounted into a Linux container: the file
+    # exists but its shebang interpreter doesn't, so exec raises OSError.
+    (tmp_path / "test_ok.py").write_text("def test_ok():\n    assert True\n")
+    broken = tmp_path / ".venv" / "bin" / "pytest"
+    broken.parent.mkdir(parents=True)
+    broken.write_text("#!/nonexistent/python\n")
+    broken.chmod(0o755)
+
+    proc = subprocess.run(
+        [str(ADAPTER), "test_ok.py", str(tmp_path)], capture_output=True, text=True
+    )
+    result = json.loads(proc.stdout)
+
+    assert result["passed"] == 1
+    assert result["failed"] == 0

@@ -13,6 +13,7 @@ import json
 import os
 import shlex
 import shutil
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -39,7 +40,7 @@ from core.state_machine import (
     TDDStateMachine,
 )
 
-PROJECT_ROOT = os.environ.get("TDD_PROJECT_ROOT", "/app")
+PROJECT_ROOT = os.environ.get("TDD_PROJECT_ROOT") or str(Path.cwd())
 CONFIG_PATH = os.environ.get(
     "TDD_CONFIG_PATH", str(Path(PROJECT_ROOT) / ".tdd-config.json")
 )
@@ -816,7 +817,12 @@ class TDDServer:
             # command, e.g. a console script installed by `pip install`.
             # Left unresolved (falls through unchanged) if not found on
             # PATH, so the existing "does not exist" error still fires.
-            resolved = shutil.which(adapter_path)
+            # Fall back to the running interpreter's bin dir, where this
+            # package's own console scripts live (e.g. an isolated mcpctl
+            # runtime whose bin is not on PATH).
+            resolved = shutil.which(adapter_path) or shutil.which(
+                adapter_path, path=str(Path(sys.executable).parent)
+            )
             if resolved:
                 config = {**config, "adapterPath": resolved}
         elif not Path(adapter_path).is_absolute():
@@ -1360,7 +1366,18 @@ async def main() -> None:
 
 
 def run() -> None:
-    """Sync entry point for the `outside-in-tdd-mcp` console script."""
+    """Sync entry point for the `outside-in-tdd-mcp` console script.
+
+    `outside-in-tdd-mcp install [target]` scaffolds a project instead of
+    starting the server, so it works through `mcpctl run` too (which can
+    only launch this one entrypoint).
+    """
+    if len(sys.argv) > 1 and sys.argv[1] == "install":
+        from core.install_agent_configs import main as install_main
+
+        sys.argv = [sys.argv[0], *sys.argv[2:]]
+        install_main()
+        return
     asyncio.run(main())
 
 

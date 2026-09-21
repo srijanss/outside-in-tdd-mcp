@@ -15,4 +15,5 @@ uv sync --extra dev
 
 echo "Worktree ready: $PROJECT_ROOT"
 echo "  $(.venv/bin/python --version) -> .venv/"
-echo "  MCP server / adapters will resolve to this worktree's own .venv (see .agents/mcp/launch-outside-in-tdd.sh)."
+echo "  MCP server (.mcp.json / .codex/config.toml) runs this worktree's own code via 'uv run'."
+echo "  Other projects use the mcpctl snapshot: bump version + 'mcpctl update' to publish changes."

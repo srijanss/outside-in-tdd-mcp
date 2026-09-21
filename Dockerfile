@@ -8,6 +8,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY pyproject.toml /mcp/
 COPY core/ /mcp/core/
+COPY adapters/ /mcp/adapters/
 # pytest/pytest-json-report are baked in at this fixed version, not read
 # from the consumer project's own pin — unlike vitest (invoked via `npx`,
 # which resolves the project's own local node_modules/devDependency first),
