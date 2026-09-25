@@ -1,5 +1,5 @@
 name = "outside-in-tdd-mcp"
-version = "0.1.4"
+version = "0.1.5"
 [runtime]
 type = "python"
 python = ">=3.10"
