@@ -328,7 +328,7 @@ def test_write_code_blocked_for_file_outside_declared_targets(tmp_path):
     payload = call(server, "write_code", filePath="new_module.py")
 
     assert "declared target files" in payload["error"]
-    assert call(server, "write_code", filePath="views.py") == {"ok": True}
+    assert call(server, "write_code", filePath="views.py")["ok"] is True
 
 
 def test_get_status_reports_target_files(tmp_path):
@@ -435,8 +435,8 @@ else:
     # The base level can never own real target files -- drill into a
     # nested level that owns "f.py" before exercising write_code().
     call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
-    assert call(server, "write_test", testName="t") == {"ok": True}
-    assert call(server, "write_test_skeleton", testName="t") == {"ok": True}
+    assert call(server, "write_test", testName="t")["ok"] is True
+    assert call(server, "write_test_skeleton", testName="t")["ok"] is True
 
     call(server, "run_tests")  # count=1: failed=1 -> base verify_red
     call(server, "verify")  # -> base implement
@@ -444,7 +444,7 @@ else:
 
     call(server, "run_tests")  # count=2: failed=1 -> nested verify_red
     call(server, "verify")  # -> nested implement
-    assert call(server, "write_code", filePath="f.py") == {"ok": True}
+    assert call(server, "write_code", filePath="f.py")["ok"] is True
 
     call(server, "run_tests")  # count=3: passed=1 -> nested verify_green
     call(server, "verify")  # -> nested refactor
@@ -1206,7 +1206,7 @@ def test_log_event_swallows_oserror_when_log_path_unwritable(tmp_path):
 
     payload = call(server, "write_test", testName="t")  # must not raise
 
-    assert payload == {"ok": True}
+    assert payload["ok"] is True
     assert not (tmp_path / "no-such-dir").exists()
 
 
@@ -2207,7 +2207,7 @@ def test_save_state_swallows_oserror_when_state_path_unwritable(tmp_path):
 
     payload = call(server, "write_test", testName="t")  # must not raise
 
-    assert payload == {"ok": True}
+    assert payload["ok"] is True
     assert not (tmp_path / "no-such-dir").exists()
 
 
@@ -2338,3 +2338,183 @@ def test_bare_adapter_falls_back_to_interpreter_bin_dir(tmp_path, monkeypatch):
 
     assert error is None
     assert config["adapterPath"] == str(adapter)
+
+
+def test_state_files_are_added_to_git_info_exclude_on_first_save(tmp_path):
+    (tmp_path / ".git" / "info").mkdir(parents=True)
+    server = make_server(tmp_path)
+
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    call(server, "reset_feature")
+
+    lines = (tmp_path / ".git" / "info" / "exclude").read_text().splitlines()
+    for name in (
+        ".tdd-features.json",
+        ".tdd-state.json",
+        ".tdd-research.json",
+        ".tdd-review-findings.json",
+        ".tdd-session.log",
+    ):
+        assert lines.count(name) == 1
+
+
+def test_git_exclude_is_not_duplicated_and_preserves_existing_entries(tmp_path):
+    info = tmp_path / ".git" / "info"
+    info.mkdir(parents=True)
+    (info / "exclude").write_text("*.swp\n.tdd-state.json\n")
+    server = make_server(tmp_path)
+
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    call(server, "reset_feature")
+
+    lines = (info / "exclude").read_text().splitlines()
+    assert lines[0] == "*.swp"
+    assert lines.count(".tdd-state.json") == 1
+
+
+def test_no_git_directory_means_no_exclude_file_is_created(tmp_path):
+    server = make_server(tmp_path)
+
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+
+    assert not (tmp_path / ".git").exists()
+
+
+def test_write_test_reports_file_evidence_and_flags_unchanged_redeclare(tmp_path):
+    server = make_server(tmp_path)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    (tmp_path / "t.py").write_text("def test_a(): assert False\n")
+
+    first = call(server, "write_test", testName="a")
+    assert first["ok"] is True
+    assert first["fileChanged"] is True
+    assert len(first["sha256"]) == 64
+    assert "warning" not in first
+
+    again = call(server, "write_test", testName="a")
+    assert again["fileChanged"] is False
+    assert again["sha256"] == first["sha256"]
+    assert "unchanged" in again["warning"]
+
+
+def test_write_test_warns_when_declared_file_is_missing(tmp_path):
+    server = make_server(tmp_path)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+
+    payload = call(server, "write_test", testName="a")
+
+    assert payload["ok"] is True
+    assert payload["fileChanged"] is False
+    assert "sha256" not in payload
+    assert "not found" in payload["warning"]
+
+
+def test_write_test_reports_change_after_the_file_is_edited(tmp_path):
+    server = make_server(tmp_path)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    (tmp_path / "t.py").write_text("v1\n")
+    first = call(server, "write_test", testName="a")
+
+    (tmp_path / "t.py").write_text("v2\n")
+    second = call(server, "write_test", testName="a")
+
+    assert second["fileChanged"] is True
+    assert second["sha256"] != first["sha256"]
+    assert "warning" not in second
+
+
+def test_write_code_reports_evidence_for_the_declared_file(tmp_path):
+    fake_adapter = tmp_path / "fake_adapter.py"
+    fake_adapter.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json\n"
+        'print(json.dumps({"passed": 0, "failed": 1, "failures": []}))\n'
+    )
+    fake_adapter.chmod(0o755)
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
+    server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    call(server, "run_tests")
+    call(server, "verify")
+    call(server, "drill_down", testFile="u.py", targetFiles=["f.py"])
+    call(server, "run_tests")
+    call(server, "verify")
+
+    missing = call(server, "write_code", filePath="f.py")
+    assert missing["ok"] is True
+    assert "not found" in missing["warning"]
+
+    (tmp_path / "f.py").write_text("x = 1\n")
+    written = call(server, "write_code", filePath="f.py")
+    assert written["fileChanged"] is True
+    assert len(written["sha256"]) == 64
+    assert "warning" not in written
+
+    assert "unchanged" in call(server, "write_code", filePath="f.py")["warning"]
+
+
+def test_git_exclude_also_covers_lock_files(tmp_path):
+    (tmp_path / ".git" / "info").mkdir(parents=True)
+    server = make_server(tmp_path)
+
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+
+    lines = (tmp_path / ".git" / "info" / "exclude").read_text().splitlines()
+    for name in (".tdd-features.json.lock", ".tdd-state.json.lock"):
+        assert lines.count(name) == 1
+
+
+def test_redrilling_the_same_path_after_abandon_starts_with_fresh_evidence(tmp_path):
+    fake_adapter = tmp_path / "fake_adapter.py"
+    fake_adapter.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json\n"
+        'print(json.dumps({"passed": 0, "failed": 1, "failures": []}))\n'
+    )
+    fake_adapter.chmod(0o755)
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
+    server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
+    (tmp_path / "f.py").write_text("x = 1\n")
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    call(server, "run_tests")
+    call(server, "verify")
+    call(server, "drill_down", testFile="u.py", targetFiles=["f.py"])
+    call(server, "run_tests")
+    call(server, "verify")
+    assert call(server, "write_code", filePath="f.py")["fileChanged"] is True
+
+    call(server, "abandon_drill_down")
+    call(server, "drill_down", testFile="u.py", targetFiles=["f.py"])
+    call(server, "run_tests")
+    call(server, "verify")
+
+    again = call(server, "write_code", filePath="f.py")
+    assert again["fileChanged"] is True
+    assert "warning" not in again
+
+
+def test_declare_evidence_hashes_files_larger_than_one_read_chunk(tmp_path):
+    import hashlib
+
+    server = make_server(tmp_path)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    content = b"abc123" * 100_000
+    (tmp_path / "t.py").write_bytes(content)
+
+    payload = call(server, "write_test", testName="t")
+
+    assert payload["sha256"] == hashlib.sha256(content).hexdigest()
+
+
+def test_git_exclude_is_added_when_git_init_happens_after_the_first_save(tmp_path):
+    server = make_server(tmp_path)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    assert not (tmp_path / ".git").exists()
+
+    (tmp_path / ".git" / "info").mkdir(parents=True)
+    call(server, "reset_feature")
+
+    lines = (tmp_path / ".git" / "info" / "exclude").read_text().splitlines()
+    assert ".tdd-state.json" in lines

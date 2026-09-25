@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import os
 import shlex
@@ -496,7 +497,85 @@ class TDDServer:
         self.state_path = state_path or os.environ.get(
             "TDD_STATE_PATH", str(Path(project_root) / ".tdd-state.json")
         )
+        self._git_excluded = False
+        # (depth, path) -> sha256 last reported by write_test/write_code;
+        # in-memory only, cleared on init_feature.
+        self._declared_hashes: dict[tuple[int, str], str] = {}
         self._load_state()
+
+    def _ensure_git_excluded(self) -> None:
+        """Keep the server's own state files out of `git status` by listing
+        them in .git/info/exclude (local-only, so the user's tracked
+        .gitignore is never touched). Best-effort and once per process:
+        skipped when project_root has no .git directory (or .git is a
+        worktree pointer file), and never blocks the TDD cycle."""
+        if self._git_excluded:
+            return
+        info_dir = Path(self.project_root) / ".git" / "info"
+        if not info_dir.parent.is_dir():
+            return  # not a git repo (yet) — try again on the next save
+        self._git_excluded = True
+        paths = (
+            self.features_path,
+            self.state_path,
+            self.research_path,
+            self.review_findings_path,
+            self.session_log_path,
+        )
+        # _file_lock leaves a sibling "<name>.lock" behind next to each file.
+        names = [n for p in paths for n in (Path(p).name, f"{Path(p).name}.lock")]
+        try:
+            info_dir.mkdir(exist_ok=True)
+            exclude = info_dir / "exclude"
+            existing = exclude.read_text() if exclude.exists() else ""
+            present = set(existing.splitlines())
+            missing = [n for n in dict.fromkeys(names) if n not in present]
+            if missing:
+                prefix = "" if not existing or existing.endswith("\n") else "\n"
+                with exclude.open("a") as f:
+                    f.write(prefix + "\n".join(missing) + "\n")
+        except OSError:
+            pass
+
+    def _forget_declared_hashes(self, from_depth: int) -> None:
+        """Drop remembered hashes for levels at or below `from_depth`, so a
+        level re-entered after a pop (or freshly pushed) starts with no
+        stale baseline inherited from a previous level at the same depth."""
+        for key in [k for k in self._declared_hashes if k[0] >= from_depth]:
+            del self._declared_hashes[key]
+
+    def _declare_evidence(self, path: str) -> dict[str, Any]:
+        """Soft check of a write_test/write_code declaration against disk:
+        report the file's sha256 and whether it changed since the last
+        declaration of it at this level, warning (never rejecting) when it
+        is missing or unchanged. Declare-only tools can't know what was
+        actually written, so this is the evidence trail."""
+        full = Path(path)
+        if not full.is_absolute():
+            full = Path(self.project_root) / full
+        try:
+            hasher = hashlib.sha256()
+            with full.open("rb") as f:
+                for chunk in iter(lambda: f.read(65536), b""):
+                    hasher.update(chunk)
+            digest = hasher.hexdigest()
+        except OSError:
+            return {
+                "fileChanged": False,
+                "warning": f"'{path}' not found on disk — declared but never written?",
+            }
+        key = (self.sm.depth, path)
+        previous = self._declared_hashes.get(key)
+        self._declared_hashes[key] = digest
+        evidence: dict[str, Any] = {
+            "fileChanged": digest != previous,
+            "sha256": digest,
+        }
+        if digest == previous:
+            evidence["warning"] = (
+                f"'{path}' is unchanged since the last declaration at this level."
+            )
+        return evidence
 
     def _load_state(self) -> None:
         path = Path(self.state_path)
@@ -520,6 +599,7 @@ class TDDServer:
             content = json.dumps(self.sm.to_dict(), indent=2) + "\n"
         except TypeError:
             return
+        self._ensure_git_excluded()
         tmp_path = f"{self.state_path}.tmp"
         try:
             with self._state_lock():
@@ -544,6 +624,7 @@ class TDDServer:
         # Write to a temp file and rename into place (atomic on POSIX and
         # Windows for a same-filesystem replace) so a crash mid-write never
         # leaves .tdd-features.json truncated/partial.
+        self._ensure_git_excluded()
         tmp_path = f"{self.features_path}.tmp"
         try:
             with open(tmp_path, "w") as f:
@@ -846,6 +927,7 @@ class TDDServer:
     ) -> list[types.TextContent]:
         try:
             if name == "init_feature":
+                self._declared_hashes.clear()
                 config, error = self._try_load_config()
                 if error:
                     return self._error(error)
@@ -921,20 +1003,29 @@ class TDDServer:
 
             if name == "write_test":
                 self.sm.write_test(arguments["testName"])
-                self._log_event("write_test", testName=arguments["testName"])
-                return self._text({"ok": True})
+                evidence = self._declare_evidence(self.sm.test_file)
+                self._log_event(
+                    "write_test", testName=arguments["testName"], **evidence
+                )
+                return self._text({"ok": True, **evidence})
 
             if name == "write_test_skeleton":
                 self.sm.write_test_skeleton(arguments["testName"])
+                evidence = self._declare_evidence(self.sm.test_file)
                 self._log_event(
-                    "write_test_skeleton", testName=arguments["testName"]
+                    "write_test_skeleton",
+                    testName=arguments["testName"],
+                    **evidence,
                 )
-                return self._text({"ok": True})
+                return self._text({"ok": True, **evidence})
 
             if name == "write_code":
                 self.sm.write_code(arguments["filePath"])
-                self._log_event("write_code", filePath=arguments["filePath"])
-                return self._text({"ok": True})
+                evidence = self._declare_evidence(arguments["filePath"])
+                self._log_event(
+                    "write_code", filePath=arguments["filePath"], **evidence
+                )
+                return self._text({"ok": True, **evidence})
 
             if name == "refactor_code":
                 self.sm.refactor_code(arguments["description"])
@@ -1072,6 +1163,7 @@ class TDDServer:
 
             if name == "drill_down":
                 self.sm.drill_down(arguments["testFile"], arguments["targetFiles"])
+                self._forget_declared_hashes(self.sm.depth)
                 self._log_event(
                     "drill_down",
                     testFile=arguments["testFile"],
@@ -1091,6 +1183,7 @@ class TDDServer:
 
             if name == "return_to_parent":
                 summary = self.sm.return_to_parent()
+                self._forget_declared_hashes(self.sm.depth + 1)
                 self._log_event(
                     "return_to_parent",
                     testFile=summary["testFile"],
@@ -1110,6 +1203,7 @@ class TDDServer:
 
             if name == "abandon_drill_down":
                 summary = self.sm.abandon_drill_down()
+                self._forget_declared_hashes(self.sm.depth + 1)
                 self._log_event(
                     "abandon_drill_down",
                     testFile=summary["testFile"],
