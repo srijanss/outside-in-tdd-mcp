@@ -3372,6 +3372,59 @@ def test_drift_check_detects_a_change_without_reading_file_contents(tmp_path, mo
     assert "big_dirty.bin" in payload["driftWarning"]
 
 
+def test_drift_check_is_silent_when_the_project_is_not_a_git_repository(tmp_path):
+    server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    call(server, "write_test", testName="t")
+    (tmp_path / "probe_other.py").write_text("x = 1\n")
+
+    payload = call(server, "run_tests")
+
+    assert "driftWarning" not in payload
+    assert payload["testResult"]["failed"] == 1
+
+
+def test_drift_check_reports_the_new_name_of_a_renamed_file(tmp_path):
+    git_init(tmp_path)
+    (tmp_path / "old_name.py").write_text("x = 1\n")
+    subprocess.run(["git", "add", "old_name.py"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "c"],
+        cwd=tmp_path,
+        check=True,
+    )
+    server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    call(server, "write_test", testName="t")
+    subprocess.run(["git", "mv", "old_name.py", "new_name.py"], cwd=tmp_path, check=True)
+
+    payload = call(server, "run_tests")
+
+    assert "new_name.py" in payload["driftWarning"]
+
+
+def test_a_state_file_without_a_drift_baseline_loads_and_rebaselines_quietly(tmp_path):
+    git_init(tmp_path)
+    server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    call(server, "write_test", testName="t")
+    state_path = tmp_path / ".tdd-state.json"
+    state = json.loads(state_path.read_text())
+    del state["driftBaseline"]
+    state_path.write_text(json.dumps(state))
+    (tmp_path / "probe_other.py").write_text("x = 1\n")
+    restarted = TDDServer(
+        project_root=str(tmp_path), config_path=str(tmp_path / ".tdd-config.json")
+    )
+
+    first = call(restarted, "run_tests")
+    (tmp_path / "second_probe.py").write_text("y = 2\n")
+    second = call(restarted, "run_tests")
+
+    assert "driftWarning" not in first
+    assert "second_probe.py" in second["driftWarning"]
+
+
 def test_run_tests_advance_still_works_after_a_restart_when_the_test_was_declared_before_it(tmp_path):
     server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
     call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])

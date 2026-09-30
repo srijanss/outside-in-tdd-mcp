@@ -370,7 +370,7 @@ sneak arbitrary flags into the test command.
 
 - **Drift warning** — `write_code`, `run_tests` and `return_to_parent` add a
   `driftWarning` (also logged as a `drift` event) when, since the feature
-  started (or the last report), a git-modified or untracked file changed
+  started (or the last report), a git-modified or untracked file (compared by size and mtime) changed
   that isn't a test file or target file of any level (`return_to_parent`
   still counts the level being left). Files already dirty when the feature
   started are ignored, each change is reported once, and it never blocks.
