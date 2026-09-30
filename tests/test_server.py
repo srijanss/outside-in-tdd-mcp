@@ -12,14 +12,18 @@ from core.server import TOOLS
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def make_server(tmp_path):
+PYTHON_TEST_NAME_PATTERN = r"^\s*(?:async\s+)?def\s+(test_\w+)"
+
+
+def make_server(tmp_path, **extra_config):
     config_path = tmp_path / ".tdd-config.json"
     config_path.write_text(
         json.dumps(
             {
                 "adapterPath": str(
                     PROJECT_ROOT / "adapters" / "pytest-adapter" / "run.sh"
-                )
+                ),
+                **extra_config,
             }
         )
     )
@@ -2143,7 +2147,7 @@ def test_run_tests_recreate_db_without_configured_args_returns_clear_error_and_r
 
 
 def test_write_test_warns_when_more_than_one_new_test_was_added_since_the_level_started(tmp_path):
-    server = make_server(tmp_path)
+    server = make_server(tmp_path, testNamePattern=PYTHON_TEST_NAME_PATTERN)
     test_file = tmp_path / "own_test.py"
     test_file.write_text("def test_existing():\n    assert True\n")
     call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
@@ -2162,7 +2166,7 @@ def test_write_test_warns_when_more_than_one_new_test_was_added_since_the_level_
 
 
 def test_write_test_does_not_warn_about_tests_added_in_an_earlier_completed_cycle(tmp_path):
-    server = make_recording_adapter_server(tmp_path)
+    server = make_recording_adapter_server(tmp_path, testNamePattern=PYTHON_TEST_NAME_PATTERN)
     test_file = tmp_path / "own_test.py"
     test_file.write_text("def test_existing():\n    assert True\n")
     call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
@@ -2188,7 +2192,11 @@ print(json.dumps({"passed": 0, "failed": 1, "failures": [{"name": "t", "message"
     )
     fake_adapter.chmod(0o755)
     config_path = tmp_path / ".tdd-config.json"
-    config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
+    config_path.write_text(
+        json.dumps(
+            {"adapterPath": str(fake_adapter), "testNamePattern": PYTHON_TEST_NAME_PATTERN}
+        )
+    )
     server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
     (tmp_path / "top_test.py").write_text("def test_top():\n    assert True\n")
     sub_test = tmp_path / "sub_test.py"
@@ -2315,9 +2323,9 @@ def test_write_test_does_not_warn_about_existing_tests_after_a_server_restart(tm
     test_file.write_text(
         "def test_one():\n    assert True\n\ndef test_two():\n    assert True\n"
     )
-    first = make_server(tmp_path)
+    first = make_server(tmp_path, testNamePattern=PYTHON_TEST_NAME_PATTERN)
     call(first, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
-    restarted = make_server(tmp_path)  # reloads persisted state, no in-memory baseline
+    restarted = make_server(tmp_path, testNamePattern=PYTHON_TEST_NAME_PATTERN)  # reloads persisted state, no in-memory baseline
 
     payload = call(restarted, "write_test", testName="test_one")
 
@@ -2335,7 +2343,7 @@ def test_run_tests_recreate_db_treats_whitespace_only_recreate_db_args_as_unset(
 
 
 def test_write_test_warns_about_two_new_tests_when_the_file_did_not_exist_at_init(tmp_path):
-    server = make_server(tmp_path)
+    server = make_server(tmp_path, testNamePattern=PYTHON_TEST_NAME_PATTERN)
     call(server, "init_feature", featureName="f", testFile="fresh_test.py", targetFiles=[])
     (tmp_path / "fresh_test.py").write_text(
         "def test_a():\n    assert True\n\ndef test_b():\n    assert True\n"
@@ -2351,7 +2359,7 @@ def test_write_test_does_not_warn_or_fail_when_the_test_target_is_a_directory(tm
     test_dir = tmp_path / "suite"
     test_dir.mkdir()
     (test_dir / "test_x.py").write_text("def test_1():\n    pass\n")
-    server = make_server(tmp_path)
+    server = make_server(tmp_path, testNamePattern=PYTHON_TEST_NAME_PATTERN)
     call(server, "init_feature", featureName="f", testFile="suite", targetFiles=[])
     (test_dir / "test_x.py").write_text(
         "def test_1():\n    pass\n\ndef test_2():\n    pass\n\ndef test_3():\n    pass\n"
@@ -2367,13 +2375,46 @@ def test_write_test_does_not_warn_or_fail_when_the_test_target_is_a_directory(tm
 def test_write_test_does_not_fail_or_warn_on_a_non_utf8_test_file(tmp_path):
     test_file = tmp_path / "latin_test.py"
     test_file.write_bytes(b"# caf\xe9\ndef test_a():\n    pass\n")
-    server = make_server(tmp_path)
+    server = make_server(tmp_path, testNamePattern=PYTHON_TEST_NAME_PATTERN)
     call(server, "init_feature", featureName="f", testFile="latin_test.py", targetFiles=[])
 
     payload = call(server, "write_test", testName="test_a")
 
     assert payload["ok"] is True
     assert "one test per cycle" not in payload.get("warning", "")
+
+
+JS_TEST_NAME_PATTERN = r"""\b(?:it|test)\(\s*['"]([^'"]+)['"]"""
+
+
+def test_write_test_warns_using_the_configured_test_name_pattern_for_other_languages(tmp_path):
+    (tmp_path / "cart.test.js").write_text("it('adds an item', () => {});\n")
+    server = make_recording_adapter_server(tmp_path, testNamePattern=JS_TEST_NAME_PATTERN)
+    call(server, "init_feature", featureName="f", testFile="cart.test.js", targetFiles=[])
+    (tmp_path / "cart.test.js").write_text(
+        "it('adds an item', () => {});\n"
+        "it('removes an item', () => {});\n"
+        "test(\"empties the cart\", () => {});\n"
+    )
+
+    payload = call(server, "write_test", testName="removes an item")
+
+    assert "removes an item" in payload["warning"]
+    assert "empties the cart" in payload["warning"]
+    assert "adds an item" not in payload["warning"]
+
+
+def test_write_test_never_warns_about_multiple_new_tests_without_a_configured_pattern(tmp_path):
+    (tmp_path / "own_test.py").write_text("def test_existing():\n    pass\n")
+    server = make_recording_adapter_server(tmp_path)  # no testNamePattern
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
+    (tmp_path / "own_test.py").write_text(
+        "def test_existing():\n    pass\n\ndef test_a():\n    pass\n\ndef test_b():\n    pass\n"
+    )
+
+    payload = call(server, "write_test", testName="test_a")
+
+    assert "warning" not in payload
 
 
 def test_session_start_hides_completed_features_by_default_and_reports_their_count(tmp_path):

@@ -67,7 +67,8 @@ TOOLS = [
                     "type": "string",
                     "description": (
                         "Test target(s), relative to project root (passed "
-                        "as-is to the adapter, e.g. a pytest path expression)."
+                        "as-is to the adapter — a path or whatever target "
+                        "expression that adapter's test runner accepts)."
                     ),
                 },
                 "targetFiles": {
@@ -110,9 +111,10 @@ TOOLS = [
         description=(
             "Declare a failing test written to disk (via your own file "
             "tools). Only available in RED phase. Returns a warning (never "
-            "a rejection) when more than one new Python test_* function "
-            "appeared in the test file since the level or last cycle "
-            "started — add one test per cycle."
+            "a rejection) when more than one new test appeared in the test "
+            "file since the level or last cycle started — add one test per "
+            "cycle. Only checked when testNamePattern (a regex whose first "
+            "group is the test name) is set in .tdd-config.json."
         ),
         inputSchema={
             "type": "object",
@@ -208,7 +210,7 @@ TOOLS = [
                     "type": "string",
                     "description": (
                         "Scope for the closing-REFACTOR regression sweep: a "
-                        "path/pytest expression to use instead of "
+                        "path/target expression to use instead of "
                         "defaultTestDir, or \"skip\" to skip it entirely."
                     ),
                 }
@@ -496,6 +498,15 @@ def load_config(config_path: str) -> dict[str, Any]:
     _require_string(config, "adapterPath", config_path, required=True)
     _require_string(config, "defaultTestDir", config_path, required=False)
     _require_string(config, "recreateDbArgs", config_path, required=False)
+    _require_string(config, "testNamePattern", config_path, required=False)
+    if "testNamePattern" in config:
+        try:
+            re.compile(config["testNamePattern"])
+        except re.error as exc:
+            raise ConfigError(
+                f"'{config_path}' field 'testNamePattern' is not a valid "
+                f"regex: {exc}"
+            ) from exc
 
     return config
 
@@ -603,7 +614,14 @@ class TDDServer:
             source = full.read_text()
         except (OSError, UnicodeDecodeError):
             return set()
-        return set(re.findall(r"^\s*(?:async\s+)?def\s+(test_\w+)", source, re.M))
+        config, _ = self._try_load_config()
+        pattern = (config or {}).get("testNamePattern")
+        if not pattern:
+            return set()  # language-specific: only checked when configured
+        return {
+            m.group(1) if m.re.groups else m.group(0)
+            for m in re.finditer(pattern, source, re.M)
+        }
 
     def _snapshot_test_names(self, depth: int, path: str) -> None:
         self._test_name_baseline[(depth, path)] = self._read_test_names(path)
