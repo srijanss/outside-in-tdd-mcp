@@ -174,11 +174,21 @@ TOOLS = [
             "REFACTOR with defaultTestDir configured returns "
             "needsRegressionScopeConfirmation instead of running the full "
             "sweep — re-call with regressionScope set to a path/expression "
-            "(or \"skip\") to proceed."
+            "(or \"skip\") to proceed. After a schema/model change, pass "
+            "recreateDb=true to rebuild a cached test DB (needs "
+            "recreateDbArgs in .tdd-config.json)."
         ),
         inputSchema={
             "type": "object",
             "properties": {
+                "recreateDb": {
+                    "type": "boolean",
+                    "description": (
+                        "Prepend the recreateDbArgs configured in "
+                        ".tdd-config.json (e.g. \"--create-db\") to the test "
+                        "target so a stale reused database is rebuilt."
+                    ),
+                },
                 "regressionScope": {
                     "type": "string",
                     "description": (
@@ -1086,7 +1096,10 @@ class TDDServer:
 
             if name == "run_tests":
                 return self._text(
-                    self._run_tests(arguments.get("regressionScope"))
+                    self._run_tests(
+                        arguments.get("regressionScope"),
+                        recreate_db=bool(arguments.get("recreateDb")),
+                    )
                 )
 
             if name == "get_status":
@@ -1321,7 +1334,9 @@ class TDDServer:
         except KeyError as exc:
             return self._error(f"Missing required argument: {exc}")
 
-    def _run_tests(self, regression_scope: str | None = None) -> dict[str, Any]:
+    def _run_tests(
+        self, regression_scope: str | None = None, recreate_db: bool = False
+    ) -> dict[str, Any]:
         if self.sm.phase is None:
             return {"error": "No active feature. Call init_feature() first."}
 
@@ -1393,6 +1408,16 @@ class TDDServer:
             if closing_base_refactor
             else test_target
         )
+        if recreate_db:
+            recreate_db_args = config.get("recreateDbArgs")
+            if not recreate_db_args:
+                return {
+                    "error": (
+                        "recreateDb requires 'recreateDbArgs' to be set in "
+                        ".tdd-config.json (e.g. \"--create-db\")."
+                    )
+                }
+            run_target = f"{recreate_db_args} {run_target}"
 
         try:
             result = run_adapter(adapter_path, run_target, self.project_root)

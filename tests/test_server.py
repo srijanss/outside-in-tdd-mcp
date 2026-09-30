@@ -2102,6 +2102,46 @@ def test_session_start_bundles_features_status_session_log_and_research_via_call
     assert payload["research"][0]["source"] == "https://example.com/thread"
 
 
+def make_recording_adapter_server(tmp_path, **extra_config):
+    """Server whose adapter records the test target it was handed."""
+    fake_adapter = tmp_path / "recording_adapter.py"
+    fake_adapter.write_text(
+        f'''#!/usr/bin/env python3
+import json, sys
+with open({str(tmp_path / "targets.log")!r}, "a") as f:
+    f.write(sys.argv[1] + "\\n")
+print(json.dumps({{"passed": 1, "failed": 0, "failures": []}}))
+'''
+    )
+    fake_adapter.chmod(0o755)
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(
+        json.dumps({"adapterPath": str(fake_adapter), **extra_config})
+    )
+    return TDDServer(project_root=str(tmp_path), config_path=str(config_path))
+
+
+def test_run_tests_recreate_db_prepends_configured_recreate_db_args_to_the_target(tmp_path):
+    server = make_recording_adapter_server(tmp_path, recreateDbArgs="--create-db")
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
+
+    call(server, "run_tests", recreateDb=True)
+
+    assert (tmp_path / "targets.log").read_text() == "--create-db own_test.py\n"
+
+
+def test_run_tests_recreate_db_without_configured_args_returns_clear_error_and_runs_nothing(tmp_path):
+    server = make_recording_adapter_server(tmp_path)
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
+
+    payload = call(server, "run_tests", recreateDb=True)
+
+    assert "recreateDbArgs" in payload["error"]
+    assert ".tdd-config.json" in payload["error"]
+    assert "Missing required argument" not in payload["error"]
+    assert not (tmp_path / "targets.log").exists()
+
+
 def test_session_start_hides_completed_features_by_default_and_reports_their_count(tmp_path):
     server = make_server(tmp_path)
     ledger = [
