@@ -372,7 +372,8 @@ sneak arbitrary flags into the test command.
   `completedFeatureCount`; pass `includeCompleted: true` for the full ledger.
   `session_start` also returns just the last 5 research entries with
   summaries cut to 300 characters (`summaryTruncated: true`) — call
-  `list_research` for the full text.
+  `list_research` for the full text. The session log is capped to its last 5
+  events (`sessionLogTruncated: true` when older ones were cut).
   It also returns a `warnings` list — present only when `.tdd-config.json`
   needs attention, currently when no test-name pattern applies (no
   `testNamePattern` and an `adapter` label with no built-in default), which
@@ -389,6 +390,11 @@ sneak arbitrary flags into the test command.
     failure (the response carries `advanceSkipped`; review it, then call
     `verify()`) or a test that passed straight from RED. Use plain
     `run_tests` + `verify` when you want to confirm each checkpoint yourself.
+- **Stub-only hint** — a missing-name failure (import/attribute error) normally
+  tells you to write only a stub. The hint is dropped when the failing test's
+  source uses a mock/spy (`Mock`, `patch`, `mocker`, `jest.fn`, `vi.fn`,
+  `sinon`, …), since a stub can't satisfy a call assertion. A `file::Class`
+  style `testFile` is resolved to its file for this and the checks below.
 - **`write_test`** returns a `warning` (never a rejection) when more than one
   new test has appeared in the test file since the level, or the last
   completed cycle, started — one test per cycle. Active when a test-name

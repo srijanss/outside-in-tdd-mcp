@@ -3056,3 +3056,60 @@ def test_git_exclude_is_added_when_git_init_happens_after_the_first_save(tmp_pat
 
     lines = (tmp_path / ".git" / "info" / "exclude").read_text().splitlines()
     assert ".tdd-state.json" in lines
+
+
+MISSING_ATTRIBUTE_FAILURE = {
+    "passed": 0,
+    "failed": 1,
+    "failures": [
+        {
+            "name": "own_test.py::test_run_notifies",
+            "message": "AttributeError: module 'mod' has no attribute 'run'",
+        }
+    ],
+}
+
+
+def test_run_tests_gives_no_stub_hint_when_the_failing_test_drives_a_mock(tmp_path):
+    server = make_scripted_adapter_server(tmp_path, MISSING_ATTRIBUTE_FAILURE)
+    (tmp_path / "own_test.py").write_text(
+        "def test_run_notifies():\n"
+        "    c = Mock()\n"
+        "    mod.run(c)\n"
+        "    c.go.assert_called_once_with()\n"
+    )
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
+    call(server, "write_test", testName="test_run_notifies")
+
+    payload = call(server, "run_tests")
+
+    assert payload["phase"] == "verify_red"
+    assert payload["lastError"] is None
+
+
+def test_run_tests_still_gives_the_stub_hint_when_only_another_test_in_the_file_uses_a_mock(tmp_path):
+    fake_adapter = script_adapter_result(tmp_path, MISSING_ATTRIBUTE_FAILURE)
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "adapterPath": str(fake_adapter),
+                "testNamePattern": PYTHON_TEST_NAME_PATTERN,
+            }
+        )
+    )
+    server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
+    (tmp_path / "own_test.py").write_text(
+        "def test_other():\n"
+        "    c = Mock()\n"
+        "    c.go.assert_called_once_with()\n"
+        "\n"
+        "def test_run_notifies():\n"
+        "    assert mod.run() == 1\n"
+    )
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
+    call(server, "write_test", testName="test_run_notifies")
+
+    payload = call(server, "run_tests")
+
+    assert "stub" in payload["lastError"].lower()

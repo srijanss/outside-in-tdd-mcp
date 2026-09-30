@@ -389,6 +389,7 @@ class TDDStateMachine:
         duration_ms: int = 0,
         failures: list | None = None,
         raw_output: str = "",
+        suppress_stub_hint: bool = False,
     ) -> str:
         self._require_feature()
         level = self.stack[-1]
@@ -404,7 +405,9 @@ class TDDStateMachine:
         if level.phase == "red":
             if failed > 0:
                 level.phase = "verify_red"
-                if _looks_like_missing_symbol(level.last_result.failures):
+                if not suppress_stub_hint and _looks_like_missing_symbol(
+                    level.last_result.failures
+                ):
                     level.last_error = _STUB_ONLY_HINT
             elif passed > 0:
                 # Test already passes with no implementation change: skip
@@ -414,7 +417,9 @@ class TDDStateMachine:
 
         elif level.phase == "implement":
             if failed > 0:
-                if _looks_like_missing_symbol(level.last_result.failures):
+                if not suppress_stub_hint and _looks_like_missing_symbol(
+                    level.last_result.failures
+                ):
                     level.last_error = _STUB_ONLY_HINT
                 # else: stay IMPLEMENT, keep fixing (real assertion failure)
             elif passed > 0:

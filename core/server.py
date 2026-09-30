@@ -43,6 +43,14 @@ from core.state_machine import (
     TDDStateMachine,
 )
 
+# Heuristic (data-only, like DEFAULT_TEST_NAME_PATTERNS): a test mentioning
+# any of these drives a mock/spy, e.g. unittest.mock, pytest-mock, jest/vitest,
+# sinon, mockall.
+MOCK_MARKERS = re.compile(
+    r"\b(?:Mock|MagicMock|AsyncMock|patch|mocker|mockall|automock)\b"
+    r"|\b(?:jest|vi)\.(?:fn|mock|spyOn)\b|\bsinon\b"
+)
+
 PROJECT_ROOT = os.environ.get("TDD_PROJECT_ROOT") or str(Path.cwd())
 CONFIG_PATH = os.environ.get(
     "TDD_CONFIG_PATH", str(Path(PROJECT_ROOT) / ".tdd-config.json")
@@ -653,23 +661,51 @@ class TDDServer:
             full = Path(self.project_root) / full
         return full
 
+    def _test_name_pattern(self) -> str | None:
+        config, _ = self._try_load_config()
+        config = config or {}
+        return config.get("testNamePattern") or DEFAULT_TEST_NAME_PATTERNS.get(
+            config.get("adapter")
+        )
+
     def _read_test_names(self, path: str) -> set[str]:
         full = self._resolve_on_disk(path)
         try:
             source = full.read_text()
         except (OSError, UnicodeDecodeError):
             return set()
-        config, _ = self._try_load_config()
-        config = config or {}
-        pattern = config.get("testNamePattern") or DEFAULT_TEST_NAME_PATTERNS.get(
-            config.get("adapter")
-        )
+        pattern = self._test_name_pattern()
         if not pattern:
             return set()  # language-specific: only checked when configured
         return {
             m.group(1) if m.re.groups else m.group(0)
             for m in re.finditer(pattern, source, re.M)
         }
+
+    def _failing_tests_drive_mocks(self, failures: list[dict[str, Any]]) -> bool:
+        """True if any failing test's source uses a mock/patch. A stub can
+        never satisfy a test asserting on calls made to a mock, so the
+        'write only a stub' hint would mislead. Judged from the test's
+        source (its body when the name is found, else the whole file), not
+        the failure message, which rarely mentions the mock."""
+        try:
+            source = self._resolve_on_disk(self.sm.test_file).read_text()
+        except (OSError, UnicodeDecodeError):
+            return False
+        pattern = self._test_name_pattern()
+        starts = (
+            [m.start() for m in re.finditer(pattern, source, re.M)] if pattern else []
+        )
+        for failure in failures:
+            name = str(failure.get("name", "")).rsplit("::", 1)[-1]
+            at = source.find(name) if name else -1
+            body = source
+            if at >= 0:
+                end = next((s for s in starts if s > at), len(source))
+                body = source[at:end]
+            if MOCK_MARKERS.search(body):
+                return True
+        return False
 
     def _snapshot_test_names(self, depth: int, path: str) -> None:
         self._test_name_baseline[(depth, path)] = self._read_test_names(path)
@@ -1589,6 +1625,7 @@ class TDDServer:
             duration_ms=result.duration_ms,
             failures=capped_failures,
             raw_output=result.raw_output,
+            suppress_stub_hint=self._failing_tests_drive_mocks(capped_failures),
         )
         self._log_event(
             "run_tests",
