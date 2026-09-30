@@ -738,7 +738,17 @@ class TDDServer:
                 "warning": f"'{path}' not found on disk — declared but never written?",
             }
         key = (self.sm.depth, path)
-        previous = self._declared_hashes.get(key)
+        # A level with no declaration of its own yet inherits the nearest
+        # enclosing level's hash for the same file, so drilling down onto
+        # an untouched file doesn't read as "changed".
+        previous = next(
+            (
+                self._declared_hashes[(depth, path)]
+                for depth in range(self.sm.depth, 0, -1)
+                if (depth, path) in self._declared_hashes
+            ),
+            None,
+        )
         self._declared_hashes[key] = digest
         evidence: dict[str, Any] = {
             "fileChanged": digest != previous,

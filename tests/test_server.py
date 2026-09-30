@@ -2956,6 +2956,20 @@ def test_write_test_reports_file_evidence_and_flags_unchanged_redeclare(tmp_path
     assert "unchanged" in again["warning"]
 
 
+def test_write_test_after_a_drill_down_reports_an_untouched_file_as_unchanged(tmp_path):
+    server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    (tmp_path / "t.py").write_text("def test_a(): assert False\n")
+    first = call(server, "write_test", testName="a")
+    call(server, "run_tests", advance=True)
+    call(server, "drill_down", testFile="t.py", targetFiles=["impl.py"])
+
+    nested = call(server, "write_test", testName="a")
+
+    assert nested["fileChanged"] is False
+    assert nested["sha256"] == first["sha256"]
+
+
 def test_write_test_warns_when_declared_file_is_missing(tmp_path):
     server = make_server(tmp_path)
     call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
