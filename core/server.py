@@ -779,7 +779,19 @@ class TDDServer:
         for level in self.sm.stack:
             paths.append(level.test_file.split("::", 1)[0])
             paths.extend(level.target_files)
-        return [p.rstrip("/") for p in paths if p]
+        return [self._project_relative(p) for p in paths if p]
+
+    def _project_relative(self, path: str) -> str:
+        """`path` as git reports it: relative to project_root, normalised
+        ('./a//b/' -> 'a/b'), with an absolute path under project_root
+        made relative."""
+        normalised = os.path.normpath(path)
+        if os.path.isabs(normalised):
+            try:
+                normalised = os.path.relpath(normalised, self.project_root)
+            except ValueError:  # e.g. a different drive on Windows
+                pass
+        return normalised
 
     def _drift_evidence(self, declared: list[str] | None = None) -> dict[str, Any]:
         """Soft check: files changed since the feature started (or the last
