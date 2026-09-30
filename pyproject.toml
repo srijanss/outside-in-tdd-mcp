@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "outside-in-tdd-mcp"
-version = "0.1.6"
+version = "0.1.7"
 description = "Language-agnostic MCP server enforcing Outside-In TDD phases"
 requires-python = ">=3.10"
 dependencies = ["mcp>=1.2.0,<2"]
