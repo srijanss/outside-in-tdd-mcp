@@ -12,6 +12,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import sys
@@ -108,7 +109,10 @@ TOOLS = [
         name="write_test",
         description=(
             "Declare a failing test written to disk (via your own file "
-            "tools). Only available in RED phase."
+            "tools). Only available in RED phase. Returns a warning (never "
+            "a rejection) when more than one new Python test_* function "
+            "appeared in the test file since the level or last cycle "
+            "started — add one test per cycle."
         ),
         inputSchema={
             "type": "object",
@@ -533,6 +537,9 @@ class TDDServer:
         # (depth, path) -> sha256 last reported by write_test/write_code;
         # in-memory only, cleared on init_feature.
         self._declared_hashes: dict[tuple[int, str], str] = {}
+        # (depth, path) -> test function names present when that level
+        # started; in-memory only.
+        self._test_name_baseline: dict[tuple[int, str], set[str]] = {}
         self._load_state()
 
     def _ensure_git_excluded(self) -> None:
@@ -575,6 +582,23 @@ class TDDServer:
         stale baseline inherited from a previous level at the same depth."""
         for key in [k for k in self._declared_hashes if k[0] >= from_depth]:
             del self._declared_hashes[key]
+
+    def _read_test_names(self, path: str) -> set[str]:
+        full = Path(path)
+        if not full.is_absolute():
+            full = Path(self.project_root) / full
+        try:
+            source = full.read_text()
+        except (OSError, UnicodeDecodeError):
+            return set()
+        return set(re.findall(r"^\s*(?:async\s+)?def\s+(test_\w+)", source, re.M))
+
+    def _snapshot_test_names(self, depth: int, path: str) -> None:
+        self._test_name_baseline[(depth, path)] = self._read_test_names(path)
+
+    def _new_test_names(self, depth: int, path: str) -> list[str]:
+        baseline = self._test_name_baseline.get((depth, path), set())
+        return sorted(self._read_test_names(path) - baseline)
 
     def _declare_evidence(self, path: str) -> dict[str, Any]:
         """Soft check of a write_test/write_code declaration against disk:
@@ -981,6 +1005,7 @@ class TDDServer:
         try:
             if name == "init_feature":
                 self._declared_hashes.clear()
+                self._snapshot_test_names(1, arguments["testFile"])
                 config, error = self._try_load_config()
                 if error:
                     return self._error(error)
@@ -1057,6 +1082,12 @@ class TDDServer:
             if name == "write_test":
                 self.sm.write_test(arguments["testName"])
                 evidence = self._declare_evidence(self.sm.test_file)
+                new_tests = self._new_test_names(self.sm.depth, self.sm.test_file)
+                if len(new_tests) > 1:
+                    evidence["warning"] = (
+                        f"{len(new_tests)} new tests since this level started "
+                        f"({', '.join(new_tests)}) — one test per cycle."
+                    )
                 self._log_event(
                     "write_test", testName=arguments["testName"], **evidence
                 )
@@ -1095,12 +1126,14 @@ class TDDServer:
                 )
 
             if name == "run_tests":
-                return self._text(
-                    self._run_tests(
-                        arguments.get("regressionScope"),
-                        recreate_db=bool(arguments.get("recreateDb")),
-                    )
+                cycles_before = self.sm.cycle_count
+                payload = self._run_tests(
+                    arguments.get("regressionScope"),
+                    recreate_db=bool(arguments.get("recreateDb")),
                 )
+                if self.sm.cycle_count > cycles_before:
+                    self._snapshot_test_names(self.sm.depth, self.sm.test_file)
+                return self._text(payload)
 
             if name == "get_status":
                 return self._text(self.sm.status(include_stack=True))
@@ -1220,6 +1253,7 @@ class TDDServer:
             if name == "drill_down":
                 self.sm.drill_down(arguments["testFile"], arguments["targetFiles"])
                 self._forget_declared_hashes(self.sm.depth)
+                self._snapshot_test_names(self.sm.depth, arguments["testFile"])
                 self._log_event(
                     "drill_down",
                     testFile=arguments["testFile"],

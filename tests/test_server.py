@@ -2142,6 +2142,69 @@ def test_run_tests_recreate_db_without_configured_args_returns_clear_error_and_r
     assert not (tmp_path / "targets.log").exists()
 
 
+def test_write_test_warns_when_more_than_one_new_test_was_added_since_the_level_started(tmp_path):
+    server = make_server(tmp_path)
+    test_file = tmp_path / "own_test.py"
+    test_file.write_text("def test_existing():\n    assert True\n")
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
+    test_file.write_text(
+        test_file.read_text()
+        + "\ndef test_first_new():\n    assert True\n"
+        + "\ndef test_second_new():\n    assert True\n"
+    )
+
+    payload = call(server, "write_test", testName="test_first_new")
+
+    assert "test_first_new" in payload["warning"]
+    assert "test_second_new" in payload["warning"]
+    assert "test_existing" not in payload["warning"]
+    assert "one test per cycle" in payload["warning"].lower()
+
+
+def test_write_test_does_not_warn_about_tests_added_in_an_earlier_completed_cycle(tmp_path):
+    server = make_recording_adapter_server(tmp_path)
+    test_file = tmp_path / "own_test.py"
+    test_file.write_text("def test_existing():\n    assert True\n")
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
+    test_file.write_text(test_file.read_text() + "\ndef test_a():\n    assert True\n")
+    call(server, "write_test", testName="test_a")
+    call(server, "run_tests")  # passes already -> verify_green
+    call(server, "verify")  # -> refactor
+    call(server, "run_tests")  # -> red, cycle 1 complete
+    test_file.write_text(test_file.read_text() + "\ndef test_b():\n    assert True\n")
+
+    payload = call(server, "write_test", testName="test_b")
+
+    assert "warning" not in payload
+
+
+def test_write_test_in_a_drilled_down_level_ignores_tests_that_predate_the_drill_down(tmp_path):
+    fake_adapter = tmp_path / "failing_adapter.py"
+    fake_adapter.write_text(
+        '''#!/usr/bin/env python3
+import json
+print(json.dumps({"passed": 0, "failed": 1, "failures": [{"name": "t", "message": "boom"}]}))
+'''
+    )
+    fake_adapter.chmod(0o755)
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
+    server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
+    (tmp_path / "top_test.py").write_text("def test_top():\n    assert True\n")
+    sub_test = tmp_path / "sub_test.py"
+    sub_test.write_text("def test_existing():\n    assert True\n")
+    call(server, "init_feature", featureName="f", testFile="top_test.py", targetFiles=[])
+    call(server, "write_test", testName="test_top")
+    call(server, "run_tests")  # -> verify_red
+    call(server, "verify")  # -> implement
+    call(server, "drill_down", testFile="sub_test.py", targetFiles=["impl.py"])
+    sub_test.write_text(sub_test.read_text() + "\ndef test_new():\n    assert True\n")
+
+    payload = call(server, "write_test", testName="test_new")
+
+    assert "warning" not in payload
+
+
 def test_session_start_hides_completed_features_by_default_and_reports_their_count(tmp_path):
     server = make_server(tmp_path)
     ledger = [
