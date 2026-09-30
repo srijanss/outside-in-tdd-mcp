@@ -3284,6 +3284,22 @@ def test_drift_baseline_survives_a_server_restart(tmp_path):
     assert "probe_other.py" in payload["driftWarning"]
 
 
+def test_drift_check_works_when_project_root_is_a_subdirectory_of_the_repo(tmp_path):
+    git_init(tmp_path)
+    project = tmp_path / "proj"
+    project.mkdir()
+    server = make_scripted_adapter_server(project, ASSERTION_FAILURE)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    call(server, "write_test", testName="t")
+    (project / "probe_other.py").write_text("x = 1\n")
+    (tmp_path / "outside_project.py").write_text("y = 2\n")
+
+    payload = call(server, "run_tests")
+
+    assert "probe_other.py" in payload["driftWarning"]
+    assert "outside_project.py" not in payload["driftWarning"]
+
+
 def test_run_tests_advance_still_works_after_a_restart_when_the_test_was_declared_before_it(tmp_path):
     server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
     call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])

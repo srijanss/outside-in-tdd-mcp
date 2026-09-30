@@ -736,10 +736,19 @@ class TDDServer:
                 capture_output=True,
                 timeout=10,
             )
+            # git reports repo-root-relative paths; project_root may be a
+            # subdirectory of the repo.
+            prefix_out = subprocess.run(
+                ["git", "rev-parse", "--show-prefix"],
+                cwd=self.project_root,
+                capture_output=True,
+                timeout=10,
+            )
         except (OSError, subprocess.SubprocessError):
             return None
-        if out.returncode != 0:
+        if out.returncode != 0 or prefix_out.returncode != 0:
             return None
+        prefix = prefix_out.stdout.decode("utf-8", "replace").strip()
         entries = out.stdout.decode("utf-8", "replace").split("\0")
         state: dict[str, str | None] = {}
         skip_next = False
@@ -752,6 +761,9 @@ class TDDServer:
             if entry[0] in "RC" or entry[1] in "RC":
                 skip_next = True
             path = entry[3:]
+            if not path.startswith(prefix):
+                continue  # outside project_root
+            path = path[len(prefix):]
             if Path(path).name.startswith(".tdd-"):
                 continue
             try:
