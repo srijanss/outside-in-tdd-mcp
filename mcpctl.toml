@@ -49,15 +49,15 @@ from = ".tdd-config.json"
 to = ".tdd-config.json"
 
 [[scaffold.hints]]
-message = ".tdd-config.json defaults to pytest (pytest-adapter-runner) with a matching testNamePattern. pytest and pytest-json-report must be installed in the project's own .venv."
+message = ".tdd-config.json defaults to pytest (pytest-adapter-runner), with the one-test-per-cycle warning on by default. pytest and pytest-json-report must be installed in the project's own .venv."
 
 [[scaffold.hints]]
 when_exists = "Cargo.toml"
-message = "Rust project detected: in .tdd-config.json set adapter to \"cargo-adapter\", adapterPath to \"cargo-adapter-runner\", defaultTestDir to \"--workspace\" and testNamePattern to \"#\\\\[(?:tokio::)?test\\\\]\\\\s*(?:async\\\\s+)?fn\\\\s+(\\\\w+)\" (see README, Configuration reference)."
+message = "Rust project detected: in .tdd-config.json set adapter to \"cargo-adapter\", adapterPath to \"cargo-adapter-runner\" and defaultTestDir to \"--workspace\"."
 
 [[scaffold.hints]]
 when_exists = "package.json"
-message = "JS/TS project detected: in .tdd-config.json set adapter to \"vitest-adapter\" and adapterPath to \"vitest-adapter-runner\" and testNamePattern as in README's Configuration reference (vitest must be a devDependency; node/npx on PATH)."
+message = "JS/TS project detected: in .tdd-config.json set adapter to \"vitest-adapter\" and adapterPath to \"vitest-adapter-runner\" (vitest must be a devDependency; node/npx on PATH)."
 
 [[scaffold.hints]]
 message = "Restart your client here and run /mcp (Claude Code) to confirm outside-in-tdd is connected."

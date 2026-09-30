@@ -1,7 +1,6 @@
 {
-  "_comment": "Docker consumer flow — see README's 'Using in a consumer project' section. adapterPath is a container-root path (the adapter script lives inside the image, not your mounted project). For a non-Docker setup (pip install -e ., adapterPath as a bare console-script name like 'pytest-adapter-runner'), see README's 'Without Docker' section instead. Optional keys (see README 'Configuration reference'): testNamePattern, recreateDbArgs.",
+  "_comment": "Docker consumer flow — see README's 'Using in a consumer project' section. adapterPath is a container-root path (the adapter script lives inside the image, not your mounted project). For a non-Docker setup (pip install -e ., adapterPath as a bare console-script name like 'pytest-adapter-runner'), see README's 'Without Docker' section instead. Optional keys (see README 'Configuration reference'): testNamePattern (defaults by adapter), recreateDbArgs.",
   "adapter": "pytest-adapter",
   "adapterPath": "/adapters/pytest-adapter/run.sh",
-  "defaultTestDir": "tests/",
-  "testNamePattern": "^\\s*(?:async\\s+)?def\\s+(test_\\w+)"
+  "defaultTestDir": "tests/"
 }

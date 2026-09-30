@@ -1,6 +1,5 @@
 {
   "adapter": "pytest-adapter",
   "adapterPath": "pytest-adapter-runner",
-  "defaultTestDir": "tests/",
-  "testNamePattern": "^\\s*(?:async\\s+)?def\\s+(test_\\w+)"
+  "defaultTestDir": "tests/"
 }

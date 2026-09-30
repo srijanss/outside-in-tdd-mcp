@@ -343,16 +343,18 @@ adapter — `core/` has none. Only `adapterPath` is required.
 | `adapter` | no | Free-text label (`pytest-adapter`, `cargo-adapter`, …); informational. |
 | `adapterPath` | yes | The adapter executable: an absolute path, a path relative to the project root, or a bare command name found next to the server's interpreter / on `PATH`. |
 | `defaultTestDir` | no | Whole-suite target used for the regression sweep when a base-level REFACTOR closes. Same shell-word syntax as a test target. |
-| `testNamePattern` | no | Regex whose **first capture group is a test's name** (matched line-by-line across the test file). Enables the one-test-per-cycle warning on `write_test`. Unset = the warning is off. Must be a valid regex (checked at config load). |
+| `testNamePattern` | no | Regex whose **first capture group is a test's name** (matched line-by-line across the test file), used for the one-test-per-cycle warning on `write_test`. Defaults per `adapter` label (`pytest-adapter`, `vitest-adapter`, `cargo-adapter` — see below); set it to override, or for a custom adapter. No pattern and no built-in default = the warning is off. Must be a valid regex (checked at config load). |
 | `recreateDbArgs` | no | Extra runner arguments that `run_tests(recreateDb=true)` prepends to the test target, to rebuild a cached test database after a schema change (e.g. `--create-db` for pytest-django with `--reuse-db`). Unset = `recreateDb` returns a clear error. |
 
-Suggested `testNamePattern` per adapter (JSON-escaped, ready to paste):
+Built-in `testNamePattern` defaults, chosen by the `adapter` label (shown
+JSON-escaped, so you can paste one into `.tdd-config.json` as a starting
+point for your own variant):
 
-| Adapter | `testNamePattern` |
+| `adapter` | Default `testNamePattern` |
 |---|---|
-| pytest | `"^\\s*(?:async\\s+)?def\\s+(test_\\w+)"` |
-| vitest / jest | ``"\\b(?:it|test)\\(\\s*['\"`]([^'\"`]+)['\"`]"`` |
-| cargo | `"#\\[(?:tokio::)?test\\]\\s*(?:async\\s+)?fn\\s+(\\w+)"` |
+| `pytest-adapter` | `"^\\s*(?:async\\s+)?def\\s+(test_\\w+)"` |
+| `vitest-adapter` | ``"\\b(?:it|test)(?:\\.(?:only|skip|todo|concurrent))?\\(\\s*['\"`]([^'\"`]+)['\"`]"`` |
+| `cargo-adapter` | `"#\\[(?:tokio::)?test\\]\\s*(?:async\\s+)?fn\\s+(\\w+)"` |
 
 These are line-oriented heuristics, not parsers: they suit the common
 declaration styles and can miss exotic ones (e.g. generated or
@@ -385,7 +387,9 @@ sneak arbitrary flags into the test command.
     `run_tests` + `verify` when you want to confirm each checkpoint yourself.
 - **`write_test`** returns a `warning` (never a rejection) when more than one
   new test has appeared in the test file since the level, or the last
-  completed cycle, started — one test per cycle. Needs `testNamePattern`.
+  completed cycle, started — one test per cycle. Active when a test-name
+  pattern applies (`testNamePattern`, or the built-in default for the
+  `adapter` label).
   The baseline is kept in memory only, so after a server restart the check
   stays silent until the next level or cycle boundary re-snapshots it.
 
@@ -401,7 +405,7 @@ Write an executable at a known path that:
 Then point `.tdd-config.json`'s `adapterPath` at it. Nothing in `core/` needs
 to change. If the language has a recognisable test-declaration syntax, also
 set `testNamePattern` (see the Configuration reference above) to get the
-one-test-per-cycle warning; add `recreateDbArgs` if its runner caches a test
+one-test-per-cycle warning (the bundled adapters already have built-in defaults); add `recreateDbArgs` if its runner caches a test
 database.
 
 Whatever `failures` an adapter returns, `server.py`'s `run_tests` handler caps
