@@ -3338,6 +3338,22 @@ def test_drift_check_recognises_the_file_inside_a_command_style_test_target(tmp_
     assert "driftWarning" not in payload
 
 
+def test_a_failed_git_check_does_not_discard_the_drift_baseline(tmp_path, monkeypatch):
+    git_init(tmp_path)
+    server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    call(server, "write_test", testName="t")
+    (tmp_path / "probe_other.py").write_text("x = 1\n")
+    real_state = server._worktree_state
+    monkeypatch.setattr(server, "_worktree_state", lambda: None)  # git fails
+    call(server, "run_tests")
+    monkeypatch.setattr(server, "_worktree_state", real_state)
+
+    payload = call(server, "run_tests")
+
+    assert "probe_other.py" in payload["driftWarning"]
+
+
 def test_run_tests_advance_still_works_after_a_restart_when_the_test_was_declared_before_it(tmp_path):
     server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
     call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])

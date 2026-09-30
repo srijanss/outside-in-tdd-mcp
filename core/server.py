@@ -802,8 +802,10 @@ class TDDServer:
         report) that aren't a declared test file or target file of any
         level. Empty when git is unavailable or nothing drifted."""
         current = self._worktree_state()
+        if current is None:
+            return {}  # git unavailable/failed: keep the baseline as it was
         baseline, self._drift_baseline = self._drift_baseline, current
-        if current is None or baseline is None:
+        if baseline is None:
             return {}
         declared = self._declared_paths() if declared is None else declared
         drifted = sorted(
