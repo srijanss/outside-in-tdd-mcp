@@ -2274,6 +2274,32 @@ def test_run_tests_advance_stops_at_verify_red_when_the_failure_is_only_a_missin
     assert "advance" in payload["advanceSkipped"].lower()
 
 
+def test_run_tests_advance_leaves_a_still_failing_implement_run_in_implement(tmp_path):
+    server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    call(server, "write_test", testName="t")
+    call(server, "run_tests", advance=True)  # red -> implement
+
+    payload = call(server, "run_tests", advance=True)  # still failing
+
+    assert payload["phase"] == "implement"
+    assert "advanceSkipped" not in payload
+
+
+def test_run_tests_advance_has_no_extra_effect_when_closing_a_refactor(tmp_path):
+    server = make_scripted_adapter_server(tmp_path, PASSING)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    call(server, "write_test", testName="t")
+    call(server, "run_tests")  # passes straight away -> verify_green
+    call(server, "verify")  # -> refactor
+
+    payload = call(server, "run_tests", advance=True)
+
+    assert "error" not in payload
+    assert payload["phase"] == "red"  # the normal cycle close, nothing further
+    assert "advanceSkipped" not in payload
+
+
 def test_run_tests_advance_does_not_advance_a_test_that_passes_straight_from_red(tmp_path):
     server = make_scripted_adapter_server(tmp_path, PASSING)
     call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
@@ -2306,6 +2332,48 @@ def test_run_tests_recreate_db_treats_whitespace_only_recreate_db_args_as_unset(
 
     assert "recreateDbArgs" in payload["error"]
     assert not (tmp_path / "targets.log").exists()
+
+
+def test_write_test_warns_about_two_new_tests_when_the_file_did_not_exist_at_init(tmp_path):
+    server = make_server(tmp_path)
+    call(server, "init_feature", featureName="f", testFile="fresh_test.py", targetFiles=[])
+    (tmp_path / "fresh_test.py").write_text(
+        "def test_a():\n    assert True\n\ndef test_b():\n    assert True\n"
+    )
+
+    payload = call(server, "write_test", testName="test_a")
+
+    assert "test_a" in payload["warning"]
+    assert "test_b" in payload["warning"]
+
+
+def test_write_test_does_not_warn_or_fail_when_the_test_target_is_a_directory(tmp_path):
+    test_dir = tmp_path / "suite"
+    test_dir.mkdir()
+    (test_dir / "test_x.py").write_text("def test_1():\n    pass\n")
+    server = make_server(tmp_path)
+    call(server, "init_feature", featureName="f", testFile="suite", targetFiles=[])
+    (test_dir / "test_x.py").write_text(
+        "def test_1():\n    pass\n\ndef test_2():\n    pass\n\ndef test_3():\n    pass\n"
+    )
+
+    payload = call(server, "write_test", testName="test_2")
+
+    assert payload["ok"] is True
+    assert "error" not in payload
+    assert "one test per cycle" not in payload.get("warning", "")
+
+
+def test_write_test_does_not_fail_or_warn_on_a_non_utf8_test_file(tmp_path):
+    test_file = tmp_path / "latin_test.py"
+    test_file.write_bytes(b"# caf\xe9\ndef test_a():\n    pass\n")
+    server = make_server(tmp_path)
+    call(server, "init_feature", featureName="f", testFile="latin_test.py", targetFiles=[])
+
+    payload = call(server, "write_test", testName="test_a")
+
+    assert payload["ok"] is True
+    assert "one test per cycle" not in payload.get("warning", "")
 
 
 def test_session_start_hides_completed_features_by_default_and_reports_their_count(tmp_path):
@@ -2348,6 +2416,20 @@ def test_session_start_truncates_long_research_summaries_and_flags_them(tmp_path
     assert long_entry["summaryTruncated"] is True
     assert short_entry["summary"] == "brief"
     assert "summaryTruncated" not in short_entry
+
+
+def test_session_start_truncates_research_summaries_only_past_300_chars(tmp_path):
+    server = make_server(tmp_path)
+    call(server, "record_research", source="exact", summary="y" * 300)
+    call(server, "record_research", source="over", summary="y" * 301)
+
+    payload = call(server, "session_start")
+
+    exact, over = payload["research"]
+    assert exact["summary"] == "y" * 300
+    assert "summaryTruncated" not in exact
+    assert len(over["summary"]) == 300
+    assert over["summaryTruncated"] is True
 
 
 def test_session_start_truncates_research_to_last_5_entries(tmp_path):
