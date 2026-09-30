@@ -2623,6 +2623,18 @@ def test_session_start_on_fresh_project_returns_empty_bundle(tmp_path):
     assert payload["research"] == []
 
 
+def test_session_start_returns_only_the_last_5_session_log_events_and_flags_truncation(tmp_path):
+    server = make_server(tmp_path)
+    with open(tmp_path / ".tdd-session.log", "a") as f:
+        for i in range(8):
+            f.write(json.dumps({"event": f"e{i}"}) + "\n")
+
+    payload = call(server, "session_start")
+
+    assert [e["event"] for e in payload["sessionLog"]] == ["e3", "e4", "e5", "e6", "e7"]
+    assert payload["sessionLogTruncated"] is True
+
+
 def test_session_start_skips_corrupted_session_log_lines(tmp_path):
     server = make_server(tmp_path)
     call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])

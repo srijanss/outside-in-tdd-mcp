@@ -427,7 +427,7 @@ TOOLS = [
         description=(
             "Read-only orientation bundle for a fresh session or after a "
             "/clear: the feature ledger (list_features), current phase/"
-            "drill-down stack (get_status), a tail of .tdd-session.log, "
+            "drill-down stack (get_status), the last 5 events of .tdd-session.log (sessionLogTruncated: true when older ones were cut),"
             "and the last 5 entries of the durable research log "
             "(.tdd-research.json, summaries cut to 300 chars and flagged "
             "summaryTruncated — call list_research for full text). "
@@ -1009,12 +1009,13 @@ class TDDServer:
         except OSError:
             pass  # session logging is best-effort; never block the TDD cycle
 
-    def _tail_session_log(self, limit: int = 20) -> list[dict[str, Any]]:
+    def _tail_session_log(self, limit: int = 5) -> tuple[list[dict[str, Any]], bool]:
+        """Last `limit` session-log entries, and whether older lines were cut."""
         try:
             with open(self.session_log_path) as f:
                 lines = f.readlines()
         except OSError:
-            return []
+            return [], False
         entries: list[dict[str, Any]] = []
         for line in lines[-limit:]:
             try:
@@ -1023,7 +1024,7 @@ class TDDServer:
                 continue  # a corrupted line must never block orientation
             if isinstance(parsed, dict):
                 entries.append(parsed)
-        return entries
+        return entries, len(lines) > limit
 
     @staticmethod
     def _truncate_research_summary(entry: dict[str, Any]) -> dict[str, Any]:
@@ -1441,12 +1442,14 @@ class TDDServer:
             if name == "session_start":
                 with self._research_lock():
                     research = _list_research_entries(path=self.research_path)
+                session_log, log_truncated = self._tail_session_log()
                 return self._text(
                     {
                         **self._feature_ledger_view(arguments),
                         **self._config_warnings(),
                         "status": self.sm.status(include_stack=True),
-                        "sessionLog": self._tail_session_log(),
+                        "sessionLog": session_log,
+                        **({"sessionLogTruncated": True} if log_truncated else {}),
                         "research": [
                             self._truncate_research_summary(entry)
                             for entry in research[-5:]
