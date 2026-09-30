@@ -785,13 +785,13 @@ class TDDServer:
         )
         if not drifted:
             return {}
-        return {
-            "driftWarning": (
-                f"Changed outside the declared test/target files: "
-                f"{', '.join(drifted)}. Intentional? If it needs its own "
-                "test, drill_down into it first."
-            )
-        }
+        warning = (
+            f"Changed outside the declared test/target files: "
+            f"{', '.join(drifted)}. Intentional? If it needs its own "
+            "test, drill_down into it first."
+        )
+        self._log_event("drift", driftWarning=warning)
+        return {"driftWarning": warning}
 
     def _declare_evidence(self, path: str) -> dict[str, Any]:
         """Soft check of a write_test/write_code declaration against disk:
@@ -1309,11 +1309,10 @@ class TDDServer:
             if name == "write_code":
                 self.sm.write_code(arguments["filePath"])
                 evidence = self._declare_evidence(arguments["filePath"])
-                evidence.update(self._drift_evidence())
                 self._log_event(
                     "write_code", filePath=arguments["filePath"], **evidence
                 )
-                return self._text({"ok": True, **evidence})
+                return self._text({"ok": True, **evidence, **self._drift_evidence()})
 
             if name == "refactor_code":
                 self.sm.refactor_code(arguments["description"])

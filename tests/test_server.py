@@ -3234,6 +3234,48 @@ def test_write_code_warns_about_a_file_changed_outside_the_declared_files(tmp_pa
     assert "impl.py" not in payload["driftWarning"]
 
 
+def test_drift_is_recorded_in_the_session_log(tmp_path):
+    git_init(tmp_path)
+    server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    call(server, "write_test", testName="t")
+    (tmp_path / "probe_other.py").write_text("x = 1\n")
+
+    call(server, "run_tests")
+
+    entry = [e for e in call(server, "session_start")["sessionLog"] if e["event"] == "drift"][-1]
+    assert "probe_other.py" in entry["driftWarning"]
+
+
+def test_return_to_parent_warns_about_a_file_changed_outside_the_declared_files(tmp_path):
+    git_init(tmp_path)
+    server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    call(server, "write_test", testName="t")
+    call(server, "run_tests", advance=True)
+    call(server, "drill_down", testFile="u.py::test_u", targetFiles=["impl.py"])
+    (tmp_path / "probe_other.py").write_text("x = 1\n")
+
+    payload = call(server, "return_to_parent")
+
+    assert "probe_other.py" in payload["driftWarning"]
+
+
+def test_drift_baseline_survives_a_server_restart(tmp_path):
+    git_init(tmp_path)
+    server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    call(server, "write_test", testName="t")
+    (tmp_path / "probe_other.py").write_text("x = 1\n")
+    restarted = TDDServer(
+        project_root=str(tmp_path), config_path=str(tmp_path / ".tdd-config.json")
+    )
+
+    payload = call(restarted, "run_tests")
+
+    assert "probe_other.py" in payload["driftWarning"]
+
+
 def test_run_tests_advance_still_works_after_a_restart_when_the_test_was_declared_before_it(tmp_path):
     server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
     call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
