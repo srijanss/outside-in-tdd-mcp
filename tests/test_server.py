@@ -2298,6 +2298,16 @@ def test_write_test_does_not_warn_about_existing_tests_after_a_server_restart(tm
     assert "warning" not in payload
 
 
+def test_run_tests_recreate_db_treats_whitespace_only_recreate_db_args_as_unset(tmp_path):
+    server = make_recording_adapter_server(tmp_path, recreateDbArgs="   ")
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
+
+    payload = call(server, "run_tests", recreateDb=True)
+
+    assert "recreateDbArgs" in payload["error"]
+    assert not (tmp_path / "targets.log").exists()
+
+
 def test_session_start_hides_completed_features_by_default_and_reports_their_count(tmp_path):
     server = make_server(tmp_path)
     ledger = [

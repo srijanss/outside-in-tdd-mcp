@@ -57,6 +57,19 @@ def test_load_config_raises_when_default_test_dir_is_wrong_type(tmp_path):
         server.load_config(config_path)
 
 
+def test_load_config_raises_when_recreate_db_args_is_wrong_type(tmp_path):
+    config_path = write_config(
+        tmp_path,
+        {
+            "adapterPath": "adapters/pytest-adapter/run.sh",
+            "recreateDbArgs": ["--create-db"],
+        },
+    )
+
+    with pytest.raises(server.ConfigError, match="recreateDbArgs"):
+        server.load_config(config_path)
+
+
 def test_load_config_returns_config_when_valid(tmp_path):
     config_path = write_config(
         tmp_path,

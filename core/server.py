@@ -495,6 +495,7 @@ def load_config(config_path: str) -> dict[str, Any]:
 
     _require_string(config, "adapterPath", config_path, required=True)
     _require_string(config, "defaultTestDir", config_path, required=False)
+    _require_string(config, "recreateDbArgs", config_path, required=False)
 
     return config
 
@@ -1470,7 +1471,7 @@ class TDDServer:
             else test_target
         )
         if recreate_db:
-            recreate_db_args = config.get("recreateDbArgs")
+            recreate_db_args = (config.get("recreateDbArgs") or "").strip()
             if not recreate_db_args:
                 return {
                     "error": (
