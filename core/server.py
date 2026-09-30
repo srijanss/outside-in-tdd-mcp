@@ -595,7 +595,7 @@ class TDDServer:
         # (depth, path) -> test function names present when that level
         # started; in-memory only.
         self._test_name_baseline: dict[tuple[int, str], set[str]] = {}
-        # path -> content hash of every git-dirty file when the feature
+        # path -> size:mtime signature of every git-dirty file when the feature
         # started (or the last drift report); None = no baseline / no git.
         self._drift_baseline: dict[str, str | None] | None = None
         self._load_state()
@@ -726,7 +726,7 @@ class TDDServer:
         return sorted(self._read_test_names(path) - baseline)
 
     def _worktree_state(self) -> dict[str, str | None] | None:
-        """Content hash of every file git reports as modified or untracked,
+        """Size+mtime signature of every file git reports as modified or untracked,
         or None when git isn't available / this isn't a repository. The
         server's own .tdd-* state files are left out."""
         try:
@@ -767,9 +767,9 @@ class TDDServer:
             if Path(path).name.startswith(".tdd-"):
                 continue
             try:
-                state[path] = hashlib.sha256(
-                    (Path(self.project_root) / path).read_bytes()
-                ).hexdigest()
+                stat = (Path(self.project_root) / path).stat()
+                # Size + mtime instead of a content hash: no file reads.
+                state[path] = f"{stat.st_size}:{stat.st_mtime_ns}"
             except OSError:
                 state[path] = None
         return state

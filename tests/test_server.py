@@ -3354,6 +3354,24 @@ def test_a_failed_git_check_does_not_discard_the_drift_baseline(tmp_path, monkey
     assert "probe_other.py" in payload["driftWarning"]
 
 
+def test_drift_check_detects_a_change_without_reading_file_contents(tmp_path, monkeypatch):
+    git_init(tmp_path)
+    server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
+    (tmp_path / "big_dirty.bin").write_bytes(b"a" * 10)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    call(server, "write_test", testName="t")
+    (tmp_path / "big_dirty.bin").write_bytes(b"b" * 20)
+
+    def no_reads(self):
+        raise AssertionError("drift check must not read file contents")
+
+    monkeypatch.setattr(Path, "read_bytes", no_reads)
+
+    payload = call(server, "run_tests")
+
+    assert "big_dirty.bin" in payload["driftWarning"]
+
+
 def test_run_tests_advance_still_works_after_a_restart_when_the_test_was_declared_before_it(tmp_path):
     server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
     call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
