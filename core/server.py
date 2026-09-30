@@ -180,11 +180,22 @@ TOOLS = [
             "sweep — re-call with regressionScope set to a path/expression "
             "(or \"skip\") to proceed. After a schema/model change, pass "
             "recreateDb=true to rebuild a cached test DB (needs "
-            "recreateDbArgs in .tdd-config.json)."
+            "recreateDbArgs in .tdd-config.json). Pass advance=true to "
+            "also do the verify() step in the same call when the result is "
+            "what the phase expects (RED: an assertion failure; IMPLEMENT: "
+            "green) — it does not advance a missing-name failure or a test "
+            "that passed straight from RED (those return advanceSkipped)."
         ),
         inputSchema={
             "type": "object",
             "properties": {
+                "advance": {
+                    "type": "boolean",
+                    "description": (
+                        "Also call verify() in the same call when the "
+                        "result is the expected checkpoint."
+                    ),
+                },
                 "recreateDb": {
                     "type": "boolean",
                     "description": (
@@ -1127,10 +1138,24 @@ class TDDServer:
 
             if name == "run_tests":
                 cycles_before = self.sm.cycle_count
+                phase_before = self.sm.phase
                 payload = self._run_tests(
                     arguments.get("regressionScope"),
                     recreate_db=bool(arguments.get("recreateDb")),
                 )
+                if arguments.get("advance") and (phase_before, self.sm.phase) in (
+                    ("red", "verify_red"),
+                    ("implement", "verify_green"),
+                ):
+                    if self.sm.last_error:
+                        payload["advanceSkipped"] = (
+                            "Not advanced — review this checkpoint, then "
+                            "call verify()."
+                        )
+                    else:
+                        self.sm.verify()
+                        self._log_event("verify", viaRunTests=True)
+                        payload["phase"] = self.sm.phase
                 if self.sm.cycle_count > cycles_before:
                     self._snapshot_test_names(self.sm.depth, self.sm.test_file)
                 return self._text(payload)

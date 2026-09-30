@@ -2205,6 +2205,85 @@ print(json.dumps({"passed": 0, "failed": 1, "failures": [{"name": "t", "message"
     assert "warning" not in payload
 
 
+def script_adapter_result(tmp_path, result):
+    """(Re)write the scripted adapter so it prints `result` as its JSON."""
+    fake_adapter = tmp_path / "scripted_adapter.py"
+    fake_adapter.write_text(
+        f"#!/usr/bin/env python3\nimport json\nprint(json.dumps({result!r}))\n"
+    )
+    fake_adapter.chmod(0o755)
+    return fake_adapter
+
+
+def make_scripted_adapter_server(tmp_path, result):
+    """Server whose adapter prints `result` until script_adapter_result
+    swaps it."""
+    fake_adapter = script_adapter_result(tmp_path, result)
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(json.dumps({"adapterPath": str(fake_adapter)}))
+    return TDDServer(project_root=str(tmp_path), config_path=str(config_path))
+
+
+ASSERTION_FAILURE = {
+    "passed": 0,
+    "failed": 1,
+    "failures": [{"name": "t", "message": "AssertionError: expected 1, got 2"}],
+}
+
+
+def test_run_tests_advance_moves_a_red_assertion_failure_straight_to_implement(tmp_path):
+    server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    call(server, "write_test", testName="t")
+
+    payload = call(server, "run_tests", advance=True)
+
+    assert payload["phase"] == "implement"
+    assert call(server, "get_status")["phase"] == "implement"
+
+
+PASSING = {"passed": 1, "failed": 0, "failures": []}
+
+
+def test_run_tests_advance_moves_a_green_run_from_implement_straight_to_refactor(tmp_path):
+    server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    call(server, "write_test", testName="t")
+    call(server, "run_tests", advance=True)  # red -> implement
+    script_adapter_result(tmp_path, PASSING)
+
+    payload = call(server, "run_tests", advance=True)
+
+    assert payload["phase"] == "refactor"
+    assert call(server, "get_status")["phase"] == "refactor"
+
+
+def test_run_tests_advance_stops_at_verify_red_when_the_failure_is_only_a_missing_name(tmp_path):
+    missing_name = {
+        "passed": 0,
+        "failed": 1,
+        "failures": [{"name": "t", "message": "ImportError: cannot import name 'Foo'"}],
+    }
+    server = make_scripted_adapter_server(tmp_path, missing_name)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    call(server, "write_test", testName="t")
+
+    payload = call(server, "run_tests", advance=True)
+
+    assert payload["phase"] == "verify_red"
+    assert "advance" in payload["advanceSkipped"].lower()
+
+
+def test_run_tests_advance_does_not_advance_a_test_that_passes_straight_from_red(tmp_path):
+    server = make_scripted_adapter_server(tmp_path, PASSING)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    call(server, "write_test", testName="t")
+
+    payload = call(server, "run_tests", advance=True)
+
+    assert payload["phase"] == "verify_green"
+
+
 def test_session_start_hides_completed_features_by_default_and_reports_their_count(tmp_path):
     server = make_server(tmp_path)
     ledger = [
