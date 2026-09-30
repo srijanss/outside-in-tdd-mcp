@@ -1227,9 +1227,6 @@ class TDDServer:
     ) -> list[types.TextContent]:
         try:
             if name == "init_feature":
-                self._declared_hashes.clear()
-                self._drift_baseline = self._worktree_state()
-                self._snapshot_test_names(1, arguments["testFile"])
                 config, error = self._try_load_config()
                 if error:
                     return self._error(error)
@@ -1284,6 +1281,11 @@ class TDDServer:
                         arguments["targetFiles"],
                         review_finding=review_finding,
                     )
+                    # Only once the feature really started: a rejected call
+                    # must not wipe the running feature's baselines.
+                    self._declared_hashes.clear()
+                    self._drift_baseline = self._worktree_state()
+                    self._snapshot_test_names(1, arguments["testFile"])
                     self._log_event(
                         "init_feature", targetFiles=arguments["targetFiles"]
                     )
