@@ -3113,3 +3113,15 @@ def test_run_tests_still_gives_the_stub_hint_when_only_another_test_in_the_file_
     payload = call(server, "run_tests")
 
     assert "stub" in payload["lastError"].lower()
+
+
+def test_run_tests_response_carries_the_result_once_and_get_status_still_has_last_result(tmp_path):
+    server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    call(server, "write_test", testName="t")
+
+    payload = call(server, "run_tests")
+
+    assert payload["testResult"]["failed"] == 1
+    assert "lastResult" not in payload
+    assert call(server, "get_status")["lastResult"]["failed"] == 1

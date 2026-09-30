@@ -1660,7 +1660,7 @@ class TDDServer:
                 "durationMs": result.duration_ms,
                 "failures": capped_failures,
             },
-            **self.sm.status(),
+            **self.sm.status(include_last_result=False),
         }
 
 
