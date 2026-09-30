@@ -333,6 +333,62 @@ For that image, copy `.tdd-config.json.example` to `.tdd-config.json`:
 its `adapterPath` is a container-root path (`/adapters/pytest-adapter/run.sh`)
 that must stay absolute.
 
+## Configuration reference (`.tdd-config.json`)
+
+Everything language- or framework-specific lives in this file and in the
+adapter — `core/` has none. Only `adapterPath` is required.
+
+| Key | Required | Meaning |
+|---|---|---|
+| `adapter` | no | Free-text label (`pytest-adapter`, `cargo-adapter`, …); informational. |
+| `adapterPath` | yes | The adapter executable: an absolute path, a path relative to the project root, or a bare command name found next to the server's interpreter / on `PATH`. |
+| `defaultTestDir` | no | Whole-suite target used for the regression sweep when a base-level REFACTOR closes. Same shell-word syntax as a test target. |
+| `testNamePattern` | no | Regex whose **first capture group is a test's name** (matched line-by-line across the test file). Enables the one-test-per-cycle warning on `write_test`. Unset = the warning is off. Must be a valid regex (checked at config load). |
+| `recreateDbArgs` | no | Extra runner arguments that `run_tests(recreateDb=true)` prepends to the test target, to rebuild a cached test database after a schema change (e.g. `--create-db` for pytest-django with `--reuse-db`). Unset = `recreateDb` returns a clear error. |
+
+Suggested `testNamePattern` per adapter (JSON-escaped, ready to paste):
+
+| Adapter | `testNamePattern` |
+|---|---|
+| pytest | `"^\\s*(?:async\\s+)?def\\s+(test_\\w+)"` |
+| vitest / jest | ``"\\b(?:it|test)\\(\\s*['\"`]([^'\"`]+)['\"`]"`` |
+| cargo | `"#\\[(?:tokio::)?test\\]\\s*(?:async\\s+)?fn\\s+(\\w+)"` |
+
+These are line-oriented heuristics, not parsers: they suit the common
+declaration styles and can miss exotic ones (e.g. generated or
+table-driven tests). Because the check only warns, a miss is harmless.
+
+`recreateDbArgs` is a plain string of runner arguments, so it works with any
+adapter that shell-splits its `<test_target>` (the bundled pytest, vitest and
+cargo adapters all do). It is deliberately a fixed, configured string rather
+than free-form `extraArgs` on the tool call, so the agent can't use it to
+sneak arbitrary flags into the test command.
+
+## Tool behaviours worth knowing
+
+- **`session_start` / `list_features`** return only open features plus
+  `completedFeatureCount`; pass `includeCompleted: true` for the full ledger.
+  `session_start` also returns just the last 5 research entries with
+  summaries cut to 300 characters (`summaryTruncated: true`) — call
+  `list_research` for the full text.
+- **`run_tests`** takes three optional arguments:
+  - `regressionScope` — when a base-level REFACTOR closes and
+    `defaultTestDir` is configured, `run_tests` first returns
+    `needsRegressionScopeConfirmation`; re-call with a target expression to
+    sweep instead of `defaultTestDir`, or `"skip"` to skip the sweep.
+  - `recreateDb: true` — prepend `recreateDbArgs` (see the table above).
+  - `advance: true` — also perform the `verify()` step in the same call when
+    the result is exactly the expected checkpoint: an assertion failure in
+    RED, or green coming out of IMPLEMENT. It never advances a missing-name
+    failure (the response carries `advanceSkipped`; review it, then call
+    `verify()`) or a test that passed straight from RED. Use plain
+    `run_tests` + `verify` when you want to confirm each checkpoint yourself.
+- **`write_test`** returns a `warning` (never a rejection) when more than one
+  new test has appeared in the test file since the level, or the last
+  completed cycle, started — one test per cycle. Needs `testNamePattern`.
+  The baseline is kept in memory only, so after a server restart the check
+  stays silent until the next level or cycle boundary re-snapshots it.
+
 ## Adding a new adapter
 
 Write an executable at a known path that:
@@ -343,7 +399,10 @@ Write an executable at a known path that:
 - may exit non-zero — the JSON `failed` count is what matters, not the exit code
 
 Then point `.tdd-config.json`'s `adapterPath` at it. Nothing in `core/` needs
-to change.
+to change. If the language has a recognisable test-declaration syntax, also
+set `testNamePattern` (see the Configuration reference above) to get the
+one-test-per-cycle warning; add `recreateDbArgs` if its runner caches a test
+database.
 
 Whatever `failures` an adapter returns, `server.py`'s `run_tests` handler caps
 it before it reaches the response or gets stored as `last_result`: at most

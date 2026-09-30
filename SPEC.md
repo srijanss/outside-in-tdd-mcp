@@ -124,8 +124,15 @@ init_feature(name, testFile, targetFiles)
 write_test(name)
   → Only allowed in RED
   → Blocks with error otherwise
+  → Soft warning (never a rejection) when >1 new test appeared in the test
+    file since the level/last cycle began; test names come from the
+    language-agnostic config regex `testNamePattern` (unset = no check)
 
-run_tests()
+run_tests(regressionScope?, recreateDb?, advance?)
+  → recreateDb=true prepends config `recreateDbArgs` to the test target
+    (error if unset); advance=true also does the verify() step below in the
+    same call, only for RED→assertion failure and IMPLEMENT→green (never for
+    a missing-name failure or a test that passed straight from RED)
   → Calls adapter, gets JSON result
   → If RED and failures > 0: advance to VERIFY_RED
   → If RED and failures == 0 and passed > 0: advance to VERIFY_GREEN (nothing needed implementing)
@@ -166,8 +173,10 @@ complete_feature()
     upsert as reset_feature), unblocking any features whose dependsOn
     lists it
 
-list_features()
-  → Returns the full contents of .tdd-features.json: an optional upfront
+list_features(includeCompleted?)
+  → Completed entries are omitted (a completedFeatureCount is returned)
+    unless includeCompleted=true; session_start applies the same rule
+  → Returns the contents of .tdd-features.json: an optional upfront
     plan (featureName, description, dependsOn) with status/testFile/
     targetFiles/cyclesCompleted/recordedAt kept up to date by
     init_feature/complete_feature/reset_feature as work progresses
