@@ -2165,6 +2165,30 @@ def test_write_test_warns_when_more_than_one_new_test_was_added_since_the_level_
     assert "one test per cycle" in payload["warning"].lower()
 
 
+def test_write_test_resolves_a_node_id_test_file_to_the_file_on_disk(tmp_path):
+    server = make_server(tmp_path, testNamePattern=PYTHON_TEST_NAME_PATTERN)
+    test_file = tmp_path / "own_test.py"
+    test_file.write_text("def test_existing():\n    assert True\n")
+    call(
+        server,
+        "init_feature",
+        featureName="f",
+        testFile="own_test.py::SomeTest",
+        targetFiles=[],
+    )
+    test_file.write_text(
+        test_file.read_text()
+        + "\ndef test_first_new():\n    assert True\n"
+        + "\ndef test_second_new():\n    assert True\n"
+    )
+
+    payload = call(server, "write_test", testName="test_first_new")
+
+    assert payload["fileChanged"] is True
+    assert "not found on disk" not in payload.get("warning", "")
+    assert "2 new tests" in payload["warning"]
+
+
 def test_write_test_does_not_warn_about_tests_added_in_an_earlier_completed_cycle(tmp_path):
     server = make_recording_adapter_server(tmp_path, testNamePattern=PYTHON_TEST_NAME_PATTERN)
     test_file = tmp_path / "own_test.py"

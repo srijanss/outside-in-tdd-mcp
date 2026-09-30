@@ -644,10 +644,17 @@ class TDDServer:
             )
         return {"warnings": warnings} if warnings else {}
 
-    def _read_test_names(self, path: str) -> set[str]:
-        full = Path(path)
+    def _resolve_on_disk(self, path: str) -> Path:
+        """Project-relative path of a test target as a file on disk. A
+        runner node id ('file.py::Class::test') is cut at the first '::'
+        since only the file part exists on disk."""
+        full = Path(path.split("::", 1)[0])
         if not full.is_absolute():
             full = Path(self.project_root) / full
+        return full
+
+    def _read_test_names(self, path: str) -> set[str]:
+        full = self._resolve_on_disk(path)
         try:
             source = full.read_text()
         except (OSError, UnicodeDecodeError):
@@ -679,9 +686,7 @@ class TDDServer:
         declaration of it at this level, warning (never rejecting) when it
         is missing or unchanged. Declare-only tools can't know what was
         actually written, so this is the evidence trail."""
-        full = Path(path)
-        if not full.is_absolute():
-            full = Path(self.project_root) / full
+        full = self._resolve_on_disk(path)
         try:
             hasher = hashlib.sha256()
             with full.open("rb") as f:
