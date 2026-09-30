@@ -3146,3 +3146,39 @@ def test_run_tests_response_carries_the_result_once_and_get_status_still_has_las
     assert payload["testResult"]["failed"] == 1
     assert "lastResult" not in payload
     assert call(server, "get_status")["lastResult"]["failed"] == 1
+
+
+def test_run_tests_advance_is_skipped_in_red_when_no_test_was_declared_this_cycle(tmp_path):
+    server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+
+    payload = call(server, "run_tests", advance=True)
+
+    assert "write_test" in payload["advanceSkipped"]
+    assert call(server, "get_status")["phase"] == "verify_red"
+
+
+def test_run_tests_advance_still_works_after_a_restart_when_the_test_was_declared_before_it(tmp_path):
+    server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    call(server, "write_test", testName="t")
+    restarted = TDDServer(
+        project_root=str(tmp_path), config_path=str(tmp_path / ".tdd-config.json")
+    )
+
+    payload = call(restarted, "run_tests", advance=True)
+
+    assert "advanceSkipped" not in payload
+    assert call(restarted, "get_status")["phase"] == "implement"
+
+
+def test_run_tests_advance_says_why_it_did_not_advance_when_already_at_verify_red(tmp_path):
+    server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    call(server, "write_test", testName="t")
+    call(server, "run_tests")  # red -> verify_red, without advance
+
+    payload = call(server, "run_tests", advance=True)
+
+    assert "verify()" in payload["advanceSkipped"]
+    assert call(server, "get_status")["phase"] == "verify_red"

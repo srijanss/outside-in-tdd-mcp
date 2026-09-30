@@ -388,8 +388,15 @@ sneak arbitrary flags into the test command.
     the result is exactly the expected checkpoint: an assertion failure in
     RED, or green coming out of IMPLEMENT. It never advances a missing-name
     failure (the response carries `advanceSkipped`; review it, then call
-    `verify()`) or a test that passed straight from RED. Use plain
-    `run_tests` + `verify` when you want to confirm each checkpoint yourself.
+    `verify()`) or a test that passed straight from RED. It is also skipped
+    (with `advanceSkipped` saying why) in RED when no `write_test` was
+    recorded this cycle, and when the phase is already VERIFY_RED /
+    VERIFY_GREEN. Use plain `run_tests` + `verify` when you want to confirm
+    each checkpoint yourself.
+  - With `recreateDb`, the response and the session log record
+    `recreateDb: true` and the `testTarget` actually passed to the adapter.
+    The response carries the result once, as `testResult`; `lastResult` is
+    only in `get_status`.
 - **Stub-only hint** — a missing-name failure (import/attribute error) normally
   tells you to write only a stub. The hint is dropped when the failing test's
   source uses a mock/spy (`Mock`, `patch`, `mocker`, `jest.fn`, `vi.fn`,

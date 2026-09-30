@@ -1251,7 +1251,12 @@ class TDDServer:
                     ("red", "verify_red"),
                     ("implement", "verify_green"),
                 ):
-                    if self.sm.last_error:
+                    if phase_before == "red" and not self.sm.test_declared:
+                        payload["advanceSkipped"] = (
+                            "Not advanced — no write_test was recorded this "
+                            "cycle. Declare the test, then call verify()."
+                        )
+                    elif self.sm.last_error:
                         payload["advanceSkipped"] = (
                             "Not advanced — review this checkpoint, then "
                             "call verify()."
@@ -1260,6 +1265,15 @@ class TDDServer:
                         self.sm.verify()
                         self._log_event("verify", viaRunTests=True)
                         payload["phase"] = self.sm.phase
+                elif arguments.get("advance") and phase_before in (
+                    "verify_red",
+                    "verify_green",
+                ):
+                    payload["advanceSkipped"] = (
+                        f"Not advanced — already at {phase_before.upper()}: "
+                        "advance only applies to the run that reaches a "
+                        "checkpoint. Review it, then call verify()."
+                    )
                 if self.sm.cycle_count > cycles_before:
                     self._snapshot_test_names(self.sm.depth, self.sm.test_file)
                 return self._text(payload)

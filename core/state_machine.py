@@ -141,6 +141,7 @@ class _Level:
     cycle_count: int = 0
     last_result: TestResult | None = None
     last_error: str | None = None
+    test_declared: bool = False  # write_test seen this cycle
 
 
 class TDDStateMachine:
@@ -166,6 +167,10 @@ class TDDStateMachine:
     @property
     def cycle_count(self) -> int:
         return self.stack[-1].cycle_count if self.stack else 0
+
+    @property
+    def test_declared(self) -> bool:
+        return self.stack[-1].test_declared if self.stack else False
 
     @property
     def last_result(self) -> TestResult | None:
@@ -327,6 +332,7 @@ class TDDStateMachine:
 
     def write_test(self, test_name: str) -> None:
         self._require_phase("red", "write_test")
+        self.stack[-1].test_declared = True
 
     def write_test_skeleton(self, test_name: str) -> None:
         """Same RED-only gate as write_test — a distinctly-named tool for
@@ -337,6 +343,7 @@ class TDDStateMachine:
         different enforcement from write_test — same phase, same lack of
         content tracking."""
         self._require_phase("red", "write_test_skeleton")
+        self.stack[-1].test_declared = True
 
     def write_code(self, file_path: str) -> None:
         self._require_phase("implement", "write_code")
@@ -432,6 +439,7 @@ class TDDStateMachine:
             elif passed > 0:
                 level.phase = "red"
                 level.cycle_count += 1
+                level.test_declared = False
             else:
                 level.last_error = (
                     "No tests ran during the refactor check — the cycle "
@@ -461,6 +469,7 @@ class TDDStateMachine:
                     "targetFiles": list(lvl.target_files),
                     "phase": lvl.phase,
                     "cycleCount": lvl.cycle_count,
+                    "testDeclared": lvl.test_declared,
                     "lastError": lvl.last_error,
                     "lastResult": (
                         None
@@ -542,6 +551,7 @@ class TDDStateMachine:
                     cycle_count=cycle_count,
                     last_result=last_result,
                     last_error=last_error,
+                    test_declared=entry.get("testDeclared") is True,
                 )
             )
         if not levels:
