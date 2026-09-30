@@ -368,12 +368,15 @@ sneak arbitrary flags into the test command.
 
 ## Tool behaviours worth knowing
 
-- **Drift warning** — `write_code` and `run_tests` add a `driftWarning` when,
-  since the feature started (or the last report), a git-modified or
-  untracked file changed that isn't a test file or target file of any level.
-  Files already dirty when the feature started are ignored, each change is
-  reported once, and it never blocks. Needs a git repository; without one
-  there is no warning. `.tdd-*` state files are excluded.
+- **Drift warning** — `write_code`, `run_tests` and `return_to_parent` add a
+  `driftWarning` (also logged as a `drift` event) when, since the feature
+  started (or the last report), a git-modified or untracked file changed
+  that isn't a test file or target file of any level (`return_to_parent`
+  still counts the level being left). Files already dirty when the feature
+  started are ignored, each change is reported once, and it never blocks.
+  The baseline is kept in `.tdd-state.json`, so it survives a restart. Needs
+  a git repository; without one there is no warning. `.tdd-*` state files
+  are excluded.
 
 - **pytest adapter failure messages** keep only the final exception of a
   chained failure ("During handling of the above exception…" is dropped) and

@@ -200,7 +200,8 @@ TOOLS = [
             "green) — it does not advance a missing-name failure or a test "
             "that passed straight from RED, a RED cycle with no write_test, "
             "or a call already at VERIFY_RED/VERIFY_GREEN (all return "
-            "advanceSkipped with the reason). Adds driftWarning when files "
+            "advanceSkipped with the reason). Adds driftWarning (also on run_tests and "
+            "return_to_parent) when files "
             "outside the declared test/target files changed (git repos only)."
         ),
         inputSchema={
@@ -844,6 +845,8 @@ class TDDServer:
         except (OSError, json.JSONDecodeError):
             return
         self.sm = TDDStateMachine.from_dict(data)
+        baseline = data.get("driftBaseline") if isinstance(data, dict) else None
+        self._drift_baseline = baseline if isinstance(baseline, dict) else None
 
     def _save_state(self) -> None:
         # Same write-to-temp-then-rename pattern as _save_features, so a
@@ -853,7 +856,13 @@ class TDDServer:
         # block the TDD cycle any more than an unwritable path (OSError)
         # does.
         try:
-            content = json.dumps(self.sm.to_dict(), indent=2) + "\n"
+            content = (
+                json.dumps(
+                    {**self.sm.to_dict(), "driftBaseline": self._drift_baseline},
+                    indent=2,
+                )
+                + "\n"
+            )
         except TypeError:
             return
         self._ensure_git_excluded()
