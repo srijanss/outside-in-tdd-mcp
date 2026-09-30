@@ -222,9 +222,19 @@ TOOLS = [
             "cyclesCompleted get filled in). Features started without a "
             "matching plan entry are appended automatically. Use this to "
             "see what's done, in progress, or blocked on dependencies — "
-            "especially when resuming after a cleared/summarized session."
+            "especially when resuming after a cleared/summarized session. "
+            "Completed entries are omitted (only completedFeatureCount is "
+            "returned) unless includeCompleted is true."
         ),
-        inputSchema={"type": "object", "properties": {}},
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "includeCompleted": {
+                    "type": "boolean",
+                    "description": "List completed features too.",
+                }
+            },
+        },
     ),
     types.Tool(
         name="remove_completed_features",
@@ -631,6 +641,20 @@ class TDDServer:
         except (OSError, json.JSONDecodeError):
             return []
         return data if isinstance(data, list) else []
+
+    def _feature_ledger_view(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Ledger for list_features/session_start: completed entries are
+        summarized as a count unless includeCompleted is set."""
+        features = self._load_features()
+        completed_count = sum(
+            1 for f in features if f.get("status") == "completed"
+        )
+        shown = (
+            features
+            if arguments.get("includeCompleted")
+            else [f for f in features if f.get("status") != "completed"]
+        )
+        return {"features": shown, "completedFeatureCount": completed_count}
 
     def _save_features(self, features: list[dict[str, Any]]) -> None:
         # Write to a temp file and rename into place (atomic on POSIX and
@@ -1069,7 +1093,7 @@ class TDDServer:
                 return self._text(self.sm.status(include_stack=True))
 
             if name == "list_features":
-                return self._text({"features": self._load_features()})
+                return self._text(self._feature_ledger_view(arguments))
 
             if name == "remove_completed_features":
                 with self._features_lock():
@@ -1278,19 +1302,9 @@ class TDDServer:
             if name == "session_start":
                 with self._research_lock():
                     research = _list_research_entries(path=self.research_path)
-                features = self._load_features()
-                completed_count = sum(
-                    1 for f in features if f.get("status") == "completed"
-                )
-                shown_features = (
-                    features
-                    if arguments.get("includeCompleted")
-                    else [f for f in features if f.get("status") != "completed"]
-                )
                 return self._text(
                     {
-                        "features": shown_features,
-                        "completedFeatureCount": completed_count,
+                        **self._feature_ledger_view(arguments),
                         "status": self.sm.status(include_stack=True),
                         "sessionLog": self._tail_session_log(),
                         "research": [

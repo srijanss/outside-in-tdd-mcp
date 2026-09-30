@@ -729,12 +729,41 @@ def test_list_features_returns_ledger_contents(tmp_path):
     assert payload["features"][0]["featureName"] == "g"
 
 
+def test_list_features_hides_completed_features_by_default_and_reports_their_count(tmp_path):
+    server = make_server(tmp_path)
+    ledger = [
+        {"featureName": "done-a", "status": "completed"},
+        {"featureName": "done-b", "status": "completed"},
+        {"featureName": "wip", "status": "in_progress"},
+    ]
+    (tmp_path / ".tdd-features.json").write_text(json.dumps(ledger))
+
+    payload = call(server, "list_features")
+
+    assert [f["featureName"] for f in payload["features"]] == ["wip"]
+    assert payload["completedFeatureCount"] == 2
+
+
+def test_list_features_lists_completed_features_when_include_completed_is_true(tmp_path):
+    server = make_server(tmp_path)
+    ledger = [
+        {"featureName": "done-a", "status": "completed"},
+        {"featureName": "wip", "status": "in_progress"},
+    ]
+    (tmp_path / ".tdd-features.json").write_text(json.dumps(ledger))
+
+    payload = call(server, "list_features", includeCompleted=True)
+
+    assert [f["featureName"] for f in payload["features"]] == ["done-a", "wip"]
+    assert payload["completedFeatureCount"] == 1
+
+
 def test_list_features_returns_empty_list_when_ledger_missing(tmp_path):
     server = make_server(tmp_path)
 
     payload = call(server, "list_features")
 
-    assert payload == {"features": []}
+    assert payload == {"features": [], "completedFeatureCount": 0}
 
 
 def test_list_features_tool_description_instructs_draft_status_for_new_plan_entries(tmp_path):
