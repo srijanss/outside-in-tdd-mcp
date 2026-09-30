@@ -3326,6 +3326,18 @@ def test_drift_check_recognises_a_declared_test_file_written_with_a_dot_slash_pr
     assert "driftWarning" not in payload
 
 
+def test_drift_check_recognises_the_file_inside_a_command_style_test_target(tmp_path):
+    git_init(tmp_path)
+    server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
+    call(server, "init_feature", featureName="f", testFile="run --reporter=dot t.py", targetFiles=[])
+    call(server, "write_test", testName="t")
+    (tmp_path / "t.py").write_text("def test_t(): assert False\n")
+
+    payload = call(server, "run_tests")
+
+    assert "driftWarning" not in payload
+
+
 def test_run_tests_advance_still_works_after_a_restart_when_the_test_was_declared_before_it(tmp_path):
     server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
     call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])

@@ -777,7 +777,11 @@ class TDDServer:
     def _declared_paths(self) -> list[str]:
         paths: list[str] = []
         for level in self.sm.stack:
-            paths.append(level.test_file.split("::", 1)[0])
+            # A test target can be a whole command ("run --flag a.test.ts"):
+            # every non-flag word may be a file.
+            for word in level.test_file.split():
+                if not word.startswith("-"):
+                    paths.append(word.split("::", 1)[0])
             paths.extend(level.target_files)
         return [self._project_relative(p) for p in paths if p]
 
