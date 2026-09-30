@@ -2478,6 +2478,34 @@ def test_an_explicit_test_name_pattern_overrides_the_adapters_built_in_default(t
     assert "test_python_style" not in payload["warning"]
 
 
+def test_session_start_warns_when_no_test_name_pattern_applies(tmp_path):
+    server = make_recording_adapter_server(tmp_path)  # no adapter label, no pattern
+
+    payload = call(server, "session_start")
+
+    assert len(payload["warnings"]) == 1
+    assert "testNamePattern" in payload["warnings"][0]
+    assert "one-test-per-cycle" in payload["warnings"][0]
+
+
+def test_session_start_has_no_warnings_key_when_the_adapter_label_has_a_built_in_pattern(tmp_path):
+    server = make_recording_adapter_server(tmp_path, adapter="cargo-adapter")
+
+    payload = call(server, "session_start")
+
+    assert "warnings" not in payload
+
+
+def test_session_start_has_no_warnings_key_when_an_explicit_pattern_is_configured(tmp_path):
+    server = make_recording_adapter_server(
+        tmp_path, adapter="my-custom-adapter", testNamePattern=r"^check (\w+)"
+    )
+
+    payload = call(server, "session_start")
+
+    assert "warnings" not in payload
+
+
 def test_write_test_never_warns_about_multiple_new_tests_without_a_configured_pattern(tmp_path):
     (tmp_path / "own_test.py").write_text("def test_existing():\n    pass\n")
     server = make_recording_adapter_server(tmp_path)  # no testNamePattern

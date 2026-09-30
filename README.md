@@ -373,6 +373,10 @@ sneak arbitrary flags into the test command.
   `session_start` also returns just the last 5 research entries with
   summaries cut to 300 characters (`summaryTruncated: true`) — call
   `list_research` for the full text.
+  It also returns a `warnings` list — present only when `.tdd-config.json`
+  needs attention, currently when no test-name pattern applies (no
+  `testNamePattern` and an `adapter` label with no built-in default), which
+  leaves the one-test-per-cycle warning off.
 - **`run_tests`** takes three optional arguments:
   - `regressionScope` — when a base-level REFACTOR closes and
     `defaultTestDir` is configured, `run_tests` first returns

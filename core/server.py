@@ -433,7 +433,9 @@ TOOLS = [
             "summaryTruncated — call list_research for full text). "
             "Call this first instead of re-deriving context from scratch. "
             "Completed features are omitted (only completedFeatureCount is "
-            "returned) unless includeCompleted is true."
+            "returned) unless includeCompleted is true. A 'warnings' list "
+            "appears only when .tdd-config.json needs attention (e.g. no "
+            "test-name pattern applies)."
         ),
         inputSchema={
             "type": "object",
@@ -621,6 +623,26 @@ class TDDServer:
         stale baseline inherited from a previous level at the same depth."""
         for key in [k for k in self._declared_hashes if k[0] >= from_depth]:
             del self._declared_hashes[key]
+
+    def _config_warnings(self) -> dict[str, list[str]]:
+        """Non-fatal .tdd-config.json notices for session_start; empty (no
+        'warnings' key at all) when there is nothing to say."""
+        config, error = self._try_load_config()
+        if error or config is None:
+            return {}
+        warnings: list[str] = []
+        if not (
+            config.get("testNamePattern")
+            or config.get("adapter") in DEFAULT_TEST_NAME_PATTERNS
+        ):
+            warnings.append(
+                "No test-name pattern applies, so the one-test-per-cycle "
+                "warning on write_test is off. Set testNamePattern in "
+                ".tdd-config.json, or set adapter to one of: "
+                + ", ".join(sorted(DEFAULT_TEST_NAME_PATTERNS))
+                + "."
+            )
+        return {"warnings": warnings} if warnings else {}
 
     def _read_test_names(self, path: str) -> set[str]:
         full = Path(path)
@@ -1417,6 +1439,7 @@ class TDDServer:
                 return self._text(
                     {
                         **self._feature_ledger_view(arguments),
+                        **self._config_warnings(),
                         "status": self.sm.status(include_stack=True),
                         "sessionLog": self._tail_session_log(),
                         "research": [
