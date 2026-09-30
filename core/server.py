@@ -113,8 +113,10 @@ TOOLS = [
             "tools). Only available in RED phase. Returns a warning (never "
             "a rejection) when more than one new test appeared in the test "
             "file since the level or last cycle started — add one test per "
-            "cycle. Only checked when testNamePattern (a regex whose first "
-            "group is the test name) is set in .tdd-config.json."
+            "cycle. Only checked when a test-name pattern applies: "
+            "testNamePattern (a regex whose first group is the test name) "
+            "in .tdd-config.json, or the built-in default for adapter "
+            "pytest-adapter, vitest-adapter or cargo-adapter."
         ),
         inputSchema={
             "type": "object",
@@ -451,6 +453,20 @@ TOOLS = [
 # carry — defensive against an adapter that doesn't cap its own output, and
 # against a large regression check surfacing dozens of failures at once.
 MAX_FAILURES_RETURNED = 20
+
+# Stopgap: per-adapter defaults for the config's optional `testNamePattern`
+# (first capture group = test name), keyed by the config's `adapter` label so
+# the one-test-per-cycle warning works out of the box for the bundled
+# adapters. Data only — an explicit testNamePattern always wins, and an
+# unknown adapter simply gets no check. Belongs in the adapters long-term.
+DEFAULT_TEST_NAME_PATTERNS: dict[str, str] = {
+    "vitest-adapter": (
+        r"""\b(?:it|test)(?:\.(?:only|skip|todo|concurrent))?"""
+        r"""\(\s*['"`]([^'"`]+)['"`]"""
+    ),
+    "cargo-adapter": r"#\[(?:tokio::)?test\]\s*(?:async\s+)?fn\s+(\w+)",
+    "pytest-adapter": r"^\s*(?:async\s+)?def\s+(test_\w+)",
+}
 MAX_FAILURE_MESSAGE_CHARS = 500
 
 
@@ -615,7 +631,10 @@ class TDDServer:
         except (OSError, UnicodeDecodeError):
             return set()
         config, _ = self._try_load_config()
-        pattern = (config or {}).get("testNamePattern")
+        config = config or {}
+        pattern = config.get("testNamePattern") or DEFAULT_TEST_NAME_PATTERNS.get(
+            config.get("adapter")
+        )
         if not pattern:
             return set()  # language-specific: only checked when configured
         return {

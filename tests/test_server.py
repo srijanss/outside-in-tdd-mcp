@@ -2404,6 +2404,80 @@ def test_write_test_warns_using_the_configured_test_name_pattern_for_other_langu
     assert "adds an item" not in payload["warning"]
 
 
+def test_write_test_uses_a_built_in_js_pattern_for_the_vitest_adapter(tmp_path):
+    (tmp_path / "cart.test.ts").write_text("it('adds an item', () => {});\n")
+    server = make_recording_adapter_server(tmp_path, adapter="vitest-adapter")
+    call(server, "init_feature", featureName="f", testFile="cart.test.ts", targetFiles=[])
+    (tmp_path / "cart.test.ts").write_text(
+        "it('adds an item', () => {});\n"
+        "it('removes an item', () => {});\n"
+        "test.only(\"empties the cart\", () => {});\n"
+    )
+
+    payload = call(server, "write_test", testName="removes an item")
+
+    assert "removes an item" in payload["warning"]
+    assert "empties the cart" in payload["warning"]
+    assert "adds an item" not in payload["warning"]
+
+
+def test_write_test_uses_a_built_in_rust_pattern_for_the_cargo_adapter(tmp_path):
+    (tmp_path / "cart.rs").write_text("#[test]\nfn adds_an_item() {}\n")
+    server = make_recording_adapter_server(tmp_path, adapter="cargo-adapter")
+    call(server, "init_feature", featureName="f", testFile="cart.rs", targetFiles=[])
+    (tmp_path / "cart.rs").write_text(
+        "#[test]\nfn adds_an_item() {}\n\n"
+        "#[test]\nfn removes_an_item() {}\n\n"
+        "#[tokio::test]\nasync fn empties_the_cart() {}\n\n"
+        "fn helper() {}\n"
+    )
+
+    payload = call(server, "write_test", testName="removes_an_item")
+
+    assert "removes_an_item" in payload["warning"]
+    assert "empties_the_cart" in payload["warning"]
+    assert "adds_an_item" not in payload["warning"]
+    assert "helper" not in payload["warning"]
+
+
+def test_write_test_uses_a_built_in_python_pattern_for_the_pytest_adapter(tmp_path):
+    (tmp_path / "own_test.py").write_text("def test_existing():\n    pass\n")
+    server = make_recording_adapter_server(tmp_path, adapter="pytest-adapter")
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
+    (tmp_path / "own_test.py").write_text(
+        "def test_existing():\n    pass\n\n"
+        "def test_a():\n    pass\n\n"
+        "class TestX:\n    async def test_b(self):\n        pass\n\n"
+        "def helper():\n    pass\n"
+    )
+
+    payload = call(server, "write_test", testName="test_a")
+
+    assert "test_a" in payload["warning"]
+    assert "test_b" in payload["warning"]
+    assert "test_existing" not in payload["warning"]
+    assert "helper" not in payload["warning"]
+
+
+def test_an_explicit_test_name_pattern_overrides_the_adapters_built_in_default(tmp_path):
+    (tmp_path / "spec.txt").write_text("")
+    server = make_recording_adapter_server(
+        tmp_path,
+        adapter="pytest-adapter",
+        testNamePattern=r"^scenario:\s*(.+)$",
+    )
+    call(server, "init_feature", featureName="f", testFile="spec.txt", targetFiles=[])
+    (tmp_path / "spec.txt").write_text(
+        "scenario: first\nscenario: second\ndef test_python_style():\n    pass\n"
+    )
+
+    payload = call(server, "write_test", testName="first")
+
+    assert "first" in payload["warning"]
+    assert "second" in payload["warning"]
+    assert "test_python_style" not in payload["warning"]
+
+
 def test_write_test_never_warns_about_multiple_new_tests_without_a_configured_pattern(tmp_path):
     (tmp_path / "own_test.py").write_text("def test_existing():\n    pass\n")
     server = make_recording_adapter_server(tmp_path)  # no testNamePattern
