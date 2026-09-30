@@ -330,8 +330,19 @@ class TDDStateMachine:
 
     # -- gated actions ---------------------------------------------------
 
+    def _require_declarable_phase(self, tool: str) -> None:
+        """RED, or VERIFY_RED: a run_tests call in RED already moved to
+        VERIFY_RED before the test was declared, and declaring it then is
+        the only way to catch up short of reset_feature."""
+        self._require_feature()
+        if self.phase not in ("red", "verify_red"):
+            raise PhaseError(
+                f"{tool}() is only allowed in RED or VERIFY_RED phase "
+                f"(current phase: {self.phase.upper()})."
+            )
+
     def write_test(self, test_name: str) -> None:
-        self._require_phase("red", "write_test")
+        self._require_declarable_phase("write_test")
         self.stack[-1].test_declared = True
 
     def write_test_skeleton(self, test_name: str) -> None:
@@ -342,7 +353,7 @@ class TDDStateMachine:
         later write_test / write_test_skeleton call fills them in. No
         different enforcement from write_test — same phase, same lack of
         content tracking."""
-        self._require_phase("red", "write_test_skeleton")
+        self._require_declarable_phase("write_test_skeleton")
         self.stack[-1].test_declared = True
 
     def write_code(self, file_path: str) -> None:

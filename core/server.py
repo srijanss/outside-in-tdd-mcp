@@ -118,7 +118,8 @@ TOOLS = [
         name="write_test",
         description=(
             "Declare a failing test written to disk (via your own file "
-            "tools). Only available in RED phase. Returns a warning (never "
+            "tools). Only available in RED phase (or VERIFY_RED, to "
+            "declare a test that run_tests already ran). Returns a warning (never "
             "a rejection) when more than one new test appeared in the test "
             "file since the level or last cycle started — add one test per "
             "cycle. Only checked when a test-name pattern applies: "
@@ -136,7 +137,7 @@ TOOLS = [
         name="write_test_skeleton",
         description=(
             "Declare a TODO-annotated test stub written to disk instead of "
-            "a finished test. RED phase only. Use only if the "
+            "a finished test. RED (or VERIFY_RED) phase only. Use only if the "
             "skeleton-first workflow was explicitly requested — otherwise "
             "use write_test."
         ),

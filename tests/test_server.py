@@ -3158,6 +3158,17 @@ def test_run_tests_advance_is_skipped_in_red_when_no_test_was_declared_this_cycl
     assert call(server, "get_status")["phase"] == "verify_red"
 
 
+def test_write_test_is_still_allowed_after_advance_was_skipped_for_an_undeclared_test(tmp_path):
+    server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    call(server, "run_tests", advance=True)  # skipped: nothing declared
+
+    payload = call(server, "write_test", testName="t")
+
+    assert payload["ok"] is True
+    assert call(server, "verify")["ok"] is True
+
+
 def test_run_tests_advance_still_works_after_a_restart_when_the_test_was_declared_before_it(tmp_path):
     server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
     call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
