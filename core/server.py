@@ -1627,11 +1627,15 @@ class TDDServer:
             raw_output=result.raw_output,
             suppress_stub_hint=self._failing_tests_drive_mocks(capped_failures),
         )
+        recreate_evidence = (
+            {"recreateDb": True, "testTarget": run_target} if recreate_db else {}
+        )
         self._log_event(
             "run_tests",
             passed=result.passed,
             failed=result.failed,
             durationMs=result.duration_ms,
+            **recreate_evidence,
         )
 
         if own_target_broke is False:
@@ -1660,6 +1664,7 @@ class TDDServer:
                 "durationMs": result.duration_ms,
                 "failures": capped_failures,
             },
+            **recreate_evidence,
             **self.sm.status(include_last_result=False),
         }
 

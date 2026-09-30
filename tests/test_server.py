@@ -2125,6 +2125,27 @@ print(json.dumps({{"passed": 1, "failed": 0, "failures": []}}))
     return TDDServer(project_root=str(tmp_path), config_path=str(config_path))
 
 
+def test_run_tests_recreate_db_response_reports_the_target_the_adapter_ran(tmp_path):
+    server = make_recording_adapter_server(tmp_path, recreateDbArgs="--create-db")
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
+
+    payload = call(server, "run_tests", recreateDb=True)
+
+    assert payload["recreateDb"] is True
+    assert payload["testTarget"] == "--create-db own_test.py"
+
+
+def test_run_tests_recreate_db_is_recorded_in_the_session_log(tmp_path):
+    server = make_recording_adapter_server(tmp_path, recreateDbArgs="--create-db")
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
+
+    call(server, "run_tests", recreateDb=True)
+
+    entry = [e for e in call(server, "session_start")["sessionLog"] if e["event"] == "run_tests"][-1]
+    assert entry["recreateDb"] is True
+    assert entry["testTarget"] == "--create-db own_test.py"
+
+
 def test_run_tests_recreate_db_prepends_configured_recreate_db_args_to_the_target(tmp_path):
     server = make_recording_adapter_server(tmp_path, recreateDbArgs="--create-db")
     call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
