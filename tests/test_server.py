@@ -3254,11 +3254,19 @@ def test_return_to_parent_warns_about_a_file_changed_outside_the_declared_files(
     call(server, "write_test", testName="t")
     call(server, "run_tests", advance=True)
     call(server, "drill_down", testFile="u.py::test_u", targetFiles=["impl.py"])
+    call(server, "write_test", testName="u")
+    call(server, "run_tests", advance=True)
+    (tmp_path / "impl.py").write_text("code\n")
+    call(server, "write_code", filePath="impl.py")
+    script_adapter_result(tmp_path, PASSING)
+    call(server, "run_tests", advance=True)
+    call(server, "run_tests")  # closes the cycle at the drilled-down level
     (tmp_path / "probe_other.py").write_text("x = 1\n")
 
     payload = call(server, "return_to_parent")
 
     assert "probe_other.py" in payload["driftWarning"]
+    assert "impl.py" not in payload["driftWarning"]
 
 
 def test_drift_baseline_survives_a_server_restart(tmp_path):

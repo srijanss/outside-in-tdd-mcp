@@ -768,7 +768,7 @@ class TDDServer:
             paths.extend(level.target_files)
         return [p.rstrip("/") for p in paths if p]
 
-    def _drift_evidence(self) -> dict[str, Any]:
+    def _drift_evidence(self, declared: list[str] | None = None) -> dict[str, Any]:
         """Soft check: files changed since the feature started (or the last
         report) that aren't a declared test file or target file of any
         level. Empty when git is unavailable or nothing drifted."""
@@ -776,7 +776,7 @@ class TDDServer:
         baseline, self._drift_baseline = self._drift_baseline, current
         if current is None or baseline is None:
             return {}
-        declared = self._declared_paths()
+        declared = self._declared_paths() if declared is None else declared
         drifted = sorted(
             path
             for path in set(current) | set(baseline)
@@ -1504,6 +1504,8 @@ class TDDServer:
                 )
 
             if name == "return_to_parent":
+                # The level being left still owns its files for this check.
+                declared_before_pop = self._declared_paths()
                 summary = self.sm.return_to_parent()
                 self._forget_declared_hashes(self.sm.depth + 1)
                 self._log_event(
@@ -1520,6 +1522,7 @@ class TDDServer:
                             f"Back at depth {self.sm.depth}."
                         ),
                         **self.sm.status(include_last_result=False),
+                        **self._drift_evidence(declared_before_pop),
                     }
                 )
 
