@@ -608,7 +608,9 @@ class TDDServer:
         self._test_name_baseline[(depth, path)] = self._read_test_names(path)
 
     def _new_test_names(self, depth: int, path: str) -> list[str]:
-        baseline = self._test_name_baseline.get((depth, path), set())
+        baseline = self._test_name_baseline.get((depth, path))
+        if baseline is None:
+            return []  # no snapshot (e.g. server restarted mid-level): unknown
         return sorted(self._read_test_names(path) - baseline)
 
     def _declare_evidence(self, path: str) -> dict[str, Any]:

@@ -2284,6 +2284,20 @@ def test_run_tests_advance_does_not_advance_a_test_that_passes_straight_from_red
     assert payload["phase"] == "verify_green"
 
 
+def test_write_test_does_not_warn_about_existing_tests_after_a_server_restart(tmp_path):
+    test_file = tmp_path / "own_test.py"
+    test_file.write_text(
+        "def test_one():\n    assert True\n\ndef test_two():\n    assert True\n"
+    )
+    first = make_server(tmp_path)
+    call(first, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
+    restarted = make_server(tmp_path)  # reloads persisted state, no in-memory baseline
+
+    payload = call(restarted, "write_test", testName="test_one")
+
+    assert "warning" not in payload
+
+
 def test_session_start_hides_completed_features_by_default_and_reports_their_count(tmp_path):
     server = make_server(tmp_path)
     ledger = [
