@@ -389,7 +389,9 @@ TOOLS = [
             "Read-only orientation bundle for a fresh session or after a "
             "/clear: the feature ledger (list_features), current phase/"
             "drill-down stack (get_status), a tail of .tdd-session.log, "
-            "and a tail of the durable research log (.tdd-research.json). "
+            "and the last 5 entries of the durable research log "
+            "(.tdd-research.json, summaries cut to 300 chars and flagged "
+            "summaryTruncated — call list_research for full text). "
             "Call this first instead of re-deriving context from scratch. "
             "Completed features are omitted (only completedFeatureCount is "
             "returned) unless includeCompleted is true."
@@ -887,6 +889,13 @@ class TDDServer:
                 entries.append(parsed)
         return entries
 
+    @staticmethod
+    def _truncate_research_summary(entry: dict[str, Any]) -> dict[str, Any]:
+        summary = entry.get("summary")
+        if not isinstance(summary, str) or len(summary) <= 300:
+            return entry
+        return {**entry, "summary": summary[:299] + "…", "summaryTruncated": True}
+
     def _text(self, payload: dict[str, Any]) -> list[types.TextContent]:
         return [
             types.TextContent(
@@ -1284,7 +1293,10 @@ class TDDServer:
                         "completedFeatureCount": completed_count,
                         "status": self.sm.status(include_stack=True),
                         "sessionLog": self._tail_session_log(),
-                        "research": research[-20:],
+                        "research": [
+                            self._truncate_research_summary(entry)
+                            for entry in research[-5:]
+                        ],
                     }
                 )
 

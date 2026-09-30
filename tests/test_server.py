@@ -2101,17 +2101,31 @@ def test_session_start_lists_completed_features_when_include_completed_is_true(t
     assert [f["featureName"] for f in payload["features"]] == ["done-a", "wip"]
 
 
-def test_session_start_truncates_research_to_last_20_entries(tmp_path):
+def test_session_start_truncates_long_research_summaries_and_flags_them(tmp_path):
+    server = make_server(tmp_path)
+    call(server, "record_research", source="long", summary="x" * 1000)
+    call(server, "record_research", source="short", summary="brief")
+
+    payload = call(server, "session_start")
+
+    long_entry, short_entry = payload["research"]
+    assert len(long_entry["summary"]) <= 300
+    assert long_entry["summaryTruncated"] is True
+    assert short_entry["summary"] == "brief"
+    assert "summaryTruncated" not in short_entry
+
+
+def test_session_start_truncates_research_to_last_5_entries(tmp_path):
     server = make_server(tmp_path)
 
-    for i in range(21):
+    for i in range(6):
         call(server, "record_research", source=f"https://example.com/{i}", summary="s")
 
     payload = call(server, "session_start")
 
-    assert len(payload["research"]) == 20
+    assert len(payload["research"]) == 5
     assert payload["research"][0]["source"] == "https://example.com/1"
-    assert payload["research"][-1]["source"] == "https://example.com/20"
+    assert payload["research"][-1]["source"] == "https://example.com/5"
 
 
 def test_session_start_on_fresh_project_returns_empty_bundle(tmp_path):
