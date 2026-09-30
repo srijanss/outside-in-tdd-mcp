@@ -125,3 +125,16 @@ def test_adapter_falls_back_to_path_pytest_when_project_venv_pytest_is_unusable(
 
     assert result["passed"] == 1
     assert result["failed"] == 0
+
+
+def test_adapter_failure_message_drops_the_chained_exception_and_outside_frames():
+    # A failure raised while handling another exception prints the whole
+    # first traceback (often through stdlib/site-packages frames), then
+    # "During handling of the above exception…", then the real one. Keep
+    # only the final exception and the frames from the project.
+    result = run_adapter("tests/fixtures/chained_exception_failure.py")
+    message = result["failures"][0]["message"]
+    assert "FINAL_ASSERTION_MARKER" in message
+    assert "chained_exception_failure.py" in message
+    assert "During handling" not in message
+    assert "decoder.py" not in message

@@ -368,6 +368,11 @@ sneak arbitrary flags into the test command.
 
 ## Tool behaviours worth knowing
 
+- **pytest adapter failure messages** keep only the final exception of a
+  chained failure ("During handling of the above exception…" is dropped) and
+  only frames from the project — frames through the stdlib or site-packages
+  (e.g. `unittest.mock`) are cut.
+
 - **`session_start` / `list_features`** return only open features plus
   `completedFeatureCount`; pass `includeCompleted: true` for the full ledger.
   `session_start` also returns just the last 5 research entries with

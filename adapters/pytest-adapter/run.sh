@@ -10,6 +10,8 @@ space-separated paths/dirs, or a full pytest argument expression like
 `-m "not ft" cart/ order/ promotions/tests/test_models.py`.
 """
 import json
+import os
+import re
 import shlex
 import subprocess
 import sys
@@ -29,6 +31,33 @@ def _trim_for_message(raw_output: str) -> str:
         return raw_output
     line_start = raw_output.rfind("\n", 0, marker_index)
     return raw_output[: line_start if line_start != -1 else marker_index]
+
+
+_CHAIN_SEPARATOR = "During handling of the above exception, another exception occurred:"
+_FRAME_LINE = re.compile(r"^(\S+?):\d+: in \S+")
+
+
+def _clean_longrepr(text: str) -> str:
+    """Cut a failure's traceback down to what helps fix the test: only the
+    final exception of a chained failure (the earlier one is printed again
+    inside it), and only frames from the project — not the ones through
+    stdlib/site-packages (absolute or '../' paths, e.g. unittest.mock)."""
+    if _CHAIN_SEPARATOR in text:
+        text = text.rsplit(_CHAIN_SEPARATOR, 1)[1].lstrip("\n")
+    kept = []
+    skipping = False
+    for line in text.splitlines():
+        frame = _FRAME_LINE.match(line)
+        if frame:
+            path = frame.group(1)
+            skipping = (
+                path.startswith("..") or os.path.isabs(path) or "site-packages" in path
+            )
+        elif not line.startswith(" "):
+            skipping = False  # an 'E   ...' line ends the frame's code block
+        if not skipping:
+            kept.append(line)
+    return "\n".join(kept)
 
 
 def _pytest_commands(project_root: str) -> list[str]:
@@ -112,7 +141,9 @@ def main() -> int:
             failures.append(
                 {
                     "name": test["nodeid"],
-                    "message": str(test.get("call", {}).get("longrepr", ""))[-500:],
+                    "message": _clean_longrepr(
+                        str(test.get("call", {}).get("longrepr", ""))
+                    )[-500:],
                 }
             )
 
