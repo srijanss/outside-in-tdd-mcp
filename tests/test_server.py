@@ -2073,6 +2073,34 @@ def test_session_start_bundles_features_status_session_log_and_research_via_call
     assert payload["research"][0]["source"] == "https://example.com/thread"
 
 
+def test_session_start_hides_completed_features_by_default_and_reports_their_count(tmp_path):
+    server = make_server(tmp_path)
+    ledger = [
+        {"featureName": "done-a", "status": "completed"},
+        {"featureName": "done-b", "status": "completed"},
+        {"featureName": "wip", "status": "in_progress"},
+    ]
+    (tmp_path / ".tdd-features.json").write_text(json.dumps(ledger))
+
+    payload = call(server, "session_start")
+
+    assert [f["featureName"] for f in payload["features"]] == ["wip"]
+    assert payload["completedFeatureCount"] == 2
+
+
+def test_session_start_lists_completed_features_when_include_completed_is_true(tmp_path):
+    server = make_server(tmp_path)
+    ledger = [
+        {"featureName": "done-a", "status": "completed"},
+        {"featureName": "wip", "status": "in_progress"},
+    ]
+    (tmp_path / ".tdd-features.json").write_text(json.dumps(ledger))
+
+    payload = call(server, "session_start", includeCompleted=True)
+
+    assert [f["featureName"] for f in payload["features"]] == ["done-a", "wip"]
+
+
 def test_session_start_truncates_research_to_last_20_entries(tmp_path):
     server = make_server(tmp_path)
 

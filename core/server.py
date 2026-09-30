@@ -390,9 +390,19 @@ TOOLS = [
             "/clear: the feature ledger (list_features), current phase/"
             "drill-down stack (get_status), a tail of .tdd-session.log, "
             "and a tail of the durable research log (.tdd-research.json). "
-            "Call this first instead of re-deriving context from scratch."
+            "Call this first instead of re-deriving context from scratch. "
+            "Completed features are omitted (only completedFeatureCount is "
+            "returned) unless includeCompleted is true."
         ),
-        inputSchema={"type": "object", "properties": {}},
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "includeCompleted": {
+                    "type": "boolean",
+                    "description": "List completed features too.",
+                }
+            },
+        },
     ),
 ]
 
@@ -1259,9 +1269,19 @@ class TDDServer:
             if name == "session_start":
                 with self._research_lock():
                     research = _list_research_entries(path=self.research_path)
+                features = self._load_features()
+                completed_count = sum(
+                    1 for f in features if f.get("status") == "completed"
+                )
+                shown_features = (
+                    features
+                    if arguments.get("includeCompleted")
+                    else [f for f in features if f.get("status") != "completed"]
+                )
                 return self._text(
                     {
-                        "features": self._load_features(),
+                        "features": shown_features,
+                        "completedFeatureCount": completed_count,
                         "status": self.sm.status(include_stack=True),
                         "sessionLog": self._tail_session_log(),
                         "research": research[-20:],
