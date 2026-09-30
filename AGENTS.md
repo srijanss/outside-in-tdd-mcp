@@ -2,10 +2,6 @@
 
 ## Git
 
-Never commit automatically. Always ask before creating a commit, even after
-finishing a task, a TDD cycle, or a background job — wait for explicit
-confirmation each time.
-
 ## Research checkpoints
 
 Don't wait for an explicit `checkpoint`/`tdd-research` request or for

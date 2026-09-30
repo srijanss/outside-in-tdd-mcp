@@ -20,17 +20,17 @@ CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
 DANGER_PATTERNS=(
   "DROP TABLE"
   "TRUNCATE TABLE"
-  "DELETE FROM"                             # bulk deletes (with or without WHERE) — manual only
-  "kubectl delete"                          # never delete cluster resources autonomously
-  "kubectl apply.*production"               # never deploy to production autonomously
+  "DELETE FROM"               # bulk deletes (with or without WHERE) — manual only
+  "kubectl delete"            # never delete cluster resources autonomously
+  "kubectl apply.*production" # never deploy to production autonomously
   "rm -rf"
-  "git push[^|;&]*(--force([^-]|$)|--force-with-lease|-f([[:space:]]|$))"  # any force push — branch can't be verified from text alone
+  "git push[^|;&]*(--force([^-]|$)|--force-with-lease|-f([[:space:]]|$))" # any force push — branch can't be verified from text alone
   "git reset --hard origin"
-  "^[[:space:]]*git[[:space:]]+commit"      # never commit autonomously — user commits, always
-  "git[[:space:]]+push"                     # never push autonomously, force or not
-  "git[[:space:]]+checkout[[:space:]]+-b"   # never create a branch autonomously
-  "git[[:space:]]+switch[[:space:]]+-c"     # never create a branch autonomously
-  "git[[:space:]]+branch[[:space:]]+[^[:space:]-]"  # `git branch <name>` creates a branch; -a/-d/--show-current etc. still pass
+  # "^[[:space:]]*git[[:space:]]+commit"      # never commit autonomously — user commits, always
+  "git[[:space:]]+push"                            # never push autonomously, force or not
+  "git[[:space:]]+checkout[[:space:]]+-b"          # never create a branch autonomously
+  "git[[:space:]]+switch[[:space:]]+-c"            # never create a branch autonomously
+  "git[[:space:]]+branch[[:space:]]+[^[:space:]-]" # `git branch <name>` creates a branch; -a/-d/--show-current etc. still pass
 )
 
 for pattern in "${DANGER_PATTERNS[@]}"; do
