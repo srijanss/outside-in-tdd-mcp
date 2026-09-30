@@ -679,6 +679,28 @@ def test_real_assertion_failure_does_not_set_stub_only_hint():
     assert sm.last_error is None
 
 
+def test_missing_symbol_failure_from_a_mock_based_test_does_not_set_stub_only_hint():
+    # A stub can never satisfy a test that asserts on calls made to a mock,
+    # so the "write only a stub" nudge would be actively misleading here.
+    sm = make_sm()
+    sm.record_test_result(
+        passed=0,
+        failed=1,
+        failures=[
+            {
+                "name": "t",
+                "message": (
+                    "  File \"/usr/lib/python3.12/unittest/mock.py\", line 1450, "
+                    "in __enter__\n"
+                    "AttributeError: <module 'svc'> has no attribute 'notify'"
+                ),
+            }
+        ],
+    )
+    assert sm.phase == "verify_red"
+    assert sm.last_error is None
+
+
 def test_stub_only_hint_clears_once_a_later_run_reports_a_real_failure():
     sm = make_sm()
     sm.record_test_result(

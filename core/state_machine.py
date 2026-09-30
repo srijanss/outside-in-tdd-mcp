@@ -107,6 +107,10 @@ def _looks_like_missing_symbol(failures: list) -> bool:
         lowered = message.lower()
         if not any(sig in lowered for sig in _MISSING_SYMBOL_SIGNATURES):
             return False
+        # A test driving a mock/patch usually asserts on the calls made
+        # (not just that a name exists), so a bare stub could never pass it.
+        if "mock" in lowered:
+            return False
     return True
 
 
