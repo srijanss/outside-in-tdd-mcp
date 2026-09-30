@@ -3183,6 +3183,57 @@ def test_write_test_is_still_allowed_after_advance_was_skipped_for_an_undeclared
     assert call(server, "verify")["ok"] is True
 
 
+def git_init(path):
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+
+
+def test_run_tests_warns_about_a_file_changed_outside_the_declared_files(tmp_path):
+    git_init(tmp_path)
+    server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    call(server, "write_test", testName="t")
+    (tmp_path / "probe_other.py").write_text("x = 1\n")
+
+    payload = call(server, "run_tests")
+
+    assert "probe_other.py" in payload["driftWarning"]
+
+
+def test_run_tests_does_not_warn_about_declared_files_or_files_dirty_before_the_feature(tmp_path):
+    git_init(tmp_path)
+    (tmp_path / "already_dirty.py").write_text("v1\n")
+    server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    call(server, "write_test", testName="t")
+    call(server, "run_tests", advance=True)
+    call(server, "drill_down", testFile="u.py::test_u", targetFiles=["impl.py"])
+    (tmp_path / "t.py").write_text("test\n")
+    (tmp_path / "u.py").write_text("unit\n")
+    (tmp_path / "impl.py").write_text("code\n")
+
+    payload = call(server, "run_tests")
+
+    assert "driftWarning" not in payload
+
+
+def test_write_code_warns_about_a_file_changed_outside_the_declared_files(tmp_path):
+    git_init(tmp_path)
+    server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    call(server, "write_test", testName="t")
+    call(server, "run_tests", advance=True)
+    call(server, "drill_down", testFile="u.py::test_u", targetFiles=["impl.py"])
+    call(server, "write_test", testName="u")
+    call(server, "run_tests", advance=True)
+    (tmp_path / "impl.py").write_text("code\n")
+    (tmp_path / "probe_other.py").write_text("x = 1\n")
+
+    payload = call(server, "write_code", filePath="impl.py")
+
+    assert "probe_other.py" in payload["driftWarning"]
+    assert "impl.py" not in payload["driftWarning"]
+
+
 def test_run_tests_advance_still_works_after_a_restart_when_the_test_was_declared_before_it(tmp_path):
     server = make_scripted_adapter_server(tmp_path, ASSERTION_FAILURE)
     call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])

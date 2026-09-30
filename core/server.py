@@ -15,6 +15,7 @@ import os
 import re
 import shlex
 import shutil
+import subprocess
 import sys
 from importlib.metadata import PackageNotFoundError, version as _package_version
 from datetime import datetime, timezone
@@ -199,7 +200,8 @@ TOOLS = [
             "green) — it does not advance a missing-name failure or a test "
             "that passed straight from RED, a RED cycle with no write_test, "
             "or a call already at VERIFY_RED/VERIFY_GREEN (all return "
-            "advanceSkipped with the reason)."
+            "advanceSkipped with the reason). Adds driftWarning when files "
+            "outside the declared test/target files changed (git repos only)."
         ),
         inputSchema={
             "type": "object",
@@ -592,6 +594,9 @@ class TDDServer:
         # (depth, path) -> test function names present when that level
         # started; in-memory only.
         self._test_name_baseline: dict[tuple[int, str], set[str]] = {}
+        # path -> content hash of every git-dirty file when the feature
+        # started (or the last drift report); None = no baseline / no git.
+        self._drift_baseline: dict[str, str | None] | None = None
         self._load_state()
 
     def _ensure_git_excluded(self) -> None:
@@ -718,6 +723,75 @@ class TDDServer:
         if baseline is None:
             return []  # no snapshot (e.g. server restarted mid-level): unknown
         return sorted(self._read_test_names(path) - baseline)
+
+    def _worktree_state(self) -> dict[str, str | None] | None:
+        """Content hash of every file git reports as modified or untracked,
+        or None when git isn't available / this isn't a repository. The
+        server's own .tdd-* state files are left out."""
+        try:
+            out = subprocess.run(
+                ["git", "status", "--porcelain", "-z", "--untracked-files=all"],
+                cwd=self.project_root,
+                capture_output=True,
+                timeout=10,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if out.returncode != 0:
+            return None
+        entries = out.stdout.decode("utf-8", "replace").split("\0")
+        state: dict[str, str | None] = {}
+        skip_next = False
+        for entry in entries:
+            if skip_next:  # original path of a rename/copy
+                skip_next = False
+                continue
+            if len(entry) < 4:
+                continue
+            if entry[0] in "RC" or entry[1] in "RC":
+                skip_next = True
+            path = entry[3:]
+            if Path(path).name.startswith(".tdd-"):
+                continue
+            try:
+                state[path] = hashlib.sha256(
+                    (Path(self.project_root) / path).read_bytes()
+                ).hexdigest()
+            except OSError:
+                state[path] = None
+        return state
+
+    def _declared_paths(self) -> list[str]:
+        paths: list[str] = []
+        for level in self.sm.stack:
+            paths.append(level.test_file.split("::", 1)[0])
+            paths.extend(level.target_files)
+        return [p.rstrip("/") for p in paths if p]
+
+    def _drift_evidence(self) -> dict[str, Any]:
+        """Soft check: files changed since the feature started (or the last
+        report) that aren't a declared test file or target file of any
+        level. Empty when git is unavailable or nothing drifted."""
+        current = self._worktree_state()
+        baseline, self._drift_baseline = self._drift_baseline, current
+        if current is None or baseline is None:
+            return {}
+        declared = self._declared_paths()
+        drifted = sorted(
+            path
+            for path in set(current) | set(baseline)
+            if current.get(path) != baseline.get(path)
+            and not any(path == d or path.startswith(d + "/") for d in declared)
+        )
+        if not drifted:
+            return {}
+        return {
+            "driftWarning": (
+                f"Changed outside the declared test/target files: "
+                f"{', '.join(drifted)}. Intentional? If it needs its own "
+                "test, drill_down into it first."
+            )
+        }
 
     def _declare_evidence(self, path: str) -> dict[str, Any]:
         """Soft check of a write_test/write_code declaration against disk:
@@ -1133,6 +1207,7 @@ class TDDServer:
         try:
             if name == "init_feature":
                 self._declared_hashes.clear()
+                self._drift_baseline = self._worktree_state()
                 self._snapshot_test_names(1, arguments["testFile"])
                 config, error = self._try_load_config()
                 if error:
@@ -1234,6 +1309,7 @@ class TDDServer:
             if name == "write_code":
                 self.sm.write_code(arguments["filePath"])
                 evidence = self._declare_evidence(arguments["filePath"])
+                evidence.update(self._drift_evidence())
                 self._log_event(
                     "write_code", filePath=arguments["filePath"], **evidence
                 )
@@ -1289,6 +1365,7 @@ class TDDServer:
                     )
                 if self.sm.cycle_count > cycles_before:
                     self._snapshot_test_names(self.sm.depth, self.sm.test_file)
+                payload.update(self._drift_evidence())
                 return self._text(payload)
 
             if name == "get_status":
