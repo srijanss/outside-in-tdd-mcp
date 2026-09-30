@@ -196,7 +196,9 @@ TOOLS = [
             "also do the verify() step in the same call when the result is "
             "what the phase expects (RED: an assertion failure; IMPLEMENT: "
             "green) — it does not advance a missing-name failure or a test "
-            "that passed straight from RED (those return advanceSkipped)."
+            "that passed straight from RED, a RED cycle with no write_test, "
+            "or a call already at VERIFY_RED/VERIFY_GREEN (all return "
+            "advanceSkipped with the reason)."
         ),
         inputSchema={
             "type": "object",
