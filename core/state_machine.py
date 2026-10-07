@@ -443,6 +443,17 @@ class TDDStateMachine:
             elif passed > 0:
                 level.phase = "verify_green"
 
+        elif level.phase == "verify_red":
+            if failed == 0 and passed > 0:
+                # A rerun contradicts the red checkpoint: same as RED's
+                # already-passing case.
+                level.phase = "verify_green"
+
+        elif level.phase == "verify_green":
+            if failed > 0:
+                # A rerun contradicts the green checkpoint: back to fixing.
+                level.phase = "implement"
+
         elif level.phase == "refactor":
             if failed > 0:
                 level.last_error = "Refactor broke the tests."

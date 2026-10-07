@@ -138,6 +138,8 @@ run_tests(regressionScope?, recreateDb?, advance?)
   → If RED and failures == 0 and passed > 0: advance to VERIFY_GREEN (nothing needed implementing)
   → If IMPLEMENT and failures > 0: stay in IMPLEMENT
   → If IMPLEMENT and failures == 0 and passed > 0: advance to VERIFY_GREEN
+  → If VERIFY_RED and failures == 0 and passed > 0: move to VERIFY_GREEN (a rerun contradicted the red checkpoint)
+  → If VERIFY_GREEN and failures > 0: move back to IMPLEMENT (a rerun contradicted the green checkpoint)
   → If REFACTOR and tests still pass: advance back to RED, increment cycle count
   → If REFACTOR and tests fail: something broke during refactor, stay in REFACTOR, surface error
 

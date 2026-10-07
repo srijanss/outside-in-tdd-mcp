@@ -9,9 +9,9 @@ that knowledge lives entirely in swappable **adapters**.
 
 ```
 RED           write_test only. run_tests: failing -> VERIFY_RED, already passing -> VERIFY_GREEN.
-VERIFY_RED    checkpoint. User confirms the failing test is the right one. verify() -> IMPLEMENT.
+VERIFY_RED    checkpoint. User confirms the failing test is the right one. verify() -> IMPLEMENT. Rerun passing -> VERIFY_GREEN.
 IMPLEMENT     write_code only. run_tests: still failing -> stay, passing -> VERIFY_GREEN.
-VERIFY_GREEN  checkpoint. User confirms the passing implementation is correct. verify() -> REFACTOR.
+VERIFY_GREEN  checkpoint. User confirms the passing implementation is correct. verify() -> REFACTOR. Rerun failing -> IMPLEMENT.
 REFACTOR      refactor_code only. run_tests: passing -> back to RED (cycle++), failing -> stay + surface error.
 ```
 

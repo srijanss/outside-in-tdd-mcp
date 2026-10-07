@@ -100,6 +100,22 @@ def test_verify_green_advances_to_refactor():
     assert sm.phase == "refactor"
 
 
+def test_failing_rerun_at_verify_green_returns_to_implement():
+    sm = to_implement(make_sm())
+    sm.record_test_result(passed=1, failed=0)  # implement -> verify_green
+    sm.record_test_result(passed=0, failed=1)  # rerun contradicts green
+    assert sm.phase == "implement"
+    with pytest.raises(PhaseError):
+        sm.verify()
+
+
+def test_passing_rerun_at_verify_red_moves_to_verify_green():
+    sm = make_sm()
+    sm.record_test_result(passed=0, failed=1)  # red -> verify_red
+    sm.record_test_result(passed=1, failed=0)  # rerun contradicts red
+    assert sm.phase == "verify_green"
+
+
 def test_verify_only_allowed_in_verify_red_or_verify_green():
     sm = make_sm()
     with pytest.raises(PhaseError):
