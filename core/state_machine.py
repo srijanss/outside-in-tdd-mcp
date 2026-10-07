@@ -221,7 +221,8 @@ class TDDStateMachine:
     def complete_feature(self) -> dict[str, Any]:
         """Mark the current feature done. Requires being back at the base
         level (depth 1 — return_to_parent() out of any drill-downs first)
-        with at least one full cycle finished there. Distinct from
+        with at least one full cycle finished there and no newer test
+        declared since the last one closed. Distinct from
         reset_feature(), which discards a feature unconditionally from any
         phase or depth."""
         self._require_feature()
@@ -242,6 +243,12 @@ class TDDStateMachine:
                 "complete_feature() requires at least one full "
                 "RED->VERIFY_RED->IMPLEMENT->VERIFY_GREEN->REFACTOR cycle to complete "
                 f"(cycle_count={base.cycle_count})."
+            )
+        if base.test_declared:
+            raise PhaseError(
+                "complete_feature() is blocked: a new test was declared "
+                "since the last closed cycle. Run it through to REFACTOR "
+                "first, or reset_feature() to discard it."
             )
         summary = {
             "featureName": self.feature_name,
@@ -268,7 +275,8 @@ class TDDStateMachine:
     def return_to_parent(self) -> dict[str, Any]:
         """Pop the current level and resume the one beneath it. Requires
         the current level to have finished at least one full cycle (back in
-        RED, cycle_count >= 1) — same completion gate complete_feature()
+        RED, cycle_count >= 1, no newer test declared) — same completion
+        gate complete_feature()
         uses, just scoped to one level instead of the whole feature."""
         self._require_feature()
         if len(self.stack) < 2:
@@ -288,6 +296,12 @@ class TDDStateMachine:
                 "return_to_parent() requires at least one full "
                 "RED->VERIFY_RED->IMPLEMENT->VERIFY_GREEN->REFACTOR cycle at this level to "
                 f"return (cycle_count={top.cycle_count})."
+            )
+        if top.test_declared:
+            raise PhaseError(
+                "return_to_parent() is blocked: a new test was declared "
+                "since the last closed cycle at this level. Run it through "
+                "to REFACTOR first, or abandon_drill_down() to discard it."
             )
         summary = {"testFile": top.test_file, "cyclesCompleted": top.cycle_count}
         self.stack.pop()

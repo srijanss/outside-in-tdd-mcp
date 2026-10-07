@@ -511,6 +511,16 @@ def test_return_to_parent_blocked_before_nested_cycle_completes():
         sm.return_to_parent()  # nested still not back in red
 
 
+def test_return_to_parent_blocked_after_new_nested_test_declared():
+    sm = make_sm()
+    to_implement(sm)
+    sm.drill_down("cart/tests.py", ["cart/models.py"])
+    to_red_after_one_cycle(sm)  # nested cycle 1 closed
+    sm.write_test("test_next_nested_behavior")  # nested cycle 2 started
+    with pytest.raises(PhaseError):
+        sm.return_to_parent()
+
+
 def test_return_to_parent_pops_and_resumes_parent_implement():
     # "parent" here is itself a drilled-down level (owning f.py) since the
     # true base level can never own real target_files -- what matters is
@@ -601,6 +611,15 @@ def test_complete_feature_blocked_while_drilled_down():
         sm.complete_feature()
     sm.return_to_parent()  # back to depth 1, implement
     assert sm.depth == 1
+
+
+def test_complete_feature_blocked_after_new_test_declared():
+    sm = make_sm()
+    to_red_after_one_cycle(sm)  # cycle 1 closed
+    sm.write_test("test_next_behavior")  # cycle 2 started, never run
+    sm = TDDStateMachine.from_dict(sm.to_dict())  # survives a restart
+    with pytest.raises(PhaseError):
+        sm.complete_feature()
 
 
 def test_complete_feature_allowed_after_full_cycle_and_clears_state():
