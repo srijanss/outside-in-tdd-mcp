@@ -24,8 +24,12 @@ human checkpoint at the two points where an agent's judgment is easiest to
 get wrong unnoticed: right after a test goes red (is this actually testing
 the right thing?) and right after it goes green (does this implementation
 actually look right, not just pass?). Both are single-tool phases — only
-`verify()` (or `get_status()`) is callable — so nothing else can happen until
-a human explicitly advances the cycle.
+`verify()` (or `get_status()`) is callable — so the cycle can't drift past
+them by accident. They are pause points, not proof of approval: `verify()`
+is called by the agent like any other tool (and `run_tests(advance=true)`
+calls it in the same step), so the server can't tell whether a human
+actually looked. Whether the agent stops for you there is up to its
+instructions or harness.
 
 ## Architecture
 
@@ -54,8 +58,8 @@ until they pass. `IMPLEMENT` sits between RED and GREEN to close that gap: a
 failing test in RED moves you into VERIFY_RED, then (once verified)
 IMPLEMENT, where `write_code` unlocks, and only once tests pass there do you
 land in VERIFY_GREEN. VERIFY_GREEN is then a one-tool checkpoint — calling
-`verify()` advances unconditionally to REFACTOR, trusting the human has
-looked at what's about to be cleaned up.
+`verify()` advances unconditionally to REFACTOR, trusting that whoever
+called it has looked at what's about to be cleaned up.
 
 **A feature is a stack of test targets, not one flat file.** A functional
 test rarely gets to GREEN in one leap — it usually needs several unit tests

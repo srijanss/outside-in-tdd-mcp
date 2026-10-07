@@ -103,8 +103,10 @@ REFACTOR      → Clean up code, tests must stay green
 
 `VERIFY_RED` and `VERIFY_GREEN` aren't in the original 3-phase list above —
 see README.md for why they exist: they're single-tool phases (only
-`verify()`/`get_status()` are callable) so an agent can't self-approve past
-the two points where its judgment is easiest to get wrong unnoticed.
+`verify()`/`get_status()` are callable) so nothing else can happen at
+the two points where an agent's judgment is easiest to get wrong unnoticed.
+They are pause points, not an authorization mechanism: `verify()` is
+agent-callable, so the server cannot prove a human approved.
 
 ### Feature Lifecycle
 
@@ -147,7 +149,9 @@ run_tests(regressionScope?, recreateDb?, advance?)
 verify()
   → Only allowed in VERIFY_RED or VERIFY_GREEN
   → VERIFY_RED → IMPLEMENT; VERIFY_GREEN → REFACTOR
-  → No auto-approval path — a human (via the calling agent) must call this
+  → Never called implicitly except via run_tests(advance=true); meant to be
+    called after a human has looked, but agent-callable, so the server
+    can't verify that one did
 
 write_code(filePath)
   → Only allowed in IMPLEMENT
@@ -415,7 +419,7 @@ outside-in-tdd-mcp/
 - [ ] Full cycle works manually: `init_feature` → `write_test` → `run_tests` (fails, advances to VERIFY_RED) → `verify` → `write_code` → `run_tests` (passes, advances to VERIFY_GREEN) → `verify` → `refactor_code` → `run_tests` (passes, advances back to RED)
 - [ ] Server correctly **blocks** `write_code` when called during RED phase
 - [ ] Server correctly **blocks** `write_test` when called during IMPLEMENT phase
-- [ ] Server correctly **blocks** `verify` when called outside VERIFY_RED/VERIFY_GREEN (an agent can't self-approve past the checkpoint)
+- [ ] Server correctly **blocks** `verify` when called outside VERIFY_RED/VERIFY_GREEN (it can't be used to skip a phase)
 - [ ] `.mcp.json` successfully launches the server from claudecode.nvim
 - [ ] `/mcp` in Claude Code shows `outside-in-tdd` as connected
 - [ ] Full real feature (payment email validation or similar) built end-to-end through Claude using only these MCP tools
