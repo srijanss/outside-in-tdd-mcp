@@ -10,7 +10,11 @@ requires-python = ">=3.10"
 dependencies = ["mcp>=1.2.0,<2"]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-json-report"]
+dev = [
+    "hypothesis>=6.168.5",
+    "pytest",
+    "pytest-json-report",
+]
 
 [project.scripts]
 outside-in-tdd-mcp = "core.server:run"
