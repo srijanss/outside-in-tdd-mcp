@@ -1,5 +1,6 @@
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -125,6 +126,26 @@ def test_adapter_falls_back_to_path_pytest_when_project_venv_pytest_is_unusable(
 
     assert result["passed"] == 1
     assert result["failed"] == 0
+
+
+def test_adapter_prints_no_result_when_no_pytest_can_run(tmp_path):
+    # No runnable pytest at all (none in .venv, none on PATH) means no test
+    # ran — that must surface as an adapter error (empty stdout, non-zero
+    # exit), never as a failed=1 result that would count as a RED.
+    (tmp_path / "test_ok.py").write_text("def test_ok():\n    assert True\n")
+    empty_path = tmp_path / "empty-bin"
+    empty_path.mkdir()
+
+    proc = subprocess.run(
+        [sys.executable, str(ADAPTER), "test_ok.py", str(tmp_path)],
+        capture_output=True,
+        text=True,
+        env={"PATH": str(empty_path)},
+    )
+
+    assert proc.stdout.strip() == ""
+    assert proc.returncode != 0
+    assert "pytest" in proc.stderr
 
 
 def test_adapter_failure_message_drops_the_chained_exception_and_outside_frames():

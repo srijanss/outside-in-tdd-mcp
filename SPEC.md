@@ -84,6 +84,7 @@ This is the entire interface between the core and any language. Any adapter — 
 - Takes exactly 2 positional args: test target path, project root
 - Prints exactly one JSON object to stdout matching the shape above
 - Non-zero exit code is fine (tests failing isn't a script error) — the JSON `failed` count is what matters
+- If no test could run at all (runner missing, no report produced), print nothing to stdout and exit non-zero — that surfaces as an `AdapterError`, never as `failed: 1`, so a broken toolchain can't satisfy RED
 - Everything language/framework-specific (parsing pytest output vs. cargo output vs. vitest output) lives entirely inside the adapter script
 
 ---

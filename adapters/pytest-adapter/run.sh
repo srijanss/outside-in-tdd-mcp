@@ -89,8 +89,8 @@ def _run_pytest(project_root: str, args: list[str]) -> subprocess.CompletedProce
             )
         except OSError as exc:
             if index == len(candidates) - 1:
-                # No runnable pytest at all: report it as a collection-style
-                # failure (no JSON report is produced) instead of crashing.
+                # No runnable pytest at all: no JSON report gets produced,
+                # which main() turns into an adapter error instead of crashing.
                 return subprocess.CompletedProcess(
                     [command, *args], 127, "", f"cannot execute {command}: {exc}"
                 )
@@ -121,19 +121,16 @@ def main() -> int:
         try:
             report = json.loads(report_file.read_text())
         except (FileNotFoundError, json.JSONDecodeError):
-            # pytest failed before it could produce a report at all
-            # (e.g. pytest itself not found, bad cwd).
-            result = {
-                "passed": 0,
-                "failed": 1,
-                "duration_ms": 0,
-                "failures": [
-                    {"name": "collection", "message": _trim_for_message(raw_output)[-500:]}
-                ],
-                "raw_output": raw_output[-3000:],
-            }
-            print(json.dumps(result))
-            return 0
+            # pytest failed before it could produce a report at all (e.g.
+            # pytest itself not found, pytest-json-report missing, bad cwd):
+            # no test ran, so this is an adapter error, not a failing test —
+            # print nothing to stdout and exit non-zero.
+            print(
+                "pytest-adapter: pytest produced no JSON report.\n"
+                + raw_output[-3000:],
+                file=sys.stderr,
+            )
+            return 1
 
     failures = []
     for test in report.get("tests", []):

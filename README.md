@@ -438,6 +438,9 @@ Write an executable at a known path that:
 - prints exactly one JSON object to stdout:
   `{"passed": N, "failed": N, "duration_ms": N, "failures": [...], "raw_output": "..."}`
 - may exit non-zero — the JSON `failed` count is what matters, not the exit code
+- if it can't run any tests at all (runner missing, no report produced), prints
+  nothing to stdout and exits non-zero — `run_tests` then reports an adapter
+  error instead of counting it as a failing test (which would fake a RED)
 
 Then point `.tdd-config.json`'s `adapterPath` at it. Nothing in `core/` needs
 to change. If the language has a recognisable test-declaration syntax, also
