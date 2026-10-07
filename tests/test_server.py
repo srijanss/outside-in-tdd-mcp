@@ -2716,6 +2716,60 @@ def test_mid_cycle_state_survives_a_new_server_instance(tmp_path):
     assert after == before
 
 
+def test_stale_server_instance_does_not_overwrite_newer_state(tmp_path):
+    # Two MCP clients on one project: `stale` loaded state before `fresh`
+    # started a feature. A read-only call on `stale` must neither report
+    # nor persist its outdated snapshot.
+    stale = make_server(tmp_path)
+    fresh = make_server(tmp_path)
+    call(
+        fresh,
+        "init_feature",
+        featureName="shared-feature",
+        testFile="tests/test_x.py",
+        targetFiles=[],
+    )
+
+    assert call(stale, "get_status")["featureName"] == "shared-feature"
+    assert call(make_server(tmp_path), "get_status")["featureName"] == (
+        "shared-feature"
+    )
+
+
+def test_tool_call_holds_the_state_lock_for_its_whole_duration(tmp_path):
+    # Reload-act-save must be one transaction, or two processes that both
+    # reload before either saves still lose one update. The adapter runs
+    # mid-call in a separate process, so it can probe the lock.
+    lock_path = tmp_path / ".tdd-state.json.lock"
+    probe = tmp_path / "lock_probe_adapter.py"
+    probe.write_text(
+        f'''#!/usr/bin/env python3
+import fcntl, json
+with open({str(lock_path)!r}, "w") as f:
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        held = False
+    except BlockingIOError:
+        held = True
+print(json.dumps({{"passed": 0, "failed": 1,
+                  "failures": [{{"name": "probe", "message": f"held={{held}}"}}]}}))
+'''
+    )
+    probe.chmod(0o755)
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(json.dumps({"adapterPath": str(probe)}))
+    server = TDDServer(
+        project_root=str(tmp_path),
+        config_path=str(config_path),
+        state_path=str(tmp_path / ".tdd-state.json"),
+    )
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+
+    payload = call(server, "run_tests")
+
+    assert payload["testResult"]["failures"][0]["message"] == "held=True"
+
+
 def test_state_lock_provides_mutual_exclusion(tmp_path):
     import threading
     import time
@@ -2747,15 +2801,14 @@ def test_save_state_does_not_raise_on_non_serializable_field(tmp_path):
     server = make_server(tmp_path)
     call(server, "init_feature", featureName="f", testFile="tests/test_x.py", targetFiles=[])
     # Bypass run_tests() (which always parses JSON-safe adapter output) to
-    # simulate the on-disk state ending up with a value _save_state() can't
-    # serialize -- "verify"'s own response doesn't touch lastResult, so this
-    # isolates the assertion to _save_state()'s handling rather than the
-    # tool response's.
+    # put a value _save_state() can't serialize into the in-memory state.
+    # Called directly: every tool call reloads state from disk first.
     server.sm.record_test_result(passed=0, failed=1, failures=[{"bad": object()}])
 
-    payload = call(server, "verify")  # must not raise
+    server._save_state()  # must not raise
 
-    assert payload == {"ok": True, "featureName": "f", "depth": 1, "testFile": "tests/test_x.py", "targetFiles": [], "phase": "implement", "cycleCount": 0, "lastError": None}
+    # The last good on-disk state is left intact, not truncated.
+    assert call(make_server(tmp_path), "get_status")["phase"] == "red"
 
 
 def test_save_state_swallows_oserror_when_state_path_unwritable(tmp_path):

@@ -185,6 +185,11 @@ verified before clearing and what the response tells Claude happened.
   backing `_features_lock()`), the same mutual-exclusion pattern the
   feature ledger uses, so two concurrent server processes can't race on a
   read-modify-write and silently drop an entry.
+- `.tdd-state.json` holds the in-progress cycle (phase, drill-down stack).
+  Every tool call reloads it, acts, and saves it under one
+  `_state_lock()`, so several server processes on the same project (e.g.
+  Claude Code and Codex) always act on the latest state and their calls
+  serialize — a long `run_tests` in one briefly blocks the other.
 - `.tdd-config.json` (per-consumer-project, not tracked here — only the
   `.example` is) and `.mcp.json` are deliberately two separate files.
   `.tdd-config.json` is the *server's* concern (which adapter, where the

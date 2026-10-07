@@ -866,11 +866,16 @@ class TDDServer:
         return evidence
 
     def _load_state(self) -> None:
+        with self._state_lock():
+            self._read_state()
+
+    def _read_state(self) -> None:
+        """Unlocked load — callers hold _state_lock()."""
         path = Path(self.state_path)
         if not path.exists():
             return
         try:
-            with self._state_lock(), path.open() as f:
+            with path.open() as f:
                 data = json.load(f)
         except (OSError, json.JSONDecodeError):
             return
@@ -879,6 +884,11 @@ class TDDServer:
         self._drift_baseline = baseline if isinstance(baseline, dict) else None
 
     def _save_state(self) -> None:
+        with self._state_lock():
+            self._write_state()
+
+    def _write_state(self) -> None:
+        """Unlocked save — callers hold _state_lock()."""
         # Same write-to-temp-then-rename pattern as _save_features, so a
         # crash mid-write never leaves .tdd-state.json truncated/partial.
         # Serialization and the write are guarded separately (matching
@@ -898,10 +908,9 @@ class TDDServer:
         self._ensure_git_excluded()
         tmp_path = f"{self.state_path}.tmp"
         try:
-            with self._state_lock():
-                with open(tmp_path, "w") as f:
-                    f.write(content)
-                os.replace(tmp_path, self.state_path)
+            with open(tmp_path, "w") as f:
+                f.write(content)
+            os.replace(tmp_path, self.state_path)
         except OSError:
             pass  # persisted cycle state is best-effort; never block the TDD cycle
 
@@ -1235,10 +1244,16 @@ class TDDServer:
     def call_tool(
         self, name: str, arguments: dict[str, Any]
     ) -> list[types.TextContent]:
-        try:
-            return self._call_tool(name, arguments)
-        finally:
-            self._save_state()
+        # Another server process on this project may have moved on since
+        # this one last looked: reload, act and save as one transaction
+        # under the state lock, so concurrent calls serialize instead of
+        # overwriting each other's update.
+        with self._state_lock():
+            self._read_state()
+            try:
+                return self._call_tool(name, arguments)
+            finally:
+                self._write_state()
 
     def _call_tool(
         self, name: str, arguments: dict[str, Any]
