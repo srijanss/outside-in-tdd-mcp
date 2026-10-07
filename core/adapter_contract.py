@@ -33,33 +33,45 @@ class AdapterResult:
     raw_output: str = ""
 
     @staticmethod
-    def from_json(data: dict[str, Any]) -> "AdapterResult":
+    def from_json(data: Any) -> "AdapterResult":
+        if not isinstance(data, dict):
+            raise AdapterError(
+                f"Adapter output must be a JSON object, got {type(data).__name__}"
+            )
         for key in ("passed", "failed"):
             if key not in data:
                 raise AdapterError(f"Adapter output missing required field '{key}'")
-        failures = list(data.get("failures", []))
+        failures = data.get("failures", [])
+        if not isinstance(failures, list):
+            raise AdapterError(
+                f"Adapter output 'failures' must be a list, got {failures!r}"
+            )
         for entry in failures:
             has_required_fields = (
-                isinstance(entry, dict) and "name" in entry and "message" in entry
+                isinstance(entry, dict)
+                and isinstance(entry.get("name"), str)
+                and isinstance(entry.get("message"), str)
             )
             if not has_required_fields:
                 raise AdapterError(
                     "Adapter output 'failures' entries must be objects with "
-                    f"'name'/'message' fields, got {entry!r}"
+                    f"string 'name'/'message' fields, got {entry!r}"
                 )
-        passed = int(data["passed"])
-        failed = int(data["failed"])
-        duration_ms = int(data.get("duration_ms", 0))
-        for field_name, value in (
-            ("passed", passed),
-            ("failed", failed),
-            ("duration_ms", duration_ms),
-        ):
-            if value < 0:
-                raise AdapterError(
-                    f"Adapter output field '{field_name}' must be "
-                    f"non-negative, got {value}"
-                )
+        passed = _count(data, "passed")
+        failed = _count(data, "failed")
+        # Durations are informational, so a float from a custom adapter is
+        # fine — only counts must be exact integers.
+        duration = data.get("duration_ms", 0)
+        if isinstance(duration, bool) or not isinstance(duration, (int, float)):
+            raise AdapterError(
+                f"Adapter output field 'duration_ms' must be a number, got {duration!r}"
+            )
+        duration_ms = int(duration)
+        if duration_ms < 0:
+            raise AdapterError(
+                f"Adapter output field 'duration_ms' must be "
+                f"non-negative, got {duration_ms}"
+            )
 
         return AdapterResult(
             passed=passed,
@@ -68,6 +80,20 @@ class AdapterResult:
             failures=failures,
             raw_output=str(data.get("raw_output", "")),
         )
+
+
+def _count(data: dict[str, Any], key: str) -> int:
+    """A required non-negative integer count — no bools, floats or strings."""
+    value = data[key]
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise AdapterError(
+            f"Adapter output field '{key}' must be an integer, got {value!r}"
+        )
+    if value < 0:
+        raise AdapterError(
+            f"Adapter output field '{key}' must be non-negative, got {value}"
+        )
+    return value
 
 
 def run_adapter(

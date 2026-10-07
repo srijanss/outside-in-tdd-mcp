@@ -73,3 +73,24 @@ def test_from_json_rejects_negative_failed():
 def test_from_json_rejects_negative_duration_ms():
     with pytest.raises(AdapterError):
         AdapterResult.from_json({"passed": 0, "failed": 0, "duration_ms": -5})
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        5,  # not a JSON object
+        {"passed": "not a number", "failed": 0},
+        {"passed": "3", "failed": 0},  # numeric string
+        {"passed": 1.5, "failed": 0},
+        {"passed": True, "failed": 0},
+        {"passed": 0, "failed": None},
+        {"passed": 0, "failed": 1, "failures": None},
+        {"passed": 0, "failed": 1, "failures": [{"name": 1, "message": "m"}]},
+        {"passed": 0, "failed": 0, "duration_ms": "fast"},
+    ],
+)
+def test_from_json_rejects_malformed_output_with_adapter_error(data):
+    # Anything but a clean AdapterError escapes the server's adapter error
+    # handling as a raw ValueError/TypeError.
+    with pytest.raises(AdapterError):
+        AdapterResult.from_json(data)
