@@ -325,7 +325,8 @@ TOOLS = [
         name="complete_feature",
         description=(
             "Mark the current feature complete and clear its state. Only "
-            "at base level (depth 1) in RED phase, after >=1 full cycle."
+            "at base level (depth 1) in RED phase, after >=1 full cycle, "
+            "with no test declared since the last cycle closed."
         ),
         inputSchema={"type": "object", "properties": {}},
     ),
@@ -359,7 +360,8 @@ TOOLS = [
         name="return_to_parent",
         description=(
             "Pop the finished drill-down level and resume the parent. "
-            "RED phase only, after >=1 full cycle at this level. Use "
+            "RED phase only, after >=1 full cycle at this level and no "
+            "test declared since it closed. Use "
             "abandon_drill_down instead if the level isn't finished."
         ),
         inputSchema={"type": "object", "properties": {}},
