@@ -10,7 +10,9 @@ cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // empty')"
 
 # Boundary: start of string, or right after a shell separator (; & |, which
 # also covers && and || since each still contains one of those chars).
-pattern='(^|[;&|])[[:space:]]*(python3?[[:space:]]+-m[[:space:]]+(pytest|unittest)|py\.test|pytest|npx[[:space:]]+vitest|vitest|jest|go[[:space:]]+test|tox|mocha|ava|(npm|yarn|pnpm)[[:space:]]+(run[[:space:]]+)?test)([[:space:]]|$)'
+# Accept executable paths and the common uv wrapper as well as bare runners.
+# This remains a command-text heuristic, not a shell parser or a sandbox.
+pattern='(^|[;&|])[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*=[^[:space:]]+[[:space:]]+)*(([^[:space:];&|]*/)?uv[[:space:]]+run[[:space:]]+(-[^[:space:]]+[[:space:]]+)*)?([^[:space:];&|]*/)?(python([0-9]+(\.[0-9]+)?)?[[:space:]]+-m[[:space:]]+(pytest|unittest)|py\.test|pytest|npx[[:space:]]+vitest|vitest|jest|go[[:space:]]+test|tox|mocha|ava|(npm|yarn|pnpm)[[:space:]]+(run[[:space:]]+)?test)([[:space:]]|$)'
 
 if printf '%s' "$cmd" | grep -Eiq "$pattern"; then
   jq -n '{
