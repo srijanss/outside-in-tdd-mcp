@@ -126,6 +126,7 @@ def test_malformed_findings_are_retried_exactly_once(repo):
     result = manager.await_result(manager.start(f"{first}..HEAD"), timeout=10)
     assert result["status"] == "done" and len(recovers.calls) == 2
 
+    commit(repo, "c.py")  # a repeat of the same range would be a fix round
     gives_up = counting_runner(bad, bad, findings_reply(FINDING))
     manager = make_manager(repo, gives_up)
     result = manager.await_result(manager.start(f"{first}..HEAD"), timeout=10)
@@ -202,7 +203,8 @@ def test_findings_are_written_while_holding_the_supplied_findings_lock(repo):
     result = manager.await_result(manager.start(f"{first}..HEAD"), timeout=10)
 
     assert result["status"] == "done"
-    assert events == ["enter", "exit"]
+    # once to read the round history, once to save findings and the round
+    assert events == ["enter", "exit", "enter", "exit"]
 
 
 def test_a_completed_review_is_recorded_as_a_round_but_a_failed_one_is_not(repo):
@@ -216,7 +218,8 @@ def test_a_completed_review_is_recorded_as_a_round_but_a_failed_one_is_not(repo)
     )
 
     ok = manager.await_result(manager.start(f"{first}..HEAD", model="openai/m"), timeout=10)
-    bad = manager.await_result(manager.start(f"{first}..HEAD"), timeout=10)
+    commit(repo, "c.py")
+    bad = manager.await_result(manager.start(f"{head}..HEAD"), timeout=10)
 
     assert (ok["status"], bad["status"]) == ("done", "failed")
     [round_one] = list_rounds(f"review:{first}", path=rounds_path)

@@ -10,8 +10,28 @@ from core.review_findings import list_review_findings, record_review_finding
 from core.review_findings_parser import FindingsParseError, parse_findings
 from core.review_prompt import build_review_prompt
 from core.review_range import resolve_review_range
-from core.review_rounds import record_round
+from core.review_rounds import list_rounds, record_round
 from core.reviewers import build_reviewer_command
+
+
+def _ledger(rounds: list[dict], live: list[dict]) -> list[dict]:
+    """Every finding raised in earlier rounds with its current status.
+    Fixed findings are deleted from the live store, so a finding that was
+    reported but is no longer there counts as fixed."""
+    live_by_id = {f["id"]: f for f in live}
+    reported: dict[str, dict] = {}
+    for round_entry in rounds:
+        for finding in round_entry["findings"]:
+            reported[finding["id"]] = finding
+    ledger = []
+    for finding_id, finding in reported.items():
+        current = live_by_id.get(finding_id)
+        entry = {k: finding[k] for k in ("id", "severity", "file", "line", "claim")}
+        entry["status"] = current["status"] if current else "fixed"
+        if current and current.get("reason"):
+            entry["reason"] = current["reason"]
+        ledger.append(entry)
+    return ledger
 
 
 class ReviewManager:
@@ -38,15 +58,28 @@ class ReviewManager:
 
     def start(self, range_spec, reviewer=None, model=None, thinking=None) -> str:
         resolved = resolve_review_range(range_spec, repo=self.project_root)
+        scope = f"review:{resolved['start']}"
+        with self.findings_lock():
+            rounds = list_rounds(scope, path=self.rounds_path)
+            live = list_review_findings(scope, path=self.findings_path)
+        # A repeat of the same range is the next fix round: only review what
+        # changed since the last round, and tell the reviewer what happened
+        # to its earlier findings.
+        base = rounds[-1]["head"] if rounds else resolved["start"]
+        if base == resolved["head"]:
+            raise ValueError(
+                "No new commits since the last review round "
+                f"(HEAD is {base[:7]}) — commit the fixes first."
+            )
         diff = subprocess.run(
-            ["git", "diff", f"{resolved['start']}..{resolved['head']}"],
+            ["git", "diff", f"{base}..{resolved['head']}"],
             cwd=self.project_root,
             check=True,
             capture_output=True,
             text=True,
         ).stdout
         command = build_reviewer_command(
-            build_review_prompt(diff),
+            build_review_prompt(diff, ledger=_ledger(rounds, live)),
             reviewer=reviewer,
             model=model,
             thinking=thinking,

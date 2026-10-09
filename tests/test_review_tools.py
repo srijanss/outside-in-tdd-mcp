@@ -215,7 +215,8 @@ def test_each_completed_review_is_recorded_as_a_numbered_round(repo):
 
     done = call(server, "start_review", range=f"{first}..HEAD", model="openai/m")
     call(server, "await_review", reviewId=done["reviewId"], timeoutSeconds=10)
-    failed = call(server, "start_review", range=f"{first}..HEAD")  # fails: not recorded
+    commit(repo, "c.py")
+    failed = call(server, "start_review", range=f"{head}..HEAD")  # fails: not recorded
     assert call(server, "await_review", reviewId=failed["reviewId"], timeoutSeconds=10)["status"] == "failed"
 
     rounds = call(server, "list_review_rounds", scope=f"review:{first}")["rounds"]
@@ -274,3 +275,51 @@ def test_a_finding_rejected_twice_that_comes_back_escalates_to_the_human(repo):
 
     assert result["decision"] == "escalate"
     assert "missing-lock" in result["reason"]
+
+
+OTHER_FINDING = {**FINDING, "id": "bad-name", "severity": "medium"}
+
+
+def test_a_repeat_review_of_the_same_start_reviews_only_new_commits_with_the_ledger(repo):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    runner = FakeRunner(findings_reply(FINDING, OTHER_FINDING), findings_reply())
+    server = make_server(repo, runner)
+    scope = f"review:{first}"
+    run_review(server, first)
+    # The author fixed one finding (complete_feature drops it from the live
+    # store) and rejected the other with a reason.
+    store = repo / ".tdd-review-findings.json"
+    live = json.loads(store.read_text())
+    live[scope] = [f for f in live[scope] if f["id"] != "missing-lock"]
+    store.write_text(json.dumps(live))
+    call(server, "record_review_finding", scope=scope,
+         finding={**OTHER_FINDING, "status": "rejected", "reason": "by design"})
+    commit(repo, "c.py")
+
+    second = run_review(server, first)
+
+    prompt = runner.calls[1][-1]
+    assert second["status"] == "done"
+    assert "+c.py" in prompt and "+b.py" not in prompt
+    start = prompt.index("[\n", prompt.index("Previous findings"))
+    ledger = json.loads(prompt[start:prompt.index("\n```", start)])
+    assert {(f["id"], f["status"]) for f in ledger} == {
+        ("missing-lock", "fixed"), ("bad-name", "rejected")}
+    assert [r["round"] for r in call(server, "list_review_rounds", scope=scope)["rounds"]] == [1, 2]
+
+
+def test_a_repeat_review_with_no_new_commits_since_the_last_round_is_an_error(repo):
+    first = commit(repo, "a.py")
+    head = commit(repo, "b.py")
+    runner = FakeRunner(findings_reply(FINDING))
+    server = make_server(repo, runner)
+    run_review(server, first)
+
+    again = call(server, "start_review", range=f"{first}..HEAD")
+
+    assert again == {
+        "error": f"No new commits since the last review round (HEAD is {head[:7]}) — "
+                 "commit the fixes first."
+    }
+    assert len(runner.calls) == 1
