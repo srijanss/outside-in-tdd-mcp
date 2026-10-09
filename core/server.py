@@ -33,6 +33,7 @@ from mcp.server import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
 
 from core.adapter_contract import AdapterError, run_adapter
+from core.review_runner import ReviewManager
 from core.review_findings import list_review_findings as _list_review_findings
 from core.review_findings import record_review_finding as _record_review_finding
 from core.research_log import list_research as _list_research_entries
@@ -405,6 +406,45 @@ TOOLS = [
         },
     ),
     types.Tool(
+        name="start_review",
+        description=(
+            "Start an independent code review of a commit range in the "
+            "background and return a reviewId immediately. The reviewer "
+            "(pi by default) sees only the diff, never the implementer's "
+            "reasoning, and its validated findings are saved under scope "
+            "'review:<startSha>'. Poll with await_review. range is "
+            "'<sha>..HEAD'; reviewer/model/thinking override the "
+            ".tdd-config.json 'reviewers.default' values."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "range": {"type": "string"},
+                "reviewer": {"type": "string"},
+                "model": {"type": "string"},
+                "thinking": {"type": "string"},
+            },
+            "required": ["range"],
+        },
+    ),
+    types.Tool(
+        name="await_review",
+        description=(
+            "Wait up to timeoutSeconds (default 60) for a review started "
+            "with start_review. Returns status 'pending' (call again), "
+            "'done' with findings, or 'failed' with an error — a failed "
+            "review is never reported as zero findings."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "reviewId": {"type": "string"},
+                "timeoutSeconds": {"type": "number"},
+            },
+            "required": ["reviewId"],
+        },
+    ),
+    types.Tool(
         name="record_research",
         description=(
             "Append an entry to the durable research log "
@@ -565,12 +605,44 @@ def _require_string(
         )
 
 
+REVIEW_TIMEOUT_SECONDS = 1800
+
+
+def _run_reviewer_subprocess(argv: list[str], cwd: str) -> str:
+    """Run a reviewer command and return its stdout.
+
+    The exit code is deliberately not trusted (pi can exit 0 after a failed
+    response and non-zero after a good one): the caller judges the output.
+    Only a run that produced nothing at all is an error here, with a stderr
+    tail so the failure is diagnosable.
+    """
+    result = subprocess.run(
+        argv,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        timeout=REVIEW_TIMEOUT_SECONDS,
+    )
+    if not result.stdout.strip():
+        tail = result.stderr.strip()[-500:]
+        raise RuntimeError(f"{argv[0]} exited {result.returncode} with no output: {tail}")
+    return result.stdout
+
+
 class TDDServer:
     def __init__(
-        self, project_root: str, config_path: str, state_path: str | None = None
+        self,
+        project_root: str,
+        config_path: str,
+        state_path: str | None = None,
+        review_runner: Any = None,
     ) -> None:
         self.project_root = project_root
         self.config_path = config_path
+        # (argv, cwd) -> reviewer stdout; injectable so tests never spawn a
+        # real reviewer. Built lazily by _review_manager().
+        self._review_runner = review_runner or _run_reviewer_subprocess
+        self._review_manager_instance: ReviewManager | None = None
         self.sm = TDDStateMachine()
         self.session_log_path = os.environ.get(
             "TDD_SESSION_LOG_PATH", str(Path(project_root) / ".tdd-session.log")
@@ -1249,6 +1321,10 @@ class TDDServer:
     def call_tool(
         self, name: str, arguments: dict[str, Any]
     ) -> list[types.TextContent]:
+        if name == "await_review":
+            # May wait minutes for the reviewer: it touches no TDD state, so
+            # it must not hold the project-wide state lock while it waits.
+            return self._await_review(arguments)
         # Another server process on this project may have moved on since
         # this one last looked: reload, act and save as one transaction
         # under the state lock, so concurrent calls serialize instead of
@@ -1260,10 +1336,52 @@ class TDDServer:
             finally:
                 self._write_state()
 
+    def _review_manager(self) -> ReviewManager | str:
+        """The shared ReviewManager, or a config error message."""
+        if self._review_manager_instance is None:
+            config, error = self._try_load_config()
+            if error:
+                return error
+            self._review_manager_instance = ReviewManager(
+                project_root=self.project_root,
+                findings_path=self.review_findings_path,
+                config=config,
+                runner=self._review_runner,
+                findings_lock=self._review_findings_lock,
+            )
+        return self._review_manager_instance
+
+    def _await_review(self, arguments: dict[str, Any]) -> list[types.TextContent]:
+        manager = self._review_manager_instance
+        if manager is None:
+            return self._error(f"Unknown review id '{arguments['reviewId']}'")
+        try:
+            result = manager.await_result(
+                arguments["reviewId"], timeout=arguments.get("timeoutSeconds", 60)
+            )
+        except ValueError as exc:
+            return self._error(str(exc))
+        return self._text(result)
+
     def _call_tool(
         self, name: str, arguments: dict[str, Any]
     ) -> list[types.TextContent]:
         try:
+            if name == "start_review":
+                manager = self._review_manager()
+                if isinstance(manager, str):
+                    return self._error(manager)
+                try:
+                    review_id = manager.start(
+                        arguments["range"],
+                        reviewer=arguments.get("reviewer"),
+                        model=arguments.get("model"),
+                        thinking=arguments.get("thinking"),
+                    )
+                except ValueError as exc:
+                    return self._error(str(exc))
+                return self._text({"reviewId": review_id})
+
             if name == "init_feature":
                 config, error = self._try_load_config()
                 if error:
@@ -1849,6 +1967,16 @@ class TDDServer:
         }
 
 
+async def _dispatch_tool(
+    tdd: TDDServer, name: str, arguments: dict[str, Any]
+) -> list[types.TextContent]:
+    if name == "await_review":
+        # Blocks for up to minutes; on the event loop it would stall every
+        # other request (and cancellation) on the stdio transport.
+        return await asyncio.to_thread(tdd.call_tool, name, arguments)
+    return tdd.call_tool(name, arguments)
+
+
 def build_server() -> Server:
     tdd = TDDServer(PROJECT_ROOT, CONFIG_PATH)
     server: Server = Server("outside-in-tdd")
@@ -1861,7 +1989,7 @@ def build_server() -> Server:
     async def call_tool(
         name: str, arguments: dict[str, Any] | None
     ) -> list[types.TextContent]:
-        return tdd.call_tool(name, arguments or {})
+        return await _dispatch_tool(tdd, name, arguments or {})
 
     return server
 
