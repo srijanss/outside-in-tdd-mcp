@@ -183,3 +183,26 @@ def test_review_tool_errors_come_back_as_error_payloads_not_exceptions(repo):
     assert "Expected a range like '<sha>..HEAD'" in malformed["error"]
     assert unknown_before_any_review == {"error": "Unknown review id 'nope'"}
     assert unknown_after == {"error": "Unknown review id 'nope'"}
+
+
+def test_start_review_is_refused_while_a_tdd_feature_is_in_progress(repo):
+    from pathlib import Path
+
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    runner = FakeRunner(findings_reply(FINDING))
+    server = make_server(repo, runner)
+    adapter = Path(__file__).resolve().parents[1] / "adapters/pytest-adapter/run.sh"
+    (repo / ".tdd-config.json").write_text(json.dumps({"adapterPath": str(adapter)}))
+    call(server, "init_feature", featureName="half-done", testFile="t.py", targetFiles=[])
+
+    blocked = call(server, "start_review", range=f"{first}..HEAD")
+
+    assert blocked == {
+        "error": (
+            "Can't start a review while feature 'half-done' is in progress — "
+            "finish it with complete_feature (or reset_feature) first, so the "
+            "reviewer only sees completed work."
+        )
+    }
+    assert runner.calls == []

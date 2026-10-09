@@ -1368,6 +1368,14 @@ class TDDServer:
     ) -> list[types.TextContent]:
         try:
             if name == "start_review":
+                in_progress = self.sm.status()["featureName"]
+                if in_progress:
+                    return self._error(
+                        f"Can't start a review while feature '{in_progress}' "
+                        "is in progress — finish it with complete_feature "
+                        "(or reset_feature) first, so the reviewer only sees "
+                        "completed work."
+                    )
                 manager = self._review_manager()
                 if isinstance(manager, str):
                     return self._error(manager)
