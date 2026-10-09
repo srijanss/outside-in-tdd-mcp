@@ -3502,3 +3502,30 @@ def test_run_tests_advance_says_why_it_did_not_advance_when_already_at_verify_re
 
     assert "verify()" in payload["advanceSkipped"]
     assert call(server, "get_status")["phase"] == "verify_red"
+
+
+def test_record_review_finding_rejects_manual_fixed_status_for_review_scopes(tmp_path):
+    server = make_server(tmp_path)
+    call(
+        server,
+        "record_review_finding",
+        scope="review:abc123",
+        finding={"id": "missing-lock", "status": "open", "severity": "high"},
+    )
+
+    payload = call(
+        server,
+        "record_review_finding",
+        scope="review:abc123",
+        finding={"id": "missing-lock", "status": "fixed"},
+    )
+
+    assert payload == {
+        "error": (
+            "Finding 'missing-lock' in review scope 'review:abc123' can't be "
+            "marked 'fixed' directly — fix it through a TDD feature started "
+            "with its reviewFindingId."
+        )
+    }
+    findings = call(server, "list_review_findings", scope="review:abc123")
+    assert [f["id"] for f in findings["findings"]] == ["missing-lock"]

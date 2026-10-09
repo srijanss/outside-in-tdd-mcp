@@ -381,7 +381,10 @@ TOOLS = [
             "Persist a review finding under a shared feature or diff "
             "scope. A finding recorded with status 'fixed' is removed "
             "from the store rather than kept — the store only ever holds "
-            "live (unaddressed) findings."
+            "live (unaddressed) findings. In 'review:' scopes (the "
+            "review loop) status 'fixed' is rejected here — such findings "
+            "are only closed by complete_feature on a feature started "
+            "with their reviewFindingId."
         ),
         inputSchema={
             "type": "object",
@@ -1617,6 +1620,19 @@ class TDDServer:
                 return self._text({"ok": True, "entry": entry})
 
             if name == "record_review_finding":
+                scope = arguments["scope"]
+                finding_arg = arguments["finding"]
+                if scope.startswith("review:") and finding_arg.get("status") == "fixed":
+                    return self._text(
+                        {
+                            "error": (
+                                f"Finding '{finding_arg.get('id')}' in review "
+                                f"scope '{scope}' can't be marked 'fixed' "
+                                "directly — fix it through a TDD feature "
+                                "started with its reviewFindingId."
+                            )
+                        }
+                    )
                 with self._review_findings_lock():
                     finding = _record_review_finding(
                         arguments["scope"],
