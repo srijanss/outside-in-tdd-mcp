@@ -82,3 +82,32 @@ def test_an_allowlisted_model_is_accepted():
     command = build_reviewer_command("p", model="openai/ok", config=config)
 
     assert command["model"] == "openai/ok"
+
+
+def test_claude_command_is_headless_read_only_and_isolated_with_model_and_effort():
+    command = build_reviewer_command(
+        "PROMPT", reviewer="claude", model="opus", thinking="high"
+    )
+
+    argv = command["argv"]
+    assert command["reviewer"] == "claude"
+    assert argv[:2] == ["claude", "-p"]
+    for flag in ("--no-session-persistence", "--restricted", "--strict-mcp-config"):
+        assert flag in argv
+    assert argv[argv.index("--output-format") + 1] == "json"
+    assert argv[argv.index("--tools") + 1] == "Read"
+    assert argv[argv.index("--model") + 1] == "opus"
+    assert argv[argv.index("--effort") + 1] == "high"
+    assert argv[-2:] == ["--", "PROMPT"]
+
+
+def test_claude_effort_maps_pi_style_thinking_levels_to_the_nearest_option():
+    def argv(thinking):
+        return build_reviewer_command(
+            "P", reviewer="claude", thinking=thinking
+        )["argv"]
+
+    assert "--effort" not in argv("off")
+    assert "--effort" not in argv(None)
+    assert argv("minimal")[argv("minimal").index("--effort") + 1] == "low"
+    assert argv("xhigh")[argv("xhigh").index("--effort") + 1] == "xhigh"

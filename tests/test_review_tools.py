@@ -248,6 +248,11 @@ def run_review(server, start):
     return call(server, "await_review", reviewId=started["reviewId"], timeoutSeconds=10)
 
 
+def run_review_with(server, start, **options):
+    started = call(server, "start_review", range=f"{start}..HEAD", **options)
+    return call(server, "await_review", reviewId=started["reviewId"], timeoutSeconds=10)
+
+
 def test_a_round_decides_continue_with_open_blocking_findings_and_done_without(repo):
     first = commit(repo, "a.py")
     second = commit(repo, "b.py")
@@ -323,3 +328,29 @@ def test_a_repeat_review_with_no_new_commits_since_the_last_round_is_an_error(re
                  "commit the fixes first."
     }
     assert len(runner.calls) == 1
+
+
+def claude_result(text, is_error=False):
+    return json.dumps({
+        "type": "result", "subtype": "success", "is_error": is_error,
+        "terminal_reason": "completed", "result": text,
+    })
+
+
+def test_the_claude_reviewer_runs_headless_and_yields_the_same_findings(repo):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    reply = claude_result("```json\n" + json.dumps({"findings": [FINDING]}) + "\n```")
+    runner = FakeRunner(reply)
+    server = make_server(repo, runner)
+
+    result = run_review_with(server, first, reviewer="claude", model="opus", thinking="high")
+
+    assert result["status"] == "done"
+    assert result["findings"] == [
+        {**FINDING, "status": "open", "reviewer": "claude", "model": "opus"}
+    ]
+    argv = runner.calls[0]
+    assert argv[:2] == ["claude", "-p"]
+    assert argv[argv.index("--model") + 1] == "opus"
+    assert argv[argv.index("--effort") + 1] == "high"

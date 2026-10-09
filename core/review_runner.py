@@ -4,6 +4,7 @@ import uuid
 from contextlib import nullcontext
 from pathlib import Path
 
+from core.claude_output import parse_claude_output
 from core.pi_events import parse_pi_events
 from core.review_decision import decide
 from core.review_findings import list_review_findings, record_review_finding
@@ -150,7 +151,10 @@ class ReviewManager:
 
     def _review_once(self, command) -> list[dict]:
         output = self.runner(command["argv"], self.project_root)
-        return parse_findings(parse_pi_events(output)["text"])
+        parse_output = (
+            parse_claude_output if command["reviewer"] == "claude" else parse_pi_events
+        )
+        return parse_findings(parse_output(output)["text"])
 
     def await_result(self, review_id, timeout):
         review = self._reviews.get(review_id)
