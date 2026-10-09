@@ -206,3 +206,34 @@ def test_start_review_is_refused_while_a_tdd_feature_is_in_progress(repo):
         )
     }
     assert runner.calls == []
+
+
+def test_each_completed_review_is_recorded_as_a_numbered_round(repo):
+    first = commit(repo, "a.py")
+    head = commit(repo, "b.py")
+    server = make_server(repo, FakeRunner(findings_reply(FINDING), pi_stream("garbage")))
+
+    done = call(server, "start_review", range=f"{first}..HEAD", model="openai/m")
+    call(server, "await_review", reviewId=done["reviewId"], timeoutSeconds=10)
+    failed = call(server, "start_review", range=f"{first}..HEAD")  # fails: not recorded
+    assert call(server, "await_review", reviewId=failed["reviewId"], timeoutSeconds=10)["status"] == "failed"
+
+    rounds = call(server, "list_review_rounds", scope=f"review:{first}")["rounds"]
+
+    assert len(rounds) == 1
+    assert {k: rounds[0][k] for k in ("round", "start", "head", "reviewer", "model")} == {
+        "round": 1, "start": first, "head": head, "reviewer": "pi", "model": "openai/m",
+    }
+    assert [f["id"] for f in rounds[0]["findings"]] == ["missing-lock"]
+    assert "recordedAt" in rounds[0]
+
+
+def test_review_rounds_file_is_added_to_git_info_exclude(repo):
+    (repo / ".git" / "info").mkdir(parents=True, exist_ok=True)
+    server = make_server(repo, FakeRunner())
+
+    call(server, "init_feature", featureName="f", testFile="t.py", targetFiles=[])
+    call(server, "reset_feature")
+
+    lines = (repo / ".git" / "info" / "exclude").read_text().splitlines()
+    assert lines.count(".tdd-review-rounds.json") == 1

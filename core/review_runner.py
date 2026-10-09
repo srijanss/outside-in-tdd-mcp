@@ -2,21 +2,32 @@ import subprocess
 import threading
 import uuid
 from contextlib import nullcontext
+from pathlib import Path
 
 from core.pi_events import parse_pi_events
 from core.review_findings import record_review_finding
 from core.review_findings_parser import FindingsParseError, parse_findings
 from core.review_prompt import build_review_prompt
 from core.review_range import resolve_review_range
+from core.review_rounds import record_round
 from core.reviewers import build_reviewer_command
 
 
 class ReviewManager:
     def __init__(
-        self, project_root, findings_path, config, runner, findings_lock=nullcontext
+        self,
+        project_root,
+        findings_path,
+        config,
+        runner,
+        findings_lock=nullcontext,
+        rounds_path=None,
     ):
         self.project_root = project_root
         self.findings_path = findings_path
+        self.rounds_path = rounds_path or str(
+            Path(findings_path).with_name(".tdd-review-rounds.json")
+        )
         self.config = config
         self.runner = runner
         # Factory for a context manager guarding findings_path; the server
@@ -44,21 +55,22 @@ class ReviewManager:
         self._reviews[review_id] = {"done": threading.Event(), "result": None}
         threading.Thread(
             target=self._job,
-            args=(review_id, command, f"review:{resolved['start']}"),
+            args=(review_id, command, resolved),
             daemon=True,
         ).start()
         return review_id
 
-    def _job(self, review_id, command, scope) -> None:
+    def _job(self, review_id, command, resolved) -> None:
         review = self._reviews[review_id]
         try:
-            review["result"] = self._run(command, scope)
+            review["result"] = self._run(command, resolved)
         except Exception as exc:  # e.g. the findings store itself failing
             review["result"] = {"status": "failed", "error": str(exc)}
         finally:
             review["done"].set()
 
-    def _run(self, command, scope) -> dict:
+    def _run(self, command, resolved) -> dict:
+        scope = f"review:{resolved['start']}"
         # Any failure must end in a terminal "failed" result: a review that
         # errors out must never look like one that found nothing.
         try:
@@ -83,6 +95,17 @@ class ReviewManager:
         with self.findings_lock():
             for finding in tagged:
                 record_review_finding(scope, finding, path=self.findings_path)
+            record_round(
+                scope,
+                {
+                    "start": resolved["start"],
+                    "head": resolved["head"],
+                    "reviewer": command["reviewer"],
+                    "model": command["model"],
+                    "findings": tagged,
+                },
+                path=self.rounds_path,
+            )
         return {"status": "done", "scope": scope, "findings": tagged}
 
     def _review_once(self, command) -> list[dict]:

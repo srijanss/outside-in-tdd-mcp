@@ -203,3 +203,23 @@ def test_findings_are_written_while_holding_the_supplied_findings_lock(repo):
 
     assert result["status"] == "done"
     assert events == ["enter", "exit"]
+
+
+def test_a_completed_review_is_recorded_as_a_round_but_a_failed_one_is_not(repo):
+    from core.review_rounds import list_rounds
+
+    first = commit(repo, "a.py")
+    head = commit(repo, "b.py")
+    rounds_path = str(repo / ".tdd-review-rounds.json")
+    manager = make_manager(
+        repo, counting_runner(findings_reply(FINDING), pi_stream("x", settled=False))
+    )
+
+    ok = manager.await_result(manager.start(f"{first}..HEAD", model="openai/m"), timeout=10)
+    bad = manager.await_result(manager.start(f"{first}..HEAD"), timeout=10)
+
+    assert (ok["status"], bad["status"]) == ("done", "failed")
+    [round_one] = list_rounds(f"review:{first}", path=rounds_path)
+    assert (round_one["round"], round_one["start"], round_one["head"]) == (1, first, head)
+    assert (round_one["reviewer"], round_one["model"]) == ("pi", "openai/m")
+    assert round_one["findings"] == ok["findings"]

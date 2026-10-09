@@ -33,6 +33,7 @@ from mcp.server import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
 
 from core.adapter_contract import AdapterError, run_adapter
+from core.review_rounds import list_rounds as _list_review_rounds
 from core.review_runner import ReviewManager
 from core.review_findings import list_review_findings as _list_review_findings
 from core.review_findings import record_review_finding as _record_review_finding
@@ -406,6 +407,20 @@ TOOLS = [
         },
     ),
     types.Tool(
+        name="list_review_rounds",
+        description=(
+            "List the completed review rounds recorded for a review scope "
+            "('review:<startSha>'): round number, range, head SHA, reviewer, "
+            "model and the findings each round raised. Failed reviews are "
+            "not recorded."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {"scope": {"type": "string"}},
+            "required": ["scope"],
+        },
+    ),
+    types.Tool(
         name="start_review",
         description=(
             "Start an independent code review of a commit range in the "
@@ -656,6 +671,7 @@ class TDDServer:
         self.review_findings_path = str(
             Path(project_root) / ".tdd-review-findings.json"
         )
+        self.review_rounds_path = str(Path(project_root) / ".tdd-review-rounds.json")
         # Unlike the paths above, this one is also accepted as a
         # constructor argument (not just an env var / post-construction
         # attribute override): it's loaded eagerly right below, before a
@@ -694,6 +710,7 @@ class TDDServer:
             self.state_path,
             self.research_path,
             self.review_findings_path,
+            self.review_rounds_path,
             self.session_log_path,
         )
         # _file_lock leaves a sibling "<name>.lock" behind next to each file.
@@ -1348,6 +1365,7 @@ class TDDServer:
                 config=config,
                 runner=self._review_runner,
                 findings_lock=self._review_findings_lock,
+                rounds_path=self.review_rounds_path,
             )
         return self._review_manager_instance
 
@@ -1766,6 +1784,13 @@ class TDDServer:
                         path=self.review_findings_path,
                     )
                 return self._text({"ok": True, "finding": finding})
+
+            if name == "list_review_rounds":
+                with self._review_findings_lock():
+                    rounds = _list_review_rounds(
+                        arguments["scope"], path=self.review_rounds_path
+                    )
+                return self._text({"scope": arguments["scope"], "rounds": rounds})
 
             if name == "list_review_findings":
                 with self._review_findings_lock():
