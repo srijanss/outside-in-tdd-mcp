@@ -31,9 +31,17 @@ def record_review_finding(
 ) -> dict[str, Any]:
     if "id" not in finding:
         raise ValueError("finding must include an 'id'")
+    if finding.get("status") in ("rejected", "deferred") and not finding.get("reason"):
+        raise ValueError(f"a {finding['status']} finding must include a 'reason'")
 
     findings_by_scope = _load(path)
     findings = findings_by_scope.setdefault(scope, [])
+    previous = next((f for f in findings if f["id"] == finding["id"]), {})
+    rejected_count = previous.get("rejectedCount", 0)
+    if finding.get("status") == "rejected":
+        rejected_count += 1
+    if rejected_count:
+        finding = {**finding, "rejectedCount": rejected_count}
     findings[:] = [existing for existing in findings if existing["id"] != finding["id"]]
     if finding.get("status") != "fixed":
         findings.append(finding)

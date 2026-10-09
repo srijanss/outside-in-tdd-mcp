@@ -78,3 +78,34 @@ def test_recording_the_same_finding_id_replaces_it_within_a_shared_scope(tmp_pat
     assert list_review_findings("feature:checkout", path=path) == [
         {"id": "missing-lock", "status": "confirmed"}
     ]
+
+
+@pytest.mark.parametrize("status", ["rejected", "deferred"])
+def test_rejecting_or_deferring_a_finding_requires_a_reason(tmp_path, status):
+    path = str(tmp_path / ".tdd-review-findings.json")
+    record_review_finding("review:abc", {"id": "f1", "status": "open"}, path=path)
+
+    with pytest.raises(ValueError, match="reason"):
+        record_review_finding("review:abc", {"id": "f1", "status": status}, path=path)
+
+    assert list_review_findings("review:abc", path=path) == [
+        {"id": "f1", "status": "open"}
+    ]
+
+
+def test_rejections_are_counted_per_finding_id_across_re_reports(tmp_path):
+    path = str(tmp_path / ".tdd-review-findings.json")
+    scope = "review:abc"
+
+    record_review_finding(scope, {"id": "f1", "status": "open"}, path=path)
+    record_review_finding(
+        scope, {"id": "f1", "status": "rejected", "reason": "false positive"}, path=path
+    )
+    # The reviewer raises the same finding again next round.
+    record_review_finding(scope, {"id": "f1", "status": "open"}, path=path)
+    record_review_finding(
+        scope, {"id": "f1", "status": "rejected", "reason": "still a false positive"}, path=path
+    )
+
+    [finding] = list_review_findings(scope, path=path)
+    assert finding["rejectedCount"] == 2
