@@ -354,6 +354,8 @@ adapter — `core/` has none. Only `adapterPath` is required.
 | `defaultTestDir` | no | Whole-suite target used for the regression sweep when a base-level REFACTOR closes. Same shell-word syntax as a test target. |
 | `testNamePattern` | no | Regex whose **first capture group is a test's name** (matched line-by-line across the test file), used for the one-test-per-cycle warning on `write_test`. Defaults per `adapter` label (`pytest-adapter`, `vitest-adapter`, `cargo-adapter` — see below); set it to override, or for a custom adapter. No pattern and no built-in default = the warning is off. Must be a valid regex (checked at config load). |
 | `recreateDbArgs` | no | Extra runner arguments that `run_tests(recreateDb=true)` prepends to the test target, to rebuild a cached test database after a schema change (e.g. `--create-db` for pytest-django with `--reuse-db`). Unset = `recreateDb` returns a clear error. |
+| `reviewers.default` | no | Defaults for `start_review`: `{"reviewer": "pi" \| "claude", "model": "...", "thinking": "off\|minimal\|low\|medium\|high\|xhigh\|max"}`. Resolution order is the per-call argument, then this, then the reviewer tool's own default. |
+| `reviewers.allowedModels` | no | If set, `start_review` rejects any model not in this list. |
 
 Built-in `testNamePattern` defaults, chosen by the `adapter` label (shown
 JSON-escaped, so you can paste one into `.tdd-config.json` as a starting
@@ -374,6 +376,37 @@ adapter that shell-splits its `<test_target>` (the bundled pytest, vitest and
 cargo adapters all do). It is deliberately a fixed, configured string rather
 than free-form `extraArgs` on the tool call, so the agent can't use it to
 sneak arbitrary flags into the test command.
+
+## Automated review loop
+
+An external model reviews committed work and Claude fixes the findings, with
+the server running the reviewer and tracking the rounds. Used by the
+`/implement-and-review` and `/review-and-fix` skills.
+
+- `start_review(range, reviewer?, model?, thinking?)` — `range` is
+  `<sha>..HEAD`. Runs the reviewer in the background (read-only, no MCP,
+  no repo instructions) and returns a `reviewId`. Refused while a TDD
+  feature is in progress. Reviewers: `pi` (`pi -p --mode json`) and
+  `claude` (headless `claude -p`; `thinking` maps to `--effort`). The
+  reviewer binary must be on `PATH`.
+- `await_review(reviewId, timeoutSeconds?)` — `pending`, `failed` (with the
+  error — never treat it as "no findings"), or `done` with the findings and
+  a `decision`: `done` (no open medium-or-higher findings), `continue`, or
+  `escalate` (3 rounds hit with blocking findings still open, or a finding
+  rejected twice came back — a human decides).
+- Calling `start_review` again with the **same** `<sha>..HEAD` is the next
+  round: it reviews only commits since the previous round, passes the
+  reviewer a ledger of earlier findings (fixed / rejected / deferred / open)
+  and errors if there are no new commits.
+- `list_review_rounds(scope)` — the numbered round history for
+  `review:<startSha>`.
+- Findings live in `.tdd-review-findings.json` under scope
+  `review:<startSha>`. They can't be set to `fixed` by hand: fix one via
+  `init_feature(..., reviewFindingId, reviewFindingScope)` and
+  `complete_feature` closes it. `rejected`/`deferred` need a `reason`.
+- Round history is kept in `.tdd-review-rounds.json` (git-excluded like the
+  other state files). Pending reviews are in memory only: restarting the
+  server loses a review that hasn't finished.
 
 ## Tool behaviours worth knowing
 
