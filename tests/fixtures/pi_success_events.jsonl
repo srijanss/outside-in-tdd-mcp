@@ -1,0 +1,6 @@
+{"type": "session", "version": 3, "id": "01a12036-0348-7237-99c3-aa29a09f1af3", "timestamp": "2026-10-09T10:29:33.129Z", "cwd": "/repo"}
+{"type": "agent_start"}
+{"type": "message_end", "message": {"role": "user", "content": [{"type": "text", "text": "Reply with exactly: ok"}], "timestamp": 1791541773176}}
+{"type": "message_end", "message": {"role": "assistant", "content": [{"type": "text", "text": "ok", "textSignature": "{\"v\":1,\"id\":\"msg_05655bc623ed12d9016ac8c212dabc87d09fb96439d686e999\",\"phase\":\"final_answer\"}"}], "stopReason": "stop", "provider": "openai", "model": "gpt-6.1-sol", "usage": {"input": 489, "output": 5, "cacheRead": 0, "cacheWrite": 0, "reasoning": 0, "totalTokens": 494, "cost": {"input": 0.000978, "output": 5e-05, "cacheRead": 0, "cacheWrite": 0, "total": 0.0010279999999999998}}}}
+{"type": "agent_end", "messages": [], "willRetry": false}
+{"type": "agent_settled", "aborted": false}
