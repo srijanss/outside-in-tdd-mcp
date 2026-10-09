@@ -5,7 +5,8 @@ from contextlib import nullcontext
 from pathlib import Path
 
 from core.pi_events import parse_pi_events
-from core.review_findings import record_review_finding
+from core.review_decision import decide
+from core.review_findings import list_review_findings, record_review_finding
 from core.review_findings_parser import FindingsParseError, parse_findings
 from core.review_prompt import build_review_prompt
 from core.review_range import resolve_review_range
@@ -95,7 +96,7 @@ class ReviewManager:
         with self.findings_lock():
             for finding in tagged:
                 record_review_finding(scope, finding, path=self.findings_path)
-            record_round(
+            round_entry = record_round(
                 scope,
                 {
                     "start": resolved["start"],
@@ -106,7 +107,13 @@ class ReviewManager:
                 },
                 path=self.rounds_path,
             )
-        return {"status": "done", "scope": scope, "findings": tagged}
+            live = list_review_findings(scope, path=self.findings_path)
+        return {
+            "status": "done",
+            "scope": scope,
+            "findings": tagged,
+            **decide(round_entry["round"], live),
+        }
 
     def _review_once(self, command) -> list[dict]:
         output = self.runner(command["argv"], self.project_root)

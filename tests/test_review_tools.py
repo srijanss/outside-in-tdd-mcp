@@ -237,3 +237,40 @@ def test_review_rounds_file_is_added_to_git_info_exclude(repo):
 
     lines = (repo / ".git" / "info" / "exclude").read_text().splitlines()
     assert lines.count(".tdd-review-rounds.json") == 1
+
+
+LOW_FINDING = {**FINDING, "id": "nit", "severity": "low"}
+
+
+def run_review(server, start):
+    started = call(server, "start_review", range=f"{start}..HEAD")
+    return call(server, "await_review", reviewId=started["reviewId"], timeoutSeconds=10)
+
+
+def test_a_round_decides_continue_with_open_blocking_findings_and_done_without(repo):
+    first = commit(repo, "a.py")
+    second = commit(repo, "b.py")
+    commit(repo, "c.py")
+    server = make_server(repo, FakeRunner(
+        findings_reply(FINDING, LOW_FINDING), findings_reply(LOW_FINDING)))
+
+    blocking = run_review(server, first)
+    only_low = run_review(server, second)
+
+    assert blocking["decision"] == "continue"
+    assert only_low["decision"] == "done"
+
+
+def test_a_finding_rejected_twice_that_comes_back_escalates_to_the_human(repo):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    server = make_server(repo, FakeRunner(findings_reply(FINDING)))
+    scope = f"review:{first}"
+    for _ in range(2):
+        call(server, "record_review_finding", scope=scope,
+             finding={**FINDING, "status": "rejected", "reason": "by design"})
+
+    result = run_review(server, first)
+
+    assert result["decision"] == "escalate"
+    assert "missing-lock" in result["reason"]

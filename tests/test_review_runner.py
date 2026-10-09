@@ -77,7 +77,7 @@ def test_a_successful_review_is_done_with_findings_tagged_and_stored(repo):
     result = manager.await_result(review_id, timeout=10)
 
     expected = {**FINDING, "status": "open", "reviewer": "pi", "model": "openai/m"}
-    assert result == {"status": "done", "scope": f"review:{first}", "findings": [expected]}
+    assert result == {"status": "done", "scope": f"review:{first}", "findings": [expected], "decision": "continue"}
     assert seen["cwd"] == str(repo)
     assert "+b.py" in seen["argv"][-1]  # the diff reached the prompt
 
