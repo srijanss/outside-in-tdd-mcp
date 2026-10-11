@@ -201,6 +201,35 @@ def test_a_second_review_of_a_scope_is_refused_while_one_is_in_flight(repo):
     assert manager.start(f"{first}..HEAD")
 
 
+def test_a_scope_can_be_reviewed_again_after_start_fails_during_preparation(repo):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    manager = make_manager(repo, lambda argv, cwd, stdin: findings_reply())
+    manager.await_result(manager.start(f"{first}..HEAD"), timeout=10)
+
+    with pytest.raises(ValueError, match="No new commits"):
+        manager.start(f"{first}..HEAD")
+    commit(repo, "c.py")
+
+    retry = manager.start(f"{first}..HEAD")
+    assert manager.await_result(retry, timeout=10)["status"] == "done"
+
+
+def test_a_scope_can_be_reviewed_again_after_a_background_review_fails(repo):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    manager = make_manager(
+        repo, lambda argv, cwd, stdin: pi_stream("", stop_reason="error")
+    )
+    failed = manager.start(f"{first}..HEAD")
+    assert manager.await_result(failed, timeout=10)["status"] == "failed"
+
+    manager.runner = lambda argv, cwd, stdin: findings_reply()
+    retry = manager.start(f"{first}..HEAD")
+
+    assert manager.await_result(retry, timeout=10)["status"] == "done"
+
+
 def test_an_invalid_range_fails_immediately_without_starting_a_review(repo):
     commit(repo, "a.py")
     runner = counting_runner()
