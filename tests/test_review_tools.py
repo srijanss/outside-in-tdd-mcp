@@ -52,9 +52,11 @@ class FakeRunner:
     def __init__(self, *replies):
         self.replies = list(replies)
         self.calls = []
+        self.stdins = []
 
-    def __call__(self, argv, cwd):
+    def __call__(self, argv, cwd, stdin):
         self.calls.append(argv)
+        self.stdins.append(stdin)
         return self.replies.pop(0)
 
 
@@ -304,7 +306,7 @@ def test_a_repeat_review_of_the_same_start_reviews_only_new_commits_with_the_led
 
     second = run_review(server, first)
 
-    prompt = runner.calls[1][-1]
+    prompt = runner.stdins[1]
     assert second["status"] == "done"
     assert "+c.py" in prompt and "+b.py" not in prompt
     start = prompt.index("[\n", prompt.index("Previous findings"))

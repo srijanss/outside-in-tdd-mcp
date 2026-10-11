@@ -61,5 +61,13 @@ def build_reviewer_command(
             argv += ["--model", model]
         if thinking:
             argv += ["--thinking", thinking]
-    argv += ["--", prompt]
-    return {"reviewer": reviewer, "model": model, "thinking": thinking, "argv": argv}
+    # The prompt carries the whole diff, which can exceed the OS limit for a
+    # single argv element (E2BIG), so it travels on stdin; both reviewers
+    # read the prompt from piped stdin in print mode.
+    return {
+        "reviewer": reviewer,
+        "model": model,
+        "thinking": thinking,
+        "argv": argv,
+        "stdin": prompt,
+    }

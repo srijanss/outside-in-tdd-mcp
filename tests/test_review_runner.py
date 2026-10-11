@@ -67,8 +67,8 @@ def test_a_successful_review_is_done_with_findings_tagged_and_stored(repo):
     commit(repo, "b.py")
     seen = {}
 
-    def runner(argv, cwd):
-        seen["argv"], seen["cwd"] = argv, cwd
+    def runner(argv, cwd, stdin):
+        seen["argv"], seen["cwd"], seen["stdin"] = argv, cwd, stdin
         return findings_reply(FINDING)
 
     manager = make_manager(repo, runner)
@@ -79,7 +79,24 @@ def test_a_successful_review_is_done_with_findings_tagged_and_stored(repo):
     expected = {**FINDING, "status": "open", "reviewer": "pi", "model": "openai/m"}
     assert result == {"status": "done", "scope": f"review:{first}", "findings": [expected], "decision": "continue"}
     assert seen["cwd"] == str(repo)
-    assert "+b.py" in seen["argv"][-1]  # the diff reached the prompt
+    assert "+b.py" in seen["stdin"]  # the diff reached the prompt
+
+
+def test_the_review_prompt_with_the_diff_is_passed_to_the_runner_as_stdin_not_argv(repo):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    seen = {}
+
+    def runner(argv, cwd, stdin):
+        seen["argv"], seen["stdin"] = argv, stdin
+        return findings_reply()
+
+    manager = make_manager(repo, runner)
+    review_id = manager.start(f"{first}..HEAD")
+    manager.await_result(review_id, timeout=10)
+
+    assert "+++ b/b.py" in seen["stdin"]
+    assert not any("+++ b/b.py" in arg for arg in seen["argv"])
 
 
 @pytest.mark.parametrize(
@@ -93,7 +110,7 @@ def test_a_successful_review_is_done_with_findings_tagged_and_stored(repo):
 def test_a_failed_review_reports_failed_and_stores_nothing(repo, reply, expected_error):
     first = commit(repo, "a.py")
     commit(repo, "b.py")
-    manager = make_manager(repo, lambda argv, cwd: reply)
+    manager = make_manager(repo, lambda argv, cwd, stdin: reply)
 
     review_id = manager.start(f"{first}..HEAD")
     result = manager.await_result(review_id, timeout=10)
@@ -108,7 +125,7 @@ def counting_runner(*replies):
     calls = []
     remaining = list(replies)
 
-    def runner(argv, cwd):
+    def runner(argv, cwd, stdin):
         calls.append(argv)
         return remaining.pop(0)
 
@@ -149,7 +166,7 @@ def test_start_returns_immediately_and_await_reports_pending_until_the_reviewer_
     commit(repo, "b.py")
     release = threading.Event()
 
-    def slow_runner(argv, cwd):
+    def slow_runner(argv, cwd, stdin):
         assert release.wait(timeout=10), "test never released the reviewer"
         return findings_reply(FINDING)
 
@@ -167,7 +184,7 @@ def test_a_second_review_of_a_scope_is_refused_while_one_is_in_flight(repo):
     commit(repo, "b.py")
     release = threading.Event()
 
-    def slow_runner(argv, cwd):
+    def slow_runner(argv, cwd, stdin):
         assert release.wait(timeout=10), "test never released the reviewer"
         return findings_reply(FINDING)
 
@@ -218,7 +235,7 @@ def test_findings_are_written_while_holding_the_supplied_findings_lock(repo):
         project_root=str(repo),
         findings_path=str(repo / ".tdd-review-findings.json"),
         config={},
-        runner=lambda argv, cwd: findings_reply(FINDING),
+        runner=lambda argv, cwd, stdin: findings_reply(FINDING),
         findings_lock=RecordingLock,
     )
 

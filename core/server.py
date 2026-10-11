@@ -623,8 +623,8 @@ def _require_string(
 REVIEW_TIMEOUT_SECONDS = 1800
 
 
-def _run_reviewer_subprocess(argv: list[str], cwd: str) -> str:
-    """Run a reviewer command and return its stdout.
+def _run_reviewer_subprocess(argv: list[str], cwd: str, stdin: str) -> str:
+    """Run a reviewer command, feeding it `stdin`, and return its stdout.
 
     The exit code is deliberately not trusted (pi can exit 0 after a failed
     response and non-zero after a good one): the caller judges the output.
@@ -634,6 +634,7 @@ def _run_reviewer_subprocess(argv: list[str], cwd: str) -> str:
     result = subprocess.run(
         argv,
         cwd=cwd,
+        input=stdin,
         capture_output=True,
         text=True,
         timeout=REVIEW_TIMEOUT_SECONDS,
@@ -654,7 +655,7 @@ class TDDServer:
     ) -> None:
         self.project_root = project_root
         self.config_path = config_path
-        # (argv, cwd) -> reviewer stdout; injectable so tests never spawn a
+        # (argv, cwd, stdin) -> reviewer stdout; injectable so tests never spawn a
         # real reviewer. Built lazily by _review_manager().
         self._review_runner = review_runner or _run_reviewer_subprocess
         self._review_manager_instance: ReviewManager | None = None

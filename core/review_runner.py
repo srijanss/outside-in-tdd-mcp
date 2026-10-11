@@ -174,7 +174,7 @@ class ReviewManager:
         }
 
     def _review_once(self, command) -> list[dict]:
-        output = self.runner(command["argv"], self.project_root)
+        output = self.runner(command["argv"], self.project_root, command["stdin"])
         parse_output = (
             parse_claude_output if command["reviewer"] == "claude" else parse_pi_events
         )

@@ -3,7 +3,7 @@ import pytest
 from core.reviewers import ReviewerConfigError, build_reviewer_command
 
 
-def test_pi_command_is_an_isolated_read_only_argv_with_the_prompt_after_double_dash():
+def test_pi_command_is_an_isolated_read_only_argv_with_the_prompt_sent_on_stdin():
     command = build_reviewer_command(
         "review this",
         reviewer="pi",
@@ -23,8 +23,8 @@ def test_pi_command_is_an_isolated_read_only_argv_with_the_prompt_after_double_d
             "--tools", "read",
             "--model", "openai/gpt-6.1-sol",
             "--thinking", "medium",
-            "--", "review this",
         ],
+        "stdin": "review this",
     }
 
 
@@ -98,7 +98,8 @@ def test_claude_command_is_headless_read_only_and_isolated_with_model_and_effort
     assert argv[argv.index("--tools") + 1] == "Read"
     assert argv[argv.index("--model") + 1] == "opus"
     assert argv[argv.index("--effort") + 1] == "high"
-    assert argv[-2:] == ["--", "PROMPT"]
+    assert "PROMPT" not in argv and "--" not in argv
+    assert command["stdin"] == "PROMPT"
 
 
 def test_claude_effort_maps_pi_style_thinking_levels_to_the_nearest_option():
