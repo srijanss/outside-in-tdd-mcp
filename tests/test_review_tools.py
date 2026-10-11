@@ -98,6 +98,27 @@ def test_start_then_await_review_returns_findings_saved_under_the_range_scope(re
     assert "openai/test-model" in runner.calls[0]
 
 
+def test_reviewer_config_edits_apply_to_the_next_review_without_a_restart(repo):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    runner = FakeRunner(findings_reply(), findings_reply())
+    server = make_server(repo, runner)
+    config_path = repo / ".tdd-config.json"
+    base = {"adapterPath": "pytest-adapter-runner"}
+    config_path.write_text(json.dumps(
+        {**base, "reviewers": {"allowedModels": ["openai/a"]}}))
+    started = call(server, "start_review", range=f"{first}..HEAD", model="openai/a")
+    call(server, "await_review", reviewId=started["reviewId"], timeoutSeconds=10)
+    commit(repo, "c.py")
+
+    config_path.write_text(json.dumps(
+        {**base, "reviewers": {"allowedModels": ["openai/b"]}}))
+    refused = call(server, "start_review", range=f"{first}..HEAD", model="openai/a")
+
+    assert "allowedModels" in refused["error"]
+    assert len(runner.calls) == 1
+
+
 def fake_pi_on_path(tmp_path, monkeypatch, stdout, exit_code=0):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()

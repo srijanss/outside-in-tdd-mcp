@@ -1356,10 +1356,14 @@ class TDDServer:
 
     def _review_manager(self) -> ReviewManager | str:
         """The shared ReviewManager, or a config error message."""
-        if self._review_manager_instance is None:
-            config, error = self._try_load_config()
-            if error:
-                return error
+        config, error = self._try_load_config()
+        if error:
+            return error
+        if self._review_manager_instance is not None:
+            # Keep the manager (it owns in-flight reviews) but pick up config
+            # edits, so defaults and allowedModels apply without a restart.
+            self._review_manager_instance.config = config
+        else:
             self._review_manager_instance = ReviewManager(
                 project_root=self.project_root,
                 findings_path=self.review_findings_path,
