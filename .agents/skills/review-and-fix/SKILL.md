@@ -7,10 +7,15 @@ You have been given a commit range `<sha>..HEAD` (or `<sha>...HEAD`) and
 optional options: `--reviewer pi|claude`, `--model <model>`,
 `--thinking <level>`, `--verify`.
 
-If the range is missing or isn't of that form, ask for it and wait.
-Normalize `...` to `..`. Check the working tree is clean and that no TDD
-feature is in progress (`get_status()`); if either isn't true, say so and
-stop rather than committing someone else's work.
+If no range was given as an argument, use one already given earlier in this
+session, or else the range of the most recent review (`list_review_rounds`),
+and say which you picked. If none of those exist or it isn't of that form,
+ask for it and wait.
+Normalize `...` to `..`. Check that no tracked file has uncommitted changes
+(`git status --porcelain --untracked-files=no` is empty; untracked files such
+as `.agents/`, `.claude/`, `.tdd-config.json` or lockfiles don't count) and
+that no TDD feature is in progress (`get_status()`); if either isn't true,
+say so and stop rather than committing someone else's work.
 
 Then read `.agents/docs/review-loop.md` and follow it with `<start>` = the
 sha given. Fixes use the `tdd-start` flow, or `tdd-start-verify` if

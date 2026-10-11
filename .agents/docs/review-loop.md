@@ -5,9 +5,10 @@ Shared by `implement-and-review` and `review-and-fix`. Input: a start SHA
 options (`reviewer`, `model`, `thinking`) to pass to `start_review` as given
 — omit any that weren't given so the config defaults apply.
 
-Everything the reviewer sees is committed work: the working tree must be
-clean and no TDD feature may be in progress (`start_review` refuses
-otherwise).
+Everything the reviewer sees is committed work: no tracked file may have
+uncommitted changes (`git status --porcelain --untracked-files=no` is empty;
+untracked files don't count) and no TDD feature may be in progress
+(`start_review` refuses the latter).
 
 ## Each round
 

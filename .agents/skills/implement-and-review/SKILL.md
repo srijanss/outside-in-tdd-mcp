@@ -8,7 +8,9 @@ You have been given one or more feature descriptions and optional options:
 
 For each feature, in order:
 
-1. Check the working tree is clean and no TDD feature is in progress. Record
+1. Check no tracked file has uncommitted changes (untracked files don't
+   count; `git status --porcelain --untracked-files=no`) and no TDD feature
+   is in progress. Record
    the start SHA: `git rev-parse HEAD`.
 2. Implement it with the `tdd-start` flow (`tdd-start-verify` if `--verify`
    was given), resolving the feature name, test target and `targetFiles` as
