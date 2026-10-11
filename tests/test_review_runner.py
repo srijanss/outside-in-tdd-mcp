@@ -162,6 +162,28 @@ def test_start_returns_immediately_and_await_reports_pending_until_the_reviewer_
     assert manager.await_result(review_id, timeout=10)["status"] == "done"
 
 
+def test_a_second_review_of_a_scope_is_refused_while_one_is_in_flight(repo):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    release = threading.Event()
+
+    def slow_runner(argv, cwd):
+        assert release.wait(timeout=10), "test never released the reviewer"
+        return findings_reply(FINDING)
+
+    manager = make_manager(repo, slow_runner)
+    review_id = manager.start(f"{first}..HEAD")
+    commit(repo, "c.py")
+
+    with pytest.raises(ValueError, match="already in progress"):
+        manager.start(f"{first}..HEAD")
+
+    release.set()
+    assert manager.await_result(review_id, timeout=10)["status"] == "done"
+    # Once the first round has finished the next one may start.
+    assert manager.start(f"{first}..HEAD")
+
+
 def test_an_invalid_range_fails_immediately_without_starting_a_review(repo):
     commit(repo, "a.py")
     runner = counting_runner()

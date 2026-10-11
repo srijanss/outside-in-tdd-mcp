@@ -56,10 +56,38 @@ class ReviewManager:
         # passes its file lock since jobs write from background threads.
         self.findings_lock = findings_lock
         self._reviews: dict[str, dict] = {}
+        self._in_flight: set[str] = set()
+        self._in_flight_lock = threading.Lock()
 
     def start(self, range_spec, reviewer=None, model=None, thinking=None) -> str:
         resolved = resolve_review_range(range_spec, repo=self.project_root)
         scope = f"review:{resolved['start']}"
+        # Rounds are chained (each diff starts at the last round's head), so
+        # two reviews of one scope in flight would record out of order.
+        with self._in_flight_lock:
+            if scope in self._in_flight:
+                raise ValueError(
+                    f"A review of {scope} is already in progress — "
+                    "await it before starting the next round."
+                )
+            self._in_flight.add(scope)
+        try:
+            review_id, command = self._prepare(scope, resolved, reviewer, model, thinking)
+            threading.Thread(
+                target=self._job,
+                args=(review_id, command, resolved),
+                daemon=True,
+            ).start()
+        except BaseException:
+            self._release(scope)
+            raise
+        return review_id
+
+    def _release(self, scope) -> None:
+        with self._in_flight_lock:
+            self._in_flight.discard(scope)
+
+    def _prepare(self, scope, resolved, reviewer, model, thinking):
         with self.findings_lock():
             rounds = list_rounds(scope, path=self.rounds_path)
             live = list_review_findings(scope, path=self.findings_path)
@@ -88,12 +116,7 @@ class ReviewManager:
         )
         review_id = uuid.uuid4().hex
         self._reviews[review_id] = {"done": threading.Event(), "result": None}
-        threading.Thread(
-            target=self._job,
-            args=(review_id, command, resolved),
-            daemon=True,
-        ).start()
-        return review_id
+        return review_id, command
 
     def _job(self, review_id, command, resolved) -> None:
         review = self._reviews[review_id]
@@ -102,6 +125,7 @@ class ReviewManager:
         except Exception as exc:  # e.g. the findings store itself failing
             review["result"] = {"status": "failed", "error": str(exc)}
         finally:
+            self._release(f"review:{resolved['start']}")
             review["done"].set()
 
     def _run(self, command, resolved) -> dict:
