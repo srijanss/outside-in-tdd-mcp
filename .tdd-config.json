@@ -1,5 +1,13 @@
 {
   "adapter": "pytest-adapter",
   "adapterPath": "pytest-adapter-runner",
-  "defaultTestDir": "tests/"
+  "defaultTestDir": "tests/",
+  "reviewers": {
+    "default": {
+      "reviewer": "pi",
+      "model": "openai/gpt-6-astra",
+      "thinking": "medium"
+    },
+    "allowedModels": ["openai/gpt-6-astra", "opus"]
+  }
 }
