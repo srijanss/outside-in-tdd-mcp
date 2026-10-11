@@ -119,6 +119,35 @@ def test_reviewer_config_edits_apply_to_the_next_review_without_a_restart(repo):
     assert len(runner.calls) == 1
 
 
+def test_edited_reviewer_defaults_apply_to_the_next_review_on_the_same_manager(repo):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    runner = FakeRunner(findings_reply(FINDING), findings_reply(FINDING))
+    server = make_server(repo, runner)
+    config_path = repo / ".tdd-config.json"
+    base = {"adapterPath": "pytest-adapter-runner"}
+
+    def set_default(model, thinking):
+        config_path.write_text(json.dumps({**base, "reviewers": {
+            "default": {"reviewer": "pi", "model": model, "thinking": thinking}}}))
+
+    set_default("openai/a", "low")
+    started = call(server, "start_review", range=f"{first}..HEAD")
+    call(server, "await_review", reviewId=started["reviewId"], timeoutSeconds=10)
+    manager = server._review_manager_instance
+    commit(repo, "c.py")
+
+    set_default("openai/b", "high")
+    started = call(server, "start_review", range=f"{first}..HEAD")
+    result = call(server, "await_review", reviewId=started["reviewId"], timeoutSeconds=10)
+
+    argv = runner.calls[1]
+    assert argv[argv.index("--model") + 1] == "openai/b"
+    assert argv[argv.index("--thinking") + 1] == "high"
+    assert [(f["model"], f["reviewer"]) for f in result["findings"]] == [("openai/b", "pi")]
+    assert server._review_manager_instance is manager
+
+
 def fake_pi_on_path(tmp_path, monkeypatch, stdout, exit_code=0):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
