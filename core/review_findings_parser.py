@@ -37,6 +37,14 @@ def parse_findings(text: str) -> list[dict]:
         raise FindingsParseError(f"Findings block is not valid JSON: {exc}") from exc
     if not isinstance(payload, dict) or not isinstance(payload.get("findings"), list):
         raise FindingsParseError("Findings JSON must be an object with a 'findings' list")
+    seen: set[str] = set()
     for index, finding in enumerate(payload["findings"]):
         _validate_finding(index, finding)
+        # Findings are stored by id, so a repeat would silently replace the
+        # earlier one (a low could erase a blocking finding).
+        if finding["id"] in seen:
+            raise FindingsParseError(
+                f"finding #{index}: duplicate id '{finding['id']}'"
+            )
+        seen.add(finding["id"])
     return payload["findings"]

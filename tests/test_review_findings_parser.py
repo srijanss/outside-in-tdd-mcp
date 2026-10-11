@@ -65,5 +65,12 @@ def test_the_last_json_block_wins_when_the_reviewer_emits_several():
     assert parse_findings(draft + "\n\nOn reflection:\n\n" + final) == [FINDING]
 
 
+def test_duplicate_finding_ids_raise_instead_of_letting_one_overwrite_another():
+    low = {**FINDING, "severity": "low"}
+
+    with pytest.raises(FindingsParseError, match="duplicate.*missing-lock"):
+        parse_findings(fenced({"findings": [FINDING, low]}))
+
+
 def test_an_explicit_empty_findings_list_is_a_valid_clean_review():
     assert parse_findings(fenced({"findings": []})) == []
