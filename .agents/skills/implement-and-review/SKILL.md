@@ -26,3 +26,14 @@ over to the human before starting the next feature.
 Finish with a short report per feature: commits, rounds run, findings fixed
 / rejected / deferred, open low-severity findings, and anything needing a
 human decision.
+
+## Review categories
+
+Every unattended Pi review must cover all four checklist categories, not only the review-only procedure's default two (bugs and missing tests):
+
+1. **Bugs**: logic errors, wrong conditions, unhandled states.
+2. **Missing tests**: edge cases and error/exception paths.
+3. **Security issues or leaks**: injection, secret/credential leakage, unsafe subprocess or file-path handling.
+4. **Performance issues**: redundant I/O or subprocess calls, avoidable O(n^2) work.
+
+Put this as an explicit caller instruction in `handoff.md` and in the Pi launch prompt, so it overrides the review-only procedure's default categories. Require each recorded finding's `category` to be one of these four values.
