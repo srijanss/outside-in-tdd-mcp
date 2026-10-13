@@ -1,0 +1,7 @@
+[project]
+name = "outside-in-tdd-mcp"
+
+[[mcp]]
+name = "outside-in-tdd-mcp"
+version = "^0.2.1"
+source = "/home/dev/code/outside-in-tdd-mcp"
