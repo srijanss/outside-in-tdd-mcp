@@ -96,4 +96,4 @@ Every unattended review must cover all four checklist categories, not only the r
 3. **Security issues or leaks**: injection, secret/credential leakage, unsafe subprocess or file-path handling.
 4. **Performance issues**: redundant I/O or subprocess calls, avoidable O(n^2) work.
 
-Put this as an explicit caller instruction in `handoff.md` and in the reviewer launch prompt, so it overrides the review-only procedure's default categories. Require each recorded finding's `category` to be one of these four values.
+`start_review` already puts all four checklist categories in the reviewer prompt and requires each finding's `category` to be one of `bugs`, `missing-tests`, `security`, `performance`; a finding without one fails the review. No caller instruction is needed in `handoff.md` or the launch prompt for `start_review`. Add one only when launching a reviewer outside `start_review`.

@@ -7,6 +7,7 @@ from core.review_findings_parser import FindingsParseError, parse_findings
 FINDING = {
     "id": "missing-lock",
     "severity": "high",
+    "category": "bugs",
     "file": "core/server.py",
     "line": 42,
     "claim": "Concurrent writes can lose findings",
@@ -74,3 +75,13 @@ def test_duplicate_finding_ids_raise_instead_of_letting_one_overwrite_another():
 
 def test_an_explicit_empty_findings_list_is_a_valid_clean_review():
     assert parse_findings(fenced({"findings": []})) == []
+
+
+@pytest.mark.parametrize("category", [None, "", "style", 3])
+def test_a_missing_or_unknown_category_is_rejected(category):
+    finding = {k: v for k, v in FINDING.items() if k != "category"}
+    if category is not None:
+        finding["category"] = category
+
+    with pytest.raises(FindingsParseError, match="category"):
+        parse_findings(fenced({"findings": [finding]}))

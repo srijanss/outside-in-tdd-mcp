@@ -65,3 +65,9 @@ def test_a_diff_without_a_trailing_newline_still_gets_its_own_closing_fence_line
     prompt = build_review_prompt("+last line without newline")
 
     assert "+last line without newline\n```\n" in prompt
+
+
+def test_prompt_asks_for_all_four_review_categories():
+    prompt = build_review_prompt(DIFF)
+    for category in ("bugs", "missing-tests", "security", "performance"):
+        assert category in prompt

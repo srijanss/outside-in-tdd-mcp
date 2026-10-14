@@ -11,6 +11,7 @@ from core.server import TDDServer
 FINDING = {
     "id": "missing-lock",
     "severity": "high",
+    "category": "bugs",
     "file": "a.py",
     "line": 1,
     "claim": "Concurrent writes can lose findings",

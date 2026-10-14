@@ -2,6 +2,7 @@ import json
 import re
 
 SEVERITIES = ("low", "medium", "high", "critical")
+CATEGORIES = ("bugs", "missing-tests", "security", "performance")
 STRING_FIELDS = ("id", "file", "claim", "suggestion")
 
 
@@ -21,6 +22,10 @@ def _validate_finding(index: int, finding: object) -> None:
     if finding.get("severity") not in SEVERITIES:
         raise FindingsParseError(
             f"finding #{index}: 'severity' must be one of {', '.join(SEVERITIES)}"
+        )
+    if finding.get("category") not in CATEGORIES:
+        raise FindingsParseError(
+            f"finding #{index}: 'category' must be one of {', '.join(CATEGORIES)}"
         )
     line = finding.get("line")
     if not isinstance(line, int) or isinstance(line, bool):
