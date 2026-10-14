@@ -19,8 +19,12 @@ entrypoint = "outside-in-tdd-mcp"
 # an existing .codex/config.toml are not preserved when it is merged.)
 [scaffold]
 requires = ["jq"]  # the hooks parse JSON with it; `mcpctl init` warns if it is missing
-dirs =[".agents", ".claude", ".codex"]
+dirs =[".agents", ".claude", ".codex", ".pi"]
 exclude = [
+  ".pi/tests",
+  ".pi/mcp.json",
+  ".pi/mcp.json.example",
+  ".pi/settings.json",
   ".codex/config.toml",
   ".codex/config.toml.example",
   ".claude/settings.json",
@@ -37,6 +41,16 @@ merge = "json"
 [[scaffold.files]]
 from = ".claude/settings.json"
 to = ".claude/settings.json"
+merge = "json"
+
+[[scaffold.files]]
+from = ".pi/mcp.json.example"
+to = ".pi/mcp.json"
+merge = "json"
+
+[[scaffold.files]]
+from = ".pi/settings.json"
+to = ".pi/settings.json"
 merge = "json"
 
 [[scaffold.files]]

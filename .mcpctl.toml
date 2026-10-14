@@ -5,3 +5,8 @@ name = "outside-in-tdd-mcp"
 name = "outside-in-tdd-mcp"
 version = "^0.2.2"
 source = "/home/dev/code/outside-in-tdd-mcp"
+
+[[mcp]]
+name = "project-mcp"
+version = "^1.2.1"
+source = "/home/dev/code/project-mcp"

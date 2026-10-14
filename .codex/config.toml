@@ -1,18 +1,10 @@
-# Codex CLI project config. Counterpart to .mcp.json (Claude Code) and
-# .claude/settings.json.
-#
-# Portable and committed: the MCP server runs via `uv run` from the
-# checkout/worktree's own source and .venv (the server defaults its project
-# root to the cwd), so every worktree runs its own code. Other projects use
-# `mcpctl run outside-in-tdd-mcp` instead (see .codex/config.toml.example). The hooks below are scripts in .agents/ that resolve their own project
-# root from their own file location. See .agents/hooks/block-direct-test-runs.sh.
-#
-# Relative paths here resolve relative to this file's own directory
-# (.codex/), not the project root or runtime cwd.
-
 [mcp_servers.outside-in-tdd]
 command = "uv"
-args = ["run", "--quiet", "outside-in-tdd-mcp"]
+args = [
+    "run",
+    "--quiet",
+    "outside-in-tdd-mcp",
+]
 
 [mcp_servers.outside-in-tdd.tools.init_feature]
 approval_mode = "approve"
@@ -50,31 +42,27 @@ approval_mode = "approve"
 [mcp_servers.outside-in-tdd.tools.list_review_findings]
 approval_mode = "approve"
 
+[mcp_servers.project-mcp]
+command = "/usr/local/bin/mcpctl"
+args = [
+    "run",
+    "project-mcp",
+]
 
-# One entry per matcher (`mcpctl init` merges hook entries by matcher, so a
-# matcher listed twice would be folded together and run its hooks twice).
-#
-# First hook: counterpart to the .claude/settings.json PreToolUse hook —
-# blocks direct pytest/vitest/etc. invocations so agents go through
-# run_tests() instead. Second hook: match Claude's command safety guard —
-# block autonomous destructive commands, commits, pushes, branch creation,
-# and shell writes to protected files.
 [[hooks.PreToolUse]]
 matcher = "Bash"
 
-  [[hooks.PreToolUse.hooks]]
-  type = "command"
-  command = ".agents/hooks/block-direct-test-runs.sh"
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = ".agents/hooks/block-direct-test-runs.sh"
 
-  [[hooks.PreToolUse.hooks]]
-  type = "command"
-  command = ".agents/hooks/danger-guard.sh"
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = ".agents/hooks/danger-guard.sh"
 
-# Match Claude's direct-file-edit protection for secrets and infrastructure
-# manifests. The shared script reads the tool's file_path input.
 [[hooks.PreToolUse]]
 matcher = "Edit|Write"
 
-  [[hooks.PreToolUse.hooks]]
-  type = "command"
-  command = ".agents/hooks/protect-sensitive-files.sh"
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = ".agents/hooks/protect-sensitive-files.sh"

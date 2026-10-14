@@ -1,0 +1,13 @@
+{
+  "compaction": {
+    "keepRecentTokens": 20000,
+    "modelOverrides": {
+      "claude-bridge/claude-opus-5-5": {
+        "reserveTokens": 850000
+      },
+      "claude-bridge/claude-sonnet-5-5": {
+        "reserveTokens": 850000
+      }
+    }
+  }
+}
