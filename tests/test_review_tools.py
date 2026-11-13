@@ -567,3 +567,23 @@ def test_start_review_without_a_range_needs_a_main_branch(repo):
     git(repo, "branch", "-M", "trunk-ish")
     server = make_server(repo, FakeRunner())
     assert "main branch" in call(server, "start_review")["error"]
+
+
+def test_the_default_range_only_counts_branches_not_tags_named_like_one(repo):
+    base = commit(repo, "a.py")
+    git(repo, "branch", "-M", "master")
+    git(repo, "checkout", "-q", "-b", "feature")
+    tagged = commit(repo, "b.py")
+    git(repo, "tag", "main", tagged)  # a tag, not the main branch
+    commit(repo, "c.py")
+    server = make_server(repo, FakeRunner(findings_reply(), findings_reply()))
+
+    call(server, "start_review")
+    assert call(server, "await_review", timeoutSeconds=10)["scope"] == f"review:{base}"
+
+    # A main branch wins over master even with a tag of the same name.
+    git(repo, "branch", "main", tagged)
+    call(server, "start_review")
+    assert call(server, "await_review", timeoutSeconds=10)["scope"] == (
+        f"review:{tagged}"
+    )

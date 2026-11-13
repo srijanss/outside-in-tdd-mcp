@@ -31,7 +31,13 @@ def resolve_review_range(range_spec: str, repo: str) -> dict[str, str]:
     return {"start": start, "head": head}
 
 
-MAIN_BRANCH_CANDIDATES = ("main", "master", "origin/main", "origin/master")
+# Fully qualified, so a tag named like a branch never stands in for it.
+MAIN_BRANCH_CANDIDATES = (
+    "refs/heads/main",
+    "refs/heads/master",
+    "refs/remotes/origin/main",
+    "refs/remotes/origin/master",
+)
 
 
 def _git(args: list[str], repo: str) -> str | None:
@@ -39,10 +45,15 @@ def _git(args: list[str], repo: str) -> str | None:
     return result.stdout.strip() if result.returncode == 0 else None
 
 
+def _short(ref: str) -> str:
+    return ref.removeprefix("refs/heads/").removeprefix("refs/remotes/")
+
+
 def main_branch(repo: str) -> str | None:
-    """The remote's default branch (origin/HEAD) if set, else the first of
-    main, master, origin/main and origin/master that exists."""
-    remote_head = _git(["symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"], repo)
+    """The full ref of the remote's default branch (origin/HEAD) if it
+    exists, else of the first of main, master, origin/main and
+    origin/master that does."""
+    remote_head = _git(["symbolic-ref", "-q", "refs/remotes/origin/HEAD"], repo)
     for ref in (remote_head, *MAIN_BRANCH_CANDIDATES):
         if ref and _git(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], repo):
             return ref
@@ -56,15 +67,18 @@ def default_review_range(repo: str) -> str:
     if branch is None:
         raise ValueError(
             "No range given and no main branch found (tried origin/HEAD, "
-            + ", ".join(MAIN_BRANCH_CANDIDATES)
+            + ", ".join(_short(ref) for ref in MAIN_BRANCH_CANDIDATES)
             + ") — pass range='<sha>..HEAD'."
         )
     base = _git(["merge-base", branch, "HEAD"], repo)
     if base is None:
-        raise ValueError(f"HEAD shares no history with {branch} — pass range='<sha>..HEAD'.")
+        raise ValueError(
+            f"HEAD shares no history with {_short(branch)} — pass "
+            "range='<sha>..HEAD'."
+        )
     if base == _rev_parse("HEAD", repo):
         raise ValueError(
-            f"No new commits since the merge-base with {branch} — commit "
+            f"No new commits since the merge-base with {_short(branch)} — commit "
             "work on a branch first, or pass range='<sha>..HEAD'."
         )
     return f"{base}..HEAD"
