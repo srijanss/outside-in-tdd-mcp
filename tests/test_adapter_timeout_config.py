@@ -67,3 +67,39 @@ def test_timeout_also_kills_a_child_the_adapter_spawned_without_exec(tmp_path):
     while not _is_gone(child) and time.monotonic() < deadline:
         time.sleep(0.05)
     assert _is_gone(child)
+
+
+def test_timeout_returns_even_when_a_child_escaped_the_process_group(tmp_path):
+    import os
+    import signal
+
+    adapter = tmp_path / "escaping-adapter.sh"
+    pid_file = tmp_path / "escaped.pid"
+    # setsid moves the child into its own session, out of reach of the
+    # group kill, while it still holds the inherited stdout pipe.
+    adapter.write_text(
+        f"#!/bin/sh\nsetsid sleep 30 &\necho $! > {pid_file}\nwait\n"
+    )
+    adapter.chmod(0o755)
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(
+        json.dumps({"adapterPath": str(adapter), "adapterTimeoutSeconds": 1})
+    )
+    server = TDDServer(project_root=str(tmp_path), config_path=str(config_path))
+    server.call_tool(
+        "init_feature",
+        {"featureName": "esc", "testFile": "tests/test_esc.py", "targetFiles": []},
+    )
+
+    started = time.monotonic()
+    try:
+        result = run_tests(server)
+        elapsed = time.monotonic() - started
+    finally:
+        try:
+            os.kill(int(pid_file.read_text()), signal.SIGKILL)
+        except (FileNotFoundError, ValueError, ProcessLookupError):
+            pass
+
+    assert elapsed < 10
+    assert "timed out after 1s" in result["error"]

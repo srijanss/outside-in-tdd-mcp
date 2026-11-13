@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 DEFAULT_TIMEOUT_S = 120
+# How long to wait for a SIGKILLed adapter to be reaped.
+_CLEANUP_WAIT_S = 5
 
 
 class AdapterError(Exception):
@@ -160,9 +162,16 @@ def run_adapter(
 
 
 def _kill_process_group(proc: subprocess.Popen) -> None:
-    """SIGKILL the adapter's whole process group, then reap the adapter."""
+    """SIGKILL the adapter's whole process group, then reap the adapter.
+
+    Bounded on purpose: a descendant that left the group (setsid) may still
+    hold the pipes, so close them instead of waiting for EOF.
+    """
     try:
         os.killpg(proc.pid, signal.SIGKILL)
     except ProcessLookupError:
         pass
-    proc.communicate()
+    for pipe in (proc.stdout, proc.stderr):
+        if pipe is not None:
+            pipe.close()
+    proc.wait(timeout=_CLEANUP_WAIT_S)
