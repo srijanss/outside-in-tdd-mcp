@@ -467,8 +467,9 @@ the server running the reviewer and tracking the rounds. Used by the
     `.cargo/`, toolchain files or a file outside every crate give `null`.
     The vitest adapter's `scope.sh` gives `related <file>...`, which its
     `run.sh` runs as `vitest related --run <file>...` — only the tests whose
-    import graph reaches a changed file; docs (text files at the root,
-    under `doc(s)/`, or README/CHANGELOG/LICENSE-style names) and deleted
+    import graph reaches a changed file; docs (README/CHANGELOG/LICENSE-style
+    text files, or text files under `doc(s)/`, at the root or a package
+    root — a directory with a `package.json`) and deleted
     test files are ignored, and other `.md`/`.rst`/`.txt` files (possible
     fixtures), package manifests, lockfiles, `tsconfig*.json`, vite/vitest
     config, workspace or setup files, dotenv files, a file a vite/vitest

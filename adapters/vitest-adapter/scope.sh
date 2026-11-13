@@ -8,8 +8,9 @@ related --run <file>...`, which runs only the tests whose import graph
 reaches a changed file (a changed test file runs itself) — or
 {"scope": null} when the files can't be mapped (the caller then runs the
 whole suite):
-  - docs (.md/.rst/.txt at the root, under doc(s)/, or README-, CHANGELOG-
-    or LICENSE-style names anywhere) are ignored, as are deleted test files;
+  - docs (README-, CHANGELOG- or LICENSE-style .md/.rst/.txt names, or
+    any .md/.rst/.txt under doc(s)/, at the root or a package root) are
+    ignored, as are deleted test files;
   - any other .md/.rst/.txt -> null: it may be a fixture read from disk;
   - package manifests and lockfiles, tsconfig*.json, vite/vitest config,
     workspace and setup files, and dotenv files -> null: they affect tests
@@ -116,17 +117,25 @@ def is_test_file(rel):
     )
 
 
-def is_documentation(rel):
-    """A text file at the project root, under doc(s)/, or a README-style
-    name anywhere; other text files may be fixtures or raw imports."""
+def is_package_root(root, directory):
+    return not directory or os.path.isfile(os.path.join(root, directory, "package.json"))
+
+
+def is_documentation(root, rel):
+    """A README-style text file at the project root or a package root (a
+    directory with a package.json), or a text file under a doc(s)/
+    directory there; other text files may be fixtures or raw imports."""
     name = os.path.basename(rel)
     if not name.endswith(DOC_SUFFIXES):
         return False
     parts = rel.split("/")
-    return (
-        len(parts) == 1
-        or parts[0] in DOC_DIRS
-        or os.path.splitext(name)[0].upper() in DOC_NAMES
+    if os.path.splitext(name)[0].upper() in DOC_NAMES and is_package_root(
+        root, "/".join(parts[:-1])
+    ):
+        return True
+    return any(
+        part in DOC_DIRS and is_package_root(root, "/".join(parts[:index]))
+        for index, part in enumerate(parts[:-1])
     )
 
 
@@ -137,7 +146,7 @@ def target_for(root, rel):
         return None
     if any(fnmatch.fnmatch(name, pattern) for pattern in GLOBAL_PATTERNS):
         return None
-    if is_documentation(rel):
+    if is_documentation(root, rel):
         return ""
     if name.endswith(DOC_SUFFIXES):
         return None

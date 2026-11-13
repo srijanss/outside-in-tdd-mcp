@@ -121,6 +121,7 @@ def test_only_documentation_text_files_are_ignored(tmp_path):
             "src/util.ts": "",
             "src/content/intro.md": "",
             "tests/fixtures/expected.txt": "",
+            "packages/web/package.json": "{}",
         },
     )
     for changed in ("src/content/intro.md", "tests/fixtures/expected.txt"):
@@ -198,3 +199,28 @@ def test_build_output_and_vendored_trees_are_not_searched_for_configs(tmp_path):
     write(tmp_path, files)
     # Copies of a config in build output don't make src/setup.ts global.
     assert scope(tmp_path, "src/setup.ts") == "related src/setup.ts"
+
+
+def test_documentation_names_count_only_at_the_root_or_a_package_root(tmp_path):
+    # Directory and name conventions alone don't make a file documentation:
+    # a root-level prompt.txt or a README.md under fixtures may be test input.
+    write(
+        tmp_path,
+        {
+            "src/util.ts": "",
+            "prompt.txt": "",
+            "tests/fixtures/README.md": "",
+            "src/docs/page.md": "",
+            "packages/web/package.json": "{}",
+        },
+    )
+    for changed in ("prompt.txt", "tests/fixtures/README.md", "src/docs/page.md"):
+        assert scope(tmp_path, "src/util.ts", changed) is None, changed
+    for doc in (
+        "README.md",
+        "LICENSE.txt",
+        "docs/api/usage.rst",
+        "packages/web/CHANGELOG.md",
+        "packages/web/docs/intro.md",
+    ):
+        assert scope(tmp_path, "src/util.ts", doc) == "related src/util.ts", doc
