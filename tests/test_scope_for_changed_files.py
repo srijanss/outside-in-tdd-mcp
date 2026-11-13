@@ -45,3 +45,8 @@ def test_no_mapping_without_changed_files_or_when_the_script_hangs(tmp_path):
 
     hanging = adapter_with_scope(tmp_path, "#!/bin/sh\nexec sleep 30\n")
     assert scope_for_changed_files(hanging, "/r", ["a"], timeout_s=1) is None
+
+
+def test_no_mapping_when_the_script_prints_invalid_utf8(tmp_path):
+    adapter = adapter_with_scope(tmp_path, "#!/bin/sh\nprintf '\\377\\376'\n")
+    assert scope_for_changed_files(adapter, "/r", ["a"]) is None

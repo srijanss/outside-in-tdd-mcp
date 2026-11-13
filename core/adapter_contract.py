@@ -220,7 +220,6 @@ def scope_for_changed_files(
             [script, project_root, *changed_files],
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            text=True,
             start_new_session=True,
         )
     except OSError:
@@ -236,8 +235,9 @@ def scope_for_changed_files(
     if proc.returncode != 0:
         return None
     try:
+        # Bytes in: invalid UTF-8 surfaces here as a ValueError too.
         data = json.loads(stdout)
-    except json.JSONDecodeError:
+    except ValueError:
         return None
     scope = data.get("scope") if isinstance(data, dict) else None
     if not isinstance(scope, str) or not scope.strip():
