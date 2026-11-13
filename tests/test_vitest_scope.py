@@ -258,3 +258,21 @@ def test_a_setup_file_importing_a_linked_workspace_package_gives_no_mapping(tmp_
         tmp_path / "packages/fixtures", target_is_directory=True
     )
     assert scope(tmp_path, "src/util.ts", "packages/fixtures/index.ts") is None
+
+
+def test_a_config_module_shared_by_two_packages_resolves_against_each(tmp_path):
+    shared = "import shared from '../../shared/config'\nexport default shared\n"
+    write(
+        tmp_path,
+        {
+            "src/util.ts": "",
+            "packages/a/vitest.config.ts": shared,
+            "packages/b/vitest.config.ts": shared,
+            "shared/config.ts": "export default { test: { setupFiles: ['setup.ts'] } }\n",
+            "packages/a/setup.ts": "",
+            "packages/b/setup.ts": "",
+        },
+    )
+    # setup.ts is relative to each package's config, not the shared module.
+    for changed in ("packages/a/setup.ts", "packages/b/setup.ts"):
+        assert scope(tmp_path, "src/util.ts", changed) is None, changed

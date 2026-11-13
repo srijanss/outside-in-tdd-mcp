@@ -256,15 +256,19 @@ def setup_files(root):
     neither relative nor external (an alias): what it brings in can't be
     known."""
     configs = [(config, os.path.dirname(config)) for config in config_files(root)]
+    visited = set()
     modules = set()
     pending = []
     while configs:
         module, config_dir = configs.pop()
-        if module in modules:
+        # A module shared by several configs resolves against each one.
+        if (module, config_dir) in visited:
             continue
-        modules.add(module)
-        if has_unresolved_import(root, module):
-            return None
+        visited.add((module, config_dir))
+        if module not in modules:
+            modules.add(module)
+            if has_unresolved_import(root, module):
+                return None
         imported = set(relative_imports(root, module))
         configs.extend((path, config_dir) for path in imported)
         base = os.path.dirname(module)
