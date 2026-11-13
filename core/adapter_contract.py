@@ -18,6 +18,8 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Any
 
+from core.adapter_entrypoints import bundled_adapter_dir
+
 DEFAULT_TIMEOUT_S = 120
 # How long to wait for a SIGKILLed adapter to be reaped.
 _CLEANUP_WAIT_S = 5
@@ -201,6 +203,9 @@ def _run_sibling_script(
     """JSON object printed by the executable ``name`` next to the adapter,
     or None when it is missing, fails, hangs or prints anything else."""
     script = os.path.join(os.path.dirname(adapter_path), name)
+    bundled = bundled_adapter_dir(adapter_path)
+    if not os.access(script, os.X_OK) and bundled is not None:
+        script = str(bundled / name)
     if not os.access(script, os.X_OK):
         return None
     try:

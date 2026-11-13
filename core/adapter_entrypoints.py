@@ -13,6 +13,20 @@ import sys
 from pathlib import Path
 
 ADAPTERS_DIR = Path(__file__).resolve().parent.parent / "adapters"
+# Console-script name -> the bundled adapter directory it runs.
+RUNNERS = {
+    "cargo-adapter-runner": "cargo-adapter",
+    "pytest-adapter-runner": "pytest-adapter",
+    "vitest-adapter-runner": "vitest-adapter",
+}
+
+
+def bundled_adapter_dir(adapter_path: str) -> Path | None:
+    """The bundled adapter directory behind an installed console runner
+    (whose own bin/ has none of the adapter's companion scripts), or None
+    for any other adapter executable."""
+    name = RUNNERS.get(Path(adapter_path).name)
+    return ADAPTERS_DIR / name if name else None
 
 
 def _run(adapter_dir_name: str) -> int:

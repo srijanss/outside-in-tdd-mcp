@@ -65,3 +65,12 @@ def test_adapters_dir_resolves_to_the_real_adapters_directory():
     assert (adapter_entrypoints.ADAPTERS_DIR / "pytest-adapter" / "run.sh").exists()
     assert (adapter_entrypoints.ADAPTERS_DIR / "vitest-adapter" / "run.sh").exists()
     assert (adapter_entrypoints.ADAPTERS_DIR / "cargo-adapter" / "run.sh").exists()
+
+
+def test_bundled_adapter_dir_maps_each_console_runner_to_its_adapter():
+    dirs = adapter_entrypoints.ADAPTERS_DIR
+    for kind in ("pytest", "cargo", "vitest"):
+        runner = f"/venv/bin/{kind}-adapter-runner"
+        assert adapter_entrypoints.bundled_adapter_dir(runner) == dirs / f"{kind}-adapter"
+    assert adapter_entrypoints.bundled_adapter_dir("/venv/bin/other-runner") is None
+    assert adapter_entrypoints.bundled_adapter_dir("/x/run.sh") is None
