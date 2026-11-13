@@ -59,6 +59,16 @@ CONFIG_PATH = os.environ.get(
     "TDD_CONFIG_PATH", str(Path(PROJECT_ROOT) / ".tdd-config.json")
 )
 
+def with_required_params(tool: types.Tool) -> types.Tool:
+    """A copy of ``tool`` whose description ends by naming its required
+    parameters, so a client that hasn't loaded the schema yet still passes
+    them."""
+    required = tool.inputSchema.get("required") or []
+    names = ", ".join(required) if required else "none"
+    description = f"{tool.description or ''} Required parameters: {names}.".lstrip()
+    return tool.model_copy(update={"description": description})
+
+
 TOOLS = [
     types.Tool(
         name="init_feature",
@@ -522,6 +532,7 @@ TOOLS = [
         },
     ),
 ]
+TOOLS = [with_required_params(tool) for tool in TOOLS]
 
 
 # Caps on what a run_tests() response (and the last_result it gets stored
