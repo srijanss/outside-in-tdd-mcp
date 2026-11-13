@@ -407,3 +407,22 @@ def test_the_claude_reviewer_runs_headless_and_yields_the_same_findings(repo):
     assert argv[:2] == ["claude", "-p"]
     assert argv[argv.index("--model") + 1] == "opus"
     assert argv[argv.index("--effort") + 1] == "high"
+
+
+def test_await_review_without_a_review_id_waits_on_the_latest_review(repo):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    server = make_server(repo, FakeRunner(findings_reply(FINDING), findings_reply()))
+
+    assert "error" in call(server, "await_review", timeoutSeconds=1)
+    assert "start_review" in call(server, "await_review", timeoutSeconds=1)["error"]
+
+    call(server, "start_review", range=f"{first}..HEAD")
+    assert call(server, "await_review", timeoutSeconds=10)["findings"][0]["id"] == (
+        "missing-lock"
+    )
+
+    commit(repo, "c.py")
+    call(server, "start_review", range=f"{first}..HEAD")
+    result = call(server, "await_review", timeoutSeconds=10)
+    assert (result["status"], result["findings"]) == ("done", [])

@@ -475,7 +475,8 @@ TOOLS = [
         name="await_review",
         description=(
             "Wait up to timeoutSeconds (default 60) for a review started "
-            "with start_review. Returns status 'pending' (call again), "
+            "with start_review — reviewId, or the most recently started "
+            "review when omitted. Returns status 'pending' (call again), "
             "'done' with findings, or 'failed' with an error — a failed "
             "review is never reported as zero findings."
         ),
@@ -485,7 +486,7 @@ TOOLS = [
                 "reviewId": {"type": "string"},
                 "timeoutSeconds": {"type": "number"},
             },
-            "required": ["reviewId"],
+            "required": [],
         },
     ),
     types.Tool(
@@ -1518,11 +1519,19 @@ class TDDServer:
 
     def _await_review(self, arguments: dict[str, Any]) -> list[types.TextContent]:
         manager = self._review_manager_instance
+        review_id = arguments.get("reviewId") or (
+            manager.latest_review_id if manager is not None else None
+        )
+        if review_id is None:
+            return self._error(
+                "No review has been started in this server — call "
+                "start_review first, or pass the reviewId it returned."
+            )
         if manager is None:
-            return self._error(f"Unknown review id '{arguments['reviewId']}'")
+            return self._error(f"Unknown review id '{review_id}'")
         try:
             result = manager.await_result(
-                arguments["reviewId"], timeout=arguments.get("timeoutSeconds", 60)
+                review_id, timeout=arguments.get("timeoutSeconds", 60)
             )
         except ValueError as exc:
             return self._error(str(exc))

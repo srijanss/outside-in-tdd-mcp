@@ -56,6 +56,8 @@ class ReviewManager:
         # passes its file lock since jobs write from background threads.
         self.findings_lock = findings_lock
         self._reviews: dict[str, dict] = {}
+        # What await_review waits on when it isn't given a reviewId.
+        self.latest_review_id: str | None = None
         self._in_flight: set[str] = set()
         self._in_flight_lock = threading.Lock()
 
@@ -81,6 +83,7 @@ class ReviewManager:
         except BaseException:
             self._release(scope)
             raise
+        self.latest_review_id = review_id
         return review_id
 
     def _release(self, scope) -> None:

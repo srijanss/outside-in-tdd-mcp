@@ -394,7 +394,9 @@ the server running the reviewer and tracking the rounds. Used by the
   feature is in progress. Reviewers: `pi` (`pi -p --mode json`) and
   `claude` (headless `claude -p`; `thinking` maps to `--effort`). The
   reviewer binary must be on `PATH`.
-- `await_review(reviewId, timeoutSeconds?)` — `pending`, `failed` (with the
+- `await_review(reviewId?, timeoutSeconds?)` — waits on `reviewId`, or on
+  the most recently started review when it's omitted (an error if none
+  was started). Returns `pending`, `failed` (with the
   error — never treat it as "no findings"), or `done` with the findings and
   a `decision`: `done` (no open medium-or-higher findings), `continue`, or
   `escalate` (3 rounds hit with blocking findings still open, or a finding
