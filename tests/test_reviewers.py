@@ -112,3 +112,16 @@ def test_claude_effort_maps_pi_style_thinking_levels_to_the_nearest_option():
     assert "--effort" not in argv(None)
     assert argv("minimal")[argv("minimal").index("--effort") + 1] == "low"
     assert argv("xhigh")[argv("xhigh").index("--effort") + 1] == "xhigh"
+
+
+@pytest.mark.parametrize(
+    "fallbacks", ["openai/b", ["openai/b", 3], ["openai/b", ""], [None], {"a": "b"}]
+)
+def test_fallback_models_must_be_a_list_of_non_empty_model_names(fallbacks):
+    from core.reviewers import fallback_models
+
+    config = {"reviewers": {"fallbackModels": fallbacks}}
+    with pytest.raises(
+        ReviewerConfigError, match="fallbackModels must be a list of non-empty model names"
+    ):
+        fallback_models(config, "openai/a")

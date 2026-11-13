@@ -1,3 +1,4 @@
+import json
 import re
 
 
@@ -102,8 +103,18 @@ def fallback_models(config: dict | None, model: str | None) -> list[str]:
     quota/access error: itself and models outside allowedModels skipped."""
     reviewers = (config or {}).get("reviewers") or {}
     allowed = reviewers.get("allowedModels")
+    configured = reviewers.get("fallbackModels")
+    if configured is None:
+        configured = []
+    if not isinstance(configured, list) or not all(
+        isinstance(name, str) and name.strip() for name in configured
+    ):
+        raise ReviewerConfigError(
+            "reviewers.fallbackModels must be a list of non-empty model names, "
+            f"got {json.dumps(configured)}"
+        )
     fallbacks = []
-    for candidate in reviewers.get("fallbackModels") or []:
+    for candidate in configured:
         if candidate == model or candidate in fallbacks:
             continue
         if allowed and candidate not in allowed:

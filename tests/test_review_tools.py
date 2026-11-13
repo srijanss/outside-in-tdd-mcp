@@ -687,3 +687,25 @@ def test_without_fallback_models_a_quota_error_still_fails_the_review(repo):
     assert result["status"] == "failed"
     assert "quota" in result["error"]
     assert len(runner.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "fallbacks",
+    ["openai/b", ["openai/b", 3], ["openai/b", ""], [None], {"model": "openai/b"}],
+)
+def test_a_malformed_fallback_models_setting_is_refused_when_the_review_starts(
+    repo, fallbacks
+):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    runner = FakeRunner(findings_reply())
+    server = make_server(repo, runner)
+    (repo / ".tdd-config.json").write_text(json.dumps({
+        "adapterPath": "pytest-adapter-runner",
+        "reviewers": {"fallbackModels": fallbacks},
+    }))
+
+    refused = call(server, "start_review", range=f"{first}..HEAD", model="openai/a")
+
+    assert "fallbackModels must be a list of non-empty model names" in refused["error"]
+    assert runner.calls == []
