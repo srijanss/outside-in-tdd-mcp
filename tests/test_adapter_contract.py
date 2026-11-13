@@ -133,3 +133,38 @@ def test_run_adapter_kills_the_adapter_when_communicate_raises_something_else(
         if proc.returncode is None:
             proc.kill()
             proc.wait()
+
+
+def test_a_stuck_reap_after_the_kill_keeps_the_timeout_error(tmp_path, monkeypatch):
+    import subprocess
+
+    from core import adapter_contract
+
+    adapter = tmp_path / "adapter.sh"
+    adapter.write_text("#!/bin/sh\nexec sleep 30\n")
+    adapter.chmod(adapter.stat().st_mode | stat.S_IEXEC)
+    spawned = []
+    real_init = subprocess.Popen.__init__
+    real_wait = subprocess.Popen.wait
+
+    def recording_init(self, *args, **kwargs):
+        real_init(self, *args, **kwargs)
+        spawned.append(self)
+
+    def stuck_cleanup_wait(self, timeout=None):
+        # Simulate a SIGKILLed adapter that is not reaped in time (e.g.
+        # stuck in uninterruptible I/O).
+        if timeout == adapter_contract._CLEANUP_WAIT_S:
+            raise subprocess.TimeoutExpired(self.args, timeout)
+        return real_wait(self, timeout=timeout)
+
+    monkeypatch.setattr(subprocess.Popen, "__init__", recording_init)
+    monkeypatch.setattr(subprocess.Popen, "wait", stuck_cleanup_wait)
+
+    try:
+        with pytest.raises(AdapterError, match="timed out after 1s"):
+            run_adapter(str(adapter), "irrelevant", str(tmp_path), timeout_s=1)
+    finally:
+        for proc in spawned:
+            proc.kill()
+            real_wait(proc)

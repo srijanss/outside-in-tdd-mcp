@@ -178,4 +178,10 @@ def _kill_process_group(proc: subprocess.Popen) -> None:
     for pipe in (proc.stdout, proc.stderr):
         if pipe is not None:
             pipe.close()
-    proc.wait(timeout=_CLEANUP_WAIT_S)
+    try:
+        proc.wait(timeout=_CLEANUP_WAIT_S)
+    except subprocess.TimeoutExpired:
+        # Not reaped in time (e.g. stuck in uninterruptible I/O). Don't let
+        # cleanup replace the caller's error; subprocess reaps the zombie
+        # later via its own _active list once proc is collected.
+        pass
