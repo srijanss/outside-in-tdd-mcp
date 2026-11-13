@@ -946,10 +946,11 @@ class TDDServer:
             return []  # no snapshot (e.g. server restarted mid-level): unknown
         return sorted(self._read_test_names(path) - baseline)
 
-    def _worktree_state(self) -> dict[str, str | None] | None:
-        """Size+mtime signature of every file git reports as modified or untracked,
-        or None when git isn't available / this isn't a repository. The
-        server's own .tdd-* state files are left out."""
+    def _changed_paths(self, rename_sources: bool = False) -> list[str] | None:
+        """Project-relative paths git reports as modified or untracked, or
+        None when git isn't available / this isn't a repository. The
+        server's own .tdd-* state files are left out. ``rename_sources``
+        also lists the original path of each rename/copy."""
         try:
             out = subprocess.run(
                 ["git", "status", "--porcelain", "-z", "--untracked-files=all"],
@@ -971,22 +972,37 @@ class TDDServer:
             return None
         prefix = prefix_out.stdout.decode("utf-8", "replace").strip()
         entries = out.stdout.decode("utf-8", "replace").split("\0")
-        state: dict[str, str | None] = {}
-        skip_next = False
+        raw_paths: list[str] = []
+        source_next = False
         for entry in entries:
-            if skip_next:  # original path of a rename/copy
-                skip_next = False
+            if source_next:  # original path of a rename/copy
+                source_next = False
+                if rename_sources and entry:
+                    raw_paths.append(entry)
                 continue
             if len(entry) < 4:
                 continue
             if entry[0] in "RC" or entry[1] in "RC":
-                skip_next = True
-            path = entry[3:]
+                source_next = True
+            raw_paths.append(entry[3:])
+        paths: list[str] = []
+        for path in raw_paths:
             if not path.startswith(prefix):
                 continue  # outside project_root
             path = path[len(prefix):]
             if Path(path).name.startswith(".tdd-"):
                 continue
+            paths.append(path)
+        return paths
+
+    def _worktree_state(self) -> dict[str, str | None] | None:
+        """Size+mtime signature of every path _changed_paths() reports, or
+        None when git isn't available / this isn't a repository."""
+        paths = self._changed_paths()
+        if paths is None:
+            return None
+        state: dict[str, str | None] = {}
+        for path in paths:
             try:
                 stat = (Path(self.project_root) / path).stat()
                 # Size + mtime instead of a content hash: no file reads.
@@ -2001,7 +2017,7 @@ class TDDServer:
         if would_close_base_refactor and regression_scope is None:
             # The adapter may narrow the sweep to what the uncommitted
             # changes can affect; the whole defaultTestDir stays on offer.
-            changed = sorted(self._worktree_state() or {})
+            changed = sorted(set(self._changed_paths(rename_sources=True) or []))
             scoped = scope_for_changed_files(
                 adapter_path, self.project_root, changed
             )

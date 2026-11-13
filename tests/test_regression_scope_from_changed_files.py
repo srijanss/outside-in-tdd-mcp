@@ -69,3 +69,16 @@ def test_without_a_scope_script_the_suggestion_is_the_whole_default_test_dir(
 
     assert payload["suggestedScope"] == "tests/"
     assert payload["fullSuiteScope"] == "tests/"
+
+
+def test_a_rename_hands_both_its_source_and_destination_to_the_scope_script(
+    tmp_path,
+):
+    server = project(tmp_path, with_scope_script=True)
+    root = tmp_path / "proj"
+    (root / "pkg2").mkdir()
+    git(root, "mv", "pkg/b.py", "pkg2/b.py")
+
+    payload = closing_run(server)
+
+    assert payload["suggestedScope"] == "pkg/a.py pkg/b.py pkg/new.py pkg2/b.py"
