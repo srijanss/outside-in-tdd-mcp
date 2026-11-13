@@ -50,3 +50,25 @@ def test_no_mapping_without_changed_files_or_when_the_script_hangs(tmp_path):
 def test_no_mapping_when_the_script_prints_invalid_utf8(tmp_path):
     adapter = adapter_with_scope(tmp_path, "#!/bin/sh\nprintf '\\377\\376'\n")
     assert scope_for_changed_files(adapter, "/r", ["a"]) is None
+
+
+def test_a_timeout_also_kills_a_child_the_scope_script_spawned(tmp_path):
+    import time
+
+    from tests.test_adapter_timeout_config import _is_gone
+
+    pid_file = tmp_path / "child.pid"
+    # No exec: the sleep is a child that inherits the stdout pipe.
+    adapter = adapter_with_scope(
+        tmp_path, f"#!/bin/sh\nsleep 30 &\necho $! > {pid_file}\nwait\n"
+    )
+
+    started = time.monotonic()
+    assert scope_for_changed_files(adapter, "/r", ["a"], timeout_s=1) is None
+    assert time.monotonic() - started < 10
+
+    child = int(pid_file.read_text())
+    deadline = time.monotonic() + 5
+    while not _is_gone(child) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert _is_gone(child)
