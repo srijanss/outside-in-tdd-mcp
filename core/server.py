@@ -659,6 +659,10 @@ def resolve_adapter_timeout(config: dict[str, Any]) -> int:
             raise AdapterError(
                 f"TDD_ADAPTER_TIMEOUT_S must be an integer, got {raw_env!r}"
             ) from exc
+        if timeout <= 0:
+            raise AdapterError(
+                f"TDD_ADAPTER_TIMEOUT_S must be a positive integer, got {raw_env!r}"
+            )
     else:
         timeout = config.get("adapterTimeoutSeconds", DEFAULT_TIMEOUT_S)
     return min(

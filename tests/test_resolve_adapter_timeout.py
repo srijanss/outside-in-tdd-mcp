@@ -79,3 +79,12 @@ def test_run_tests_passes_the_resolved_timeout_to_the_adapter(tmp_path, monkeypa
     server.call_tool("run_tests", {})
 
     assert seen == [42]
+
+
+@pytest.mark.parametrize("raw", ["0", "-1"])
+def test_a_non_positive_env_var_is_a_clean_adapter_error(monkeypatch, raw):
+    monkeypatch.setenv("TDD_ADAPTER_TIMEOUT_S", raw)
+    with pytest.raises(
+        AdapterError, match="TDD_ADAPTER_TIMEOUT_S must be a positive integer"
+    ):
+        resolve_adapter_timeout({})
