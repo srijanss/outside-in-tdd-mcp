@@ -82,3 +82,10 @@ def test_a_related_target_runs_the_tests_importing_the_named_files():
         result = run_adapter(target)
         assert (result["passed"], result["failed"]) == (1, 0), target
         assert result["failures"] == [], target
+
+
+def test_a_related_target_no_test_imports_is_an_empty_run_not_a_failure():
+    # Nothing imports unused.js: no test is affected, which is not a failure.
+    result = run_adapter("related unused.js")
+    assert (result["passed"], result["failed"]) == (0, 0)
+    assert result["failures"] == []
