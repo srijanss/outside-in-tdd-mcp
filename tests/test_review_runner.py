@@ -339,3 +339,45 @@ def test_each_category_subset_keeps_its_own_round_history(repo, categories, suff
     assert manager.latest_review_scope == result["scope"]
     rounds = json.loads((repo / ".tdd-review-rounds.json").read_text())
     assert list(rounds) == [result["scope"]]
+
+
+def test_switching_categories_between_rounds_reviews_each_subset_from_the_start(repo):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    stdins = []
+
+    def runner(argv, cwd, stdin):
+        stdins.append(stdin)
+        return findings_reply()
+
+    manager = make_manager(repo, runner)
+
+    def review(categories):
+        review_id = manager.start(f"{first}..HEAD", categories=categories)
+        return manager.await_result(review_id, timeout=10)
+
+    review(["security"])
+    # Unchanged HEAD: another subset and the full review still run, on the
+    # whole range; a repeat of the same subset is refused.
+    review(["bugs"])
+    review(None)
+    with pytest.raises(ValueError, match="No new commits"):
+        manager.start(f"{first}..HEAD", categories=["security"])
+    commit(repo, "c.py")
+    # A new commit: the repeated subsets review only it, a new subset
+    # reviews everything.
+    review(["security"])
+    review(None)
+    review(["performance"])
+
+    whole = ["+b.py" in s and "+c.py" not in s for s in stdins[:3]]
+    assert whole == [True, True, True]
+    assert ["+b.py" in s for s in stdins[3:]] == [False, False, True]
+    assert all("+c.py" in s for s in stdins[3:])
+    rounds = json.loads((repo / ".tdd-review-rounds.json").read_text())
+    assert {scope: len(r) for scope, r in rounds.items()} == {
+        f"review:{first}[security]": 2,
+        f"review:{first}[bugs]": 1,
+        f"review:{first}": 2,
+        f"review:{first}[performance]": 1,
+    }
