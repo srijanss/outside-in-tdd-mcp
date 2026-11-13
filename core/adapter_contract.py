@@ -143,6 +143,10 @@ def run_adapter(
         raise AdapterError(
             f"Adapter timed out after {timeout_s}s: {adapter_path}"
         ) from exc
+    except BaseException:
+        # Interrupted (e.g. KeyboardInterrupt): don't orphan the adapter.
+        _kill_process_group(proc)
+        raise
 
     stdout = raw_stdout.strip()
     if not stdout:
