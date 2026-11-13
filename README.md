@@ -469,8 +469,10 @@ the server running the reviewer and tracking the rounds. Used by the
     `run.sh` runs as `vitest related --run <file>...` — only the tests whose
     import graph reaches a changed file; docs and deleted test files are
     ignored, and package manifests, lockfiles, `tsconfig*.json`, vite/vitest
-    config, workspace or setup files, dotenv files, a deleted source file or
-    a file outside the project give `null`.
+    config, workspace or setup files, dotenv files, a file a vite/vitest
+    config references (`setupFiles`, `globalSetup`, …) or one it imports
+    by relative path, a deleted source file or a file outside the project
+    give `null`.
   - `recreateDb: true` — prepend `recreateDbArgs` (see the table above).
   - `advance: true` — also perform the `verify()` step in the same call when
     the result is exactly the expected checkpoint: an assertion failure in

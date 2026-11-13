@@ -76,3 +76,37 @@ def test_config_deleted_sources_docs_only_or_outside_files_give_no_mapping(tmp_p
         tmp_path, "src/util.ts", "src/gone.spec.ts", "src/__tests__/gone.ts"
     ) == "related src/util.ts"
     assert scope(tmp_path, "src/__tests__/util.ts") == "related src/__tests__/util.ts"
+
+
+def test_files_a_vitest_config_references_and_their_imports_give_no_mapping(tmp_path):
+    # setupFiles / globalSetup run around every test without being imported
+    # by any, so `vitest related` can't see who they affect.
+    write(
+        tmp_path,
+        {
+            "src/util.ts": "",
+            "vitest.config.ts": "export default defineConfig({ test: {\n"
+            "  setupFiles: ['./tests/init.ts'],\n"
+            '  globalSetup: "test-env/boot",\n'
+            "}})\n",
+            "tests/init.ts": "import { seed } from '../fixtures/seed'\n",
+            "fixtures/seed/index.ts": "export const seed = 1\n",
+            "test-env/boot.mjs": "const db = require(\"./db.cjs\")\n",
+            "test-env/db.cjs": "",
+            "packages/web/vite.config.mjs": "export default { test: "
+            "{ setupFiles: 'setup/dom.js' } }\n",
+            "packages/web/setup/dom.js": "",
+            "packages/web/src/app.ts": "",
+        },
+    )
+    for changed in (
+        "tests/init.ts",
+        "fixtures/seed/index.ts",
+        "test-env/boot.mjs",
+        "test-env/db.cjs",
+        "packages/web/setup/dom.js",
+    ):
+        assert scope(tmp_path, "src/util.ts", changed) is None, changed
+    assert scope(tmp_path, "src/util.ts", "packages/web/src/app.ts") == (
+        "related packages/web/src/app.ts src/util.ts"
+    )
