@@ -220,6 +220,7 @@ adapters/
   pytest-adapter/    run.sh — the only language-specific piece for pytest
                      scope.sh — maps changed files to a regression scope
   cargo-adapter/     run.sh, scope.sh — the same pair for cargo
+  vitest-adapter/    run.sh, scope.sh — the same pair for vitest
 tests/               unit tests for state_machine.py (pytest)
 pyproject.toml       packages core/, declares deps, installs the `outside-in-tdd-mcp` console script
 Dockerfile           bakes core + pytest adapter + pytest itself into one image
@@ -464,6 +465,12 @@ the server running the reviewer and tracking the rounds. Used by the
     — and every workspace crate depending on one of them; the root
     `Cargo.toml`, `Cargo.lock`,
     `.cargo/`, toolchain files or a file outside every crate give `null`.
+    The vitest adapter's `scope.sh` gives `related <file>...`, which its
+    `run.sh` runs as `vitest related --run <file>...` — only the tests whose
+    import graph reaches a changed file; docs and deleted test files are
+    ignored, and package manifests, lockfiles, `tsconfig*.json`, vite/vitest
+    config, workspace or setup files, dotenv files, a deleted source file or
+    a file outside the project give `null`.
   - `recreateDb: true` — prepend `recreateDbArgs` (see the table above).
   - `advance: true` — also perform the `verify()` step in the same call when
     the result is exactly the expected checkpoint: an assertion failure in

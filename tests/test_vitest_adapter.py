@@ -72,3 +72,13 @@ def test_adapter_reports_a_hook_failure_as_a_test_failure():
     assert result["failed"] == 1
     assert len(result["failures"]) == 1
     assert "boom in beforeEach" in result["failures"][0]["message"]
+
+
+def test_a_related_target_runs_the_tests_importing_the_named_files():
+    # "related <file>..." (from scope.sh) runs `vitest related --run`:
+    # only tests whose import graph reaches a named file, or the test
+    # file itself when it is named.
+    for target in ("related math.js", "related math.test.js"):
+        result = run_adapter(target)
+        assert (result["passed"], result["failed"]) == (1, 0), target
+        assert result["failures"] == [], target
