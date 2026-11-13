@@ -2040,21 +2040,35 @@ def _server_version() -> str:
         return "unknown"
 
 
+SERVER_INSTRUCTIONS = (
+    "Workflow: by default, implementing any feature, fix or review finding "
+    "goes through the implement-and-review workflow: the TDD cycle "
+    "(init_feature, RED -> VERIFY_RED -> IMPLEMENT -> VERIFY_GREEN -> "
+    "REFACTOR, complete_feature), then commit, then an external review "
+    "(start_review / await_review), then fix its findings the same way and "
+    "re-review. Use another workflow (tdd-start, tdd-start-verify, or any "
+    "flow without the review) only when the user names it."
+)
+
+
+def initialization_options(server: Server) -> InitializationOptions:
+    """What the server announces at initialize, including the instructions
+    the client shows the model."""
+    return InitializationOptions(
+        server_name="outside-in-tdd",
+        server_version=_server_version(),
+        capabilities=server.get_capabilities(
+            notification_options=NotificationOptions(),
+            experimental_capabilities={},
+        ),
+        instructions=SERVER_INSTRUCTIONS,
+    )
+
+
 async def main() -> None:
     server = build_server()
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
-        await server.run(
-            read_stream,
-            write_stream,
-            InitializationOptions(
-                server_name="outside-in-tdd",
-                server_version=_server_version(),
-                capabilities=server.get_capabilities(
-                    notification_options=NotificationOptions(),
-                    experimental_capabilities={},
-                ),
-            ),
-        )
+        await server.run(read_stream, write_stream, initialization_options(server))
 
 
 def run() -> None:
