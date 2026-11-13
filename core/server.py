@@ -32,7 +32,12 @@ from mcp import types
 from mcp.server import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
 
-from core.adapter_contract import DEFAULT_TIMEOUT_S, AdapterError, run_adapter
+from core.adapter_contract import (
+    DEFAULT_TIMEOUT_S,
+    AdapterError,
+    AdapterTimeoutError,
+    run_adapter,
+)
 from core.review_rounds import list_rounds as _list_review_rounds
 from core.review_runner import ReviewManager
 from core.review_findings import list_review_findings as _list_review_findings
@@ -212,7 +217,10 @@ TOOLS = [
             "green) — it does not advance a missing-name failure or a test "
             "that passed straight from RED, a RED cycle with no write_test, "
             "or a call already at VERIFY_RED/VERIFY_GREEN (all return "
-            "advanceSkipped with the reason). Adds driftWarning (also on run_tests and "
+            "advanceSkipped with the reason). Pass timeoutSeconds to give one "
+            "run a longer adapter timeout (up to maxAdapterTimeoutSeconds); "
+            "a timeout error carries retryTimeoutSeconds to retry with, or a "
+            "hint when already at the cap. Adds driftWarning (also on run_tests and "
             "return_to_parent) when files "
             "outside the declared test/target files changed (git repos only)."
         ),
@@ -224,6 +232,14 @@ TOOLS = [
                     "description": (
                         "Also call verify() in the same call when the "
                         "result is the expected checkpoint."
+                    ),
+                },
+                "timeoutSeconds": {
+                    "type": "integer",
+                    "description": (
+                        "Adapter timeout for this run, in seconds, up to "
+                        "maxAdapterTimeoutSeconds. On a timeout the error "
+                        "carries retryTimeoutSeconds to retry with."
                     ),
                 },
                 "recreateDb": {
@@ -650,7 +666,66 @@ def _require_positive_int(
 DEFAULT_MAX_ADAPTER_TIMEOUT_S = 600
 
 
-def resolve_adapter_timeout(config: dict[str, Any]) -> int:
+def max_adapter_timeout(config: dict[str, Any]) -> int:
+    return config.get("maxAdapterTimeoutSeconds", DEFAULT_MAX_ADAPTER_TIMEOUT_S)
+
+
+def retry_timeout(used: int, cap: int) -> int | None:
+    """The timeout to suggest after a run timed out at ``used`` seconds.
+
+    Double it, capped at ``cap``; None once already at the cap, since a
+    retry could not get any longer.
+    """
+    if used >= cap:
+        return None
+    return min(used * 2, cap)
+
+
+def _adapter_failure(exc: AdapterError, config: dict[str, Any]) -> dict[str, Any]:
+    """The run_tests error payload for a failed adapter call.
+
+    A timeout also offers retryTimeoutSeconds, so the agent can retry with
+    a longer timeout without asking.
+    """
+    payload: dict[str, Any] = {"error": f"Adapter failed: {exc}"}
+    if isinstance(exc, AdapterTimeoutError):
+        cap = max_adapter_timeout(config)
+        retry = retry_timeout(exc.timeout_s, cap)
+        if retry is not None:
+            payload["retryTimeoutSeconds"] = retry
+        else:
+            payload["hint"] = (
+                f"Already at maxAdapterTimeoutSeconds ({cap}); raise it in "
+                ".tdd-config.json or narrow the test target to run longer."
+            )
+    return payload
+
+
+def resolve_adapter_timeout(
+    config: dict[str, Any], requested: Any = None
+) -> int:
+    """The adapter timeout for one run.
+
+    A per-call ``requested`` value wins over the env var and the config but
+    is never silently capped: asking above maxAdapterTimeoutSeconds is an
+    error naming that key, so the caller knows what to change.
+    """
+    cap = max_adapter_timeout(config)
+    if requested is not None:
+        # bool is an int subclass — reject it explicitly.
+        if isinstance(requested, bool) or not isinstance(requested, int) or (
+            requested <= 0
+        ):
+            raise AdapterError(
+                f"timeoutSeconds must be a positive integer, got {requested!r}"
+            )
+        if requested > cap:
+            raise AdapterError(
+                f"timeoutSeconds {requested} is above maxAdapterTimeoutSeconds "
+                f"({cap}); raise maxAdapterTimeoutSeconds in .tdd-config.json "
+                "to allow it."
+            )
+        return requested
     raw_env = os.environ.get("TDD_ADAPTER_TIMEOUT_S")
     if raw_env is not None:
         try:
@@ -665,10 +740,7 @@ def resolve_adapter_timeout(config: dict[str, Any]) -> int:
             )
     else:
         timeout = config.get("adapterTimeoutSeconds", DEFAULT_TIMEOUT_S)
-    return min(
-        timeout,
-        config.get("maxAdapterTimeoutSeconds", DEFAULT_MAX_ADAPTER_TIMEOUT_S),
-    )
+    return min(timeout, cap)
 
 
 REVIEW_TIMEOUT_SECONDS = 1800
@@ -1595,6 +1667,7 @@ class TDDServer:
                 payload = self._run_tests(
                     arguments.get("regressionScope"),
                     recreate_db=bool(arguments.get("recreateDb")),
+                    timeout_seconds=arguments.get("timeoutSeconds"),
                 )
                 if arguments.get("advance") and (phase_before, self.sm.phase) in (
                     ("red", "verify_red"),
@@ -1888,7 +1961,10 @@ class TDDServer:
             return self._error(f"Missing required argument: {exc}")
 
     def _run_tests(
-        self, regression_scope: str | None = None, recreate_db: bool = False
+        self,
+        regression_scope: str | None = None,
+        recreate_db: bool = False,
+        timeout_seconds: Any = None,
     ) -> dict[str, Any]:
         if self.sm.phase is None:
             return {"error": "No active feature. Call init_feature() first."}
@@ -1973,12 +2049,12 @@ class TDDServer:
             run_target = f"{recreate_db_args} {run_target}"
 
         try:
-            timeout_s = resolve_adapter_timeout(config)
+            timeout_s = resolve_adapter_timeout(config, requested=timeout_seconds)
             result = run_adapter(
                 adapter_path, run_target, self.project_root, timeout_s=timeout_s
             )
         except AdapterError as exc:
-            return {"error": f"Adapter failed: {exc}"}
+            return _adapter_failure(exc, config)
 
         own_target_broke = None
         has_extra_regressions = False
@@ -1991,7 +2067,7 @@ class TDDServer:
                     adapter_path, test_target, self.project_root, timeout_s=timeout_s
                 )
             except AdapterError as exc:
-                return {"error": f"Adapter failed: {exc}"}
+                return _adapter_failure(exc, config)
             own_target_broke = own_result.failed > 0
             has_extra_regressions = result.failed > own_result.failed
             if not own_target_broke or has_extra_regressions:

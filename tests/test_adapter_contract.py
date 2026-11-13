@@ -168,3 +168,17 @@ def test_a_stuck_reap_after_the_kill_keeps_the_timeout_error(tmp_path, monkeypat
         for proc in spawned:
             proc.kill()
             real_wait(proc)
+
+
+def test_a_timeout_raises_an_adapter_timeout_error_carrying_the_timeout(tmp_path):
+    from core.adapter_contract import AdapterTimeoutError
+
+    adapter = tmp_path / "adapter.sh"
+    adapter.write_text("#!/bin/sh\nexec sleep 30\n")
+    adapter.chmod(adapter.stat().st_mode | stat.S_IEXEC)
+
+    with pytest.raises(AdapterTimeoutError, match="timed out after 1s") as info:
+        run_adapter(str(adapter), "irrelevant", str(tmp_path), timeout_s=1)
+
+    assert isinstance(info.value, AdapterError)
+    assert info.value.timeout_s == 1

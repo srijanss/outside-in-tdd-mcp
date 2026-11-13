@@ -27,6 +27,14 @@ class AdapterError(Exception):
     """Raised when an adapter can't be run or returns malformed output."""
 
 
+class AdapterTimeoutError(AdapterError):
+    """The adapter ran past its timeout; ``timeout_s`` is the limit it hit."""
+
+    def __init__(self, message: str, timeout_s: int) -> None:
+        super().__init__(message)
+        self.timeout_s = timeout_s
+
+
 @dataclass
 class AdapterResult:
     passed: int
@@ -140,8 +148,8 @@ def run_adapter(
         raw_stdout, raw_stderr = proc.communicate(timeout=max(timeout_s, 0))
     except subprocess.TimeoutExpired as exc:
         _kill_process_group(proc)
-        raise AdapterError(
-            f"Adapter timed out after {timeout_s}s: {adapter_path}"
+        raise AdapterTimeoutError(
+            f"Adapter timed out after {timeout_s}s: {adapter_path}", timeout_s
         ) from exc
     except BaseException:
         # Interrupted (e.g. KeyboardInterrupt): don't orphan the adapter.

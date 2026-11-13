@@ -88,3 +88,19 @@ def test_a_non_positive_env_var_is_a_clean_adapter_error(monkeypatch, raw):
         AdapterError, match="TDD_ADAPTER_TIMEOUT_S must be a positive integer"
     ):
         resolve_adapter_timeout({})
+
+
+def test_a_requested_timeout_overrides_env_and_config_up_to_the_cap(monkeypatch):
+    monkeypatch.setenv("TDD_ADAPTER_TIMEOUT_S", "3")
+    config = {"adapterTimeoutSeconds": 7, "maxAdapterTimeoutSeconds": 20}
+    assert resolve_adapter_timeout(config, requested=20) == 20
+    with pytest.raises(AdapterError, match="maxAdapterTimeoutSeconds"):
+        resolve_adapter_timeout(config, requested=21)
+
+
+def test_retry_timeout_doubles_the_used_timeout_capped_and_is_none_at_the_cap():
+    from core.server import retry_timeout
+
+    assert retry_timeout(30, cap=600) == 60
+    assert retry_timeout(400, cap=600) == 600
+    assert retry_timeout(600, cap=600) is None
