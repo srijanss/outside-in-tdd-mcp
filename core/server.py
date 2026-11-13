@@ -37,6 +37,7 @@ from core.adapter_contract import (
     AdapterError,
     AdapterTimeoutError,
     run_adapter,
+    scope_for_changed_files,
 )
 from core.review_rounds import list_rounds as _list_review_rounds
 from core.review_runner import ReviewManager
@@ -208,8 +209,10 @@ TOOLS = [
             "Auto-advances phase based on results. Closing a base-level "
             "REFACTOR with defaultTestDir configured returns "
             "needsRegressionScopeConfirmation instead of running the full "
-            "sweep — re-call with regressionScope set to a path/expression "
-            "(or \"skip\") to proceed. After a schema/model change, pass "
+            "sweep, with suggestedScope (narrowed to the changed files when "
+            "the adapter ships a scope.sh) and fullSuiteScope — re-call with "
+            "regressionScope set to suggestedScope (default), another "
+            "path/expression, or \"skip\" to proceed. After a schema/model change, pass "
             "recreateDb=true to rebuild a cached test DB (needs "
             "recreateDbArgs in .tdd-config.json). Pass advance=true to "
             "also do the verify() step in the same call when the result is "
@@ -1996,9 +1999,16 @@ class TDDServer:
         # before any adapter call happens. Once regression_scope is given,
         # proceed using it in place of defaultTestDir for this call only.
         if would_close_base_refactor and regression_scope is None:
+            # The adapter may narrow the sweep to what the uncommitted
+            # changes can affect; the whole defaultTestDir stays on offer.
+            changed = sorted(self._worktree_state() or {})
+            scoped = scope_for_changed_files(
+                adapter_path, self.project_root, changed
+            )
             return {
                 "needsRegressionScopeConfirmation": True,
-                "suggestedScope": default_test_dir,
+                "suggestedScope": scoped or default_test_dir,
+                "fullSuiteScope": default_test_dir,
                 **self.sm.status(),
             }
         if regression_scope == "skip":

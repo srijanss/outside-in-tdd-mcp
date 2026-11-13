@@ -9,6 +9,19 @@ into the result (prefixed `REGRESSION:`) and REFACTOR stays open instead
 of closing — so `complete_feature()` can't become reachable on top of a
 regression, without you needing to remember a separate step.
 
+Before running that sweep, `run_tests()` returns
+`needsRegressionScopeConfirmation` with two scopes:
+
+- `suggestedScope` — what the uncommitted changes can affect, when the
+  adapter ships a `scope.sh` that maps changed files to tests; otherwise
+  the whole `defaultTestDir`.
+- `fullSuiteScope` — the whole `defaultTestDir`.
+
+Re-call `run_tests(regressionScope=<suggestedScope>)` by default. Use
+`fullSuiteScope` only when the change is broad (shared fixtures, config,
+the adapter itself) or the user asks for it — the full suite still runs in
+review/CI. `"skip"` skips the sweep.
+
 This only fires at depth 1 (nested drill-down cycles skip it — running the
 whole suite after every nested cycle would be wasteful) and only when
 `defaultTestDir` is set in the config.

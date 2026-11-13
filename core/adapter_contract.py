@@ -193,3 +193,53 @@ def _kill_process_group(proc: subprocess.Popen) -> None:
         # cleanup replace the caller's error; subprocess reaps the zombie
         # later via its own _active list once proc is collected.
         pass
+
+
+def scope_for_changed_files(
+    adapter_path: str,
+    project_root: str,
+    changed_files: list[str],
+    timeout_s: int = 30,
+) -> str | None:
+    """The adapter's own regression scope for ``changed_files``, or None.
+
+    Optional extension of the adapter contract: an executable ``scope.sh``
+    next to the adapter, called as ``scope.sh <project_root> <file>...``,
+    prints ``{"scope": "<test target expression>"}`` — or ``{"scope":
+    null}`` when it can't map the files. A missing, failing, hanging or
+    malformed script means no mapping, so the caller falls back to the
+    whole suite.
+    """
+    if not changed_files:
+        return None
+    script = os.path.join(os.path.dirname(adapter_path), "scope.sh")
+    if not os.access(script, os.X_OK):
+        return None
+    try:
+        proc = subprocess.Popen(
+            [script, project_root, *changed_files],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            start_new_session=True,
+        )
+    except OSError:
+        return None
+    try:
+        stdout, _ = proc.communicate(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        _kill_process_group(proc)
+        return None
+    except BaseException:
+        _kill_process_group(proc)
+        raise
+    if proc.returncode != 0:
+        return None
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        return None
+    scope = data.get("scope") if isinstance(data, dict) else None
+    if not isinstance(scope, str) or not scope.strip():
+        return None
+    return scope.strip()

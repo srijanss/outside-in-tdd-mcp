@@ -441,7 +441,15 @@ the server running the reviewer and tracking the rounds. Used by the
   - `regressionScope` — when a base-level REFACTOR closes and
     `defaultTestDir` is configured, `run_tests` first returns
     `needsRegressionScopeConfirmation`; re-call with a target expression to
-    sweep instead of `defaultTestDir`, or `"skip"` to skip the sweep.
+    sweep instead of `defaultTestDir`, or `"skip"` to skip the sweep. The
+    response carries `suggestedScope` and `fullSuiteScope` (the whole
+    `defaultTestDir`). `suggestedScope` comes from the adapter's optional
+    `scope.sh` (next to the adapter executable), called as
+    `scope.sh <project_root> <changed file>...` with the files `git status`
+    reports as modified or untracked; it prints `{"scope": "<target
+    expression>"}`, or `{"scope": null}` when it can't map them. Without the
+    script — or when it fails, hangs (30s) or prints anything else —
+    `suggestedScope` is `defaultTestDir`.
   - `recreateDb: true` — prepend `recreateDbArgs` (see the table above).
   - `advance: true` — also perform the `verify()` step in the same call when
     the result is exactly the expected checkpoint: an assertion failure in
