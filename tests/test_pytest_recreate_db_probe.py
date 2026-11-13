@@ -59,3 +59,19 @@ def test_asks_the_venv_pytests_own_interpreter(tmp_path, monkeypatch):
     monkeypatch.setenv("PYTHONPATH", importable_django_plugin(tmp_path / "site"))
 
     assert default_recreate_db_args(PYTEST_ADAPTER, str(project)) == "--create-db"
+
+
+def test_a_sh_trampoline_to_a_missing_interpreter_falls_back(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    trampoline = project / ".venv" / "bin" / "pytest"
+    trampoline.parent.mkdir(parents=True)
+    trampoline.write_text(
+        "#!/bin/sh\n"
+        "'''exec' \"/nonexistent dir/python\" \"$0\" \"$@\"\n"
+        "' '''\n"
+    )
+    trampoline.chmod(0o755)
+    path_pytest(tmp_path, monkeypatch, sys.executable)
+    monkeypatch.setenv("PYTHONPATH", importable_django_plugin(tmp_path / "site"))
+
+    assert default_recreate_db_args(PYTEST_ADAPTER, str(project)) == "--create-db"

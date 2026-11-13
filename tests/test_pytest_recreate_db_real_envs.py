@@ -67,3 +67,23 @@ def test_an_editable_install_in_a_real_project_venv_counts(tmp_path, monkeypatch
 
     assert default_recreate_db_args(PYTEST_ADAPTER, str(project)) == "--create-db"
 
+
+def test_a_pip_sh_trampoline_entry_point_in_a_spaced_venv_path_counts(
+    tmp_path, monkeypatch
+):
+    """pip writes a /bin/sh trampoline instead of a plain #! line when the
+    interpreter path has spaces or is too long for the kernel."""
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    project = tmp_path / "my project"
+    site = real_venv(project / ".venv")
+    python = project / ".venv" / "bin" / "python"
+    (project / ".venv" / "bin" / "pytest").write_text(
+        "#!/bin/sh\n"
+        f"'''exec' \"{python}\" \"$0\" \"$@\"\n"
+        "' '''\n"
+        "raise SystemExit(0)\n"
+    )
+    (site / "editable.pth").write_text(f"{plugin_dir(tmp_path / 'src')}\n")
+
+    assert default_recreate_db_args(PYTEST_ADAPTER, str(project)) == "--create-db"
+

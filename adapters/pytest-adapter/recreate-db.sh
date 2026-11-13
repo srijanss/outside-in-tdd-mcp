@@ -14,6 +14,7 @@ system-site-packages, .pth and editable installs all count.
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -23,6 +24,9 @@ PROBE = (
     "sys.exit(0 if importlib.util.find_spec('pytest_django') else 1)"
 )
 PROBE_TIMEOUT_S = 20
+# pip's /bin/sh trampoline, written instead of a plain #! line when the
+# interpreter path has spaces or is too long: '''exec' "<python>" "$0" "$@"
+TRAMPOLINE = re.compile(r"""^'''exec' (?:"([^"]+)"|(\S+)) "\$0" "\$@"\s*$""")
 
 
 def pytest_candidates(project_root):
@@ -35,17 +39,23 @@ def pytest_candidates(project_root):
 
 
 def shebang(executable):
-    """The interpreter argv from an executable script's #! line, or None."""
+    """The interpreter argv from an executable script's #! line (or the
+    python a pip /bin/sh trampoline execs), or None."""
     if not os.access(executable, os.X_OK):
         return None
     try:
         with open(executable, "rb") as handle:
             first = handle.readline(4096)
+            second = handle.readline(4096)
     except OSError:
         return None
     if not first.startswith(b"#!"):
         return None
     argv = first[2:].decode(errors="replace").strip().split(None, 1)
+    if argv == ["/bin/sh"]:
+        trampoline = TRAMPOLINE.match(second.decode(errors="replace"))
+        if trampoline:
+            return [trampoline.group(1) or trampoline.group(2)]
     return argv or None
 
 
