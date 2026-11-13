@@ -1,4 +1,5 @@
 import json
+import shutil
 import time
 
 from core.server import TDDServer
@@ -39,6 +40,12 @@ def _is_gone(pid):
             return f.read().split(") ", 1)[1].startswith("Z")
     except FileNotFoundError:
         return True
+
+
+def _process_group_of(pid):
+    # Field 5 of /proc/<pid>/stat; split after the comm field, which may hold spaces.
+    with open(f"/proc/{pid}/stat") as f:
+        return int(f.read().split(") ", 1)[1].split()[2])
 
 
 def test_timeout_also_kills_a_child_the_adapter_spawned_without_exec(tmp_path):
@@ -91,10 +98,19 @@ def test_timeout_returns_even_when_a_child_escaped_the_process_group(tmp_path):
         {"featureName": "esc", "testFile": "tests/test_esc.py", "targetFiles": []},
     )
 
+    # Without setsid the child would stay in the group and the test would
+    # pass without exercising the escape at all.
+    assert shutil.which("setsid"), "setsid is required for this test"
+
     started = time.monotonic()
     try:
         result = run_tests(server)
         elapsed = time.monotonic() - started
+        escaped = int(pid_file.read_text())
+        # The child really left the adapter's group and outlived the kill,
+        # so it was still holding the pipe when run_tests returned.
+        assert not _is_gone(escaped)
+        assert _process_group_of(escaped) == escaped
     finally:
         try:
             os.kill(int(pid_file.read_text()), signal.SIGKILL)
