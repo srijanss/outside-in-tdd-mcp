@@ -148,30 +148,47 @@ def config_files(root):
                 yield os.path.relpath(os.path.join(directory, name), root)
 
 
+def relative_imports(root, rel):
+    base = os.path.dirname(rel)
+    for _, specifier in RELATIVE_IMPORT.findall(read_text(os.path.join(root, rel))):
+        found = resolve(root, base, specifier)
+        if found:
+            yield found
+
+
 def setup_files(root):
     """Files vite/vitest configs reference (setupFiles, globalSetup, ...)
     and everything they import by relative path, transitively: they run
-    around tests without being in any test's import graph."""
+    around tests without being in any test's import graph.
+
+    A config's relative imports are config modules too (shared or merged
+    configs), so their string literals are scanned the same way, resolved
+    against the module's directory and the top-level config's; a change to
+    one of them is global as well."""
+    configs = [(config, os.path.dirname(config)) for config in config_files(root)]
+    modules = set()
     pending = []
-    for config in config_files(root):
-        base = os.path.dirname(config)
-        for _, literal in STRING_LITERAL.findall(read_text(os.path.join(root, config))):
-            for directory in {base, ""}:
+    while configs:
+        module, config_dir = configs.pop()
+        if module in modules:
+            continue
+        modules.add(module)
+        imported = set(relative_imports(root, module))
+        configs.extend((path, config_dir) for path in imported)
+        base = os.path.dirname(module)
+        for _, literal in STRING_LITERAL.findall(read_text(os.path.join(root, module))):
+            for directory in {base, config_dir}:
                 found = resolve(root, directory, literal)
-                if found and found != config:
+                if found and found not in imported and found != module:
                     pending.append(found)
     seen = set()
     while pending:
         rel = pending.pop()
-        if rel in seen:
-            continue
-        seen.add(rel)
-        base = os.path.dirname(rel)
-        for _, specifier in RELATIVE_IMPORT.findall(read_text(os.path.join(root, rel))):
-            found = resolve(root, base, specifier)
-            if found:
-                pending.append(found)
-    return seen
+        if rel not in seen:
+            seen.add(rel)
+            pending.extend(relative_imports(root, rel))
+    # Imported config modules change every test's setup too.
+    return seen | modules
 
 
 def as_argument(target):

@@ -472,8 +472,9 @@ the server running the reviewer and tracking the rounds. Used by the
     test files are ignored, and other `.md`/`.rst`/`.txt` files (possible
     fixtures), package manifests, lockfiles, `tsconfig*.json`, vite/vitest
     config, workspace or setup files, dotenv files, a file a vite/vitest
-    config references (`setupFiles`, `globalSetup`, …) or one it imports
-    by relative path, a deleted source file or a file outside the project
+    config — or a config module it imports — references (`setupFiles`,
+    `globalSetup`, …), one those import by relative path, an imported
+    config module, a deleted source file or a file outside the project
     give `null`.
   - `recreateDb: true` — prepend `recreateDbArgs` (see the table above).
   - `advance: true` — also perform the `verify()` step in the same call when

@@ -133,3 +133,22 @@ def test_only_documentation_text_files_are_ignored(tmp_path):
         "LICENSE.txt",
     ):
         assert scope(tmp_path, "src/util.ts", doc) == "related src/util.ts", doc
+
+
+def test_setup_files_declared_in_an_imported_config_module_give_no_mapping(tmp_path):
+    write(
+        tmp_path,
+        {
+            "src/util.ts": "",
+            "vitest.config.ts": "import shared from './config/shared'\n"
+            "export default mergeConfig(shared, {})\n",
+            "config/shared.ts": "import { base } from './base.mjs'\n"
+            "export default { ...base, test: { setupFiles: ['tests/init.ts'] } }\n",
+            "config/base.mjs": "export const base = { test: "
+            "{ globalSetup: './global.ts' } }\n",
+            "config/global.ts": "",
+            "tests/init.ts": "",
+        },
+    )
+    for changed in ("tests/init.ts", "config/global.ts", "config/shared.ts"):
+        assert scope(tmp_path, "src/util.ts", changed) is None, changed
