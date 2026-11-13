@@ -130,3 +130,24 @@ def test_unlisted_path_dependencies_inside_the_workspace_are_members_too(tmp_pat
     assert scope(tmp_path, "crates/core/src/lib.rs") == "-p cli -p core-lib -p helper"
     assert scope(tmp_path, "libs/helper/src/lib.rs") == "-p cli -p helper"
     assert scope(tmp_path, "vendor/shim/src/lib.rs") is None
+
+
+def test_a_broken_member_manifest_falls_back_to_the_whole_suite(tmp_path):
+    import os
+
+    for broken in (
+        "[package\nname = ",  # invalid TOML
+        '[lib]\nname = "net"\n',  # no [package]
+        '[package]\nversion = "0.1.0"\n',  # no package.name
+    ):
+        write(tmp_path, {**WORKSPACE, "crates/net/Cargo.toml": broken})
+        assert scope(tmp_path, "crates/core/src/lib.rs") is None, broken
+
+    if os.geteuid() != 0:
+        write(tmp_path, WORKSPACE)
+        manifest = tmp_path / "crates/net/Cargo.toml"
+        manifest.chmod(0)
+        try:
+            assert scope(tmp_path, "crates/core/src/lib.rs") is None
+        finally:
+            manifest.chmod(0o644)
