@@ -110,3 +110,26 @@ def test_files_a_vitest_config_references_and_their_imports_give_no_mapping(tmp_
     assert scope(tmp_path, "src/util.ts", "packages/web/src/app.ts") == (
         "related packages/web/src/app.ts src/util.ts"
     )
+
+
+def test_only_documentation_text_files_are_ignored(tmp_path):
+    # .md/.txt/.rst elsewhere may be fixtures read from disk or `?raw`
+    # imports, which `vitest related` may not trace: run everything.
+    write(
+        tmp_path,
+        {
+            "src/util.ts": "",
+            "src/content/intro.md": "",
+            "tests/fixtures/expected.txt": "",
+        },
+    )
+    for changed in ("src/content/intro.md", "tests/fixtures/expected.txt"):
+        assert scope(tmp_path, "src/util.ts", changed) is None, changed
+    for doc in (
+        "README.md",
+        "docs/api/usage.rst",
+        "packages/web/CHANGELOG.md",
+        "packages/web/README.md",
+        "LICENSE.txt",
+    ):
+        assert scope(tmp_path, "src/util.ts", doc) == "related src/util.ts", doc

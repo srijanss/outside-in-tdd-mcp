@@ -8,7 +8,9 @@ related --run <file>...`, which runs only the tests whose import graph
 reaches a changed file (a changed test file runs itself) — or
 {"scope": null} when the files can't be mapped (the caller then runs the
 whole suite):
-  - docs (.md/.rst/.txt) are ignored, as are deleted test files;
+  - docs (.md/.rst/.txt at the root, under doc(s)/, or README-, CHANGELOG-
+    or LICENSE-style names anywhere) are ignored, as are deleted test files;
+  - any other .md/.rst/.txt -> null: it may be a fixture read from disk;
   - package manifests and lockfiles, tsconfig*.json, vite/vitest config,
     workspace and setup files, and dotenv files -> null: they affect tests
     without being imported by them;
@@ -28,6 +30,19 @@ import shlex
 import sys
 
 DOC_SUFFIXES = (".md", ".rst", ".txt")
+DOC_DIRS = {"doc", "docs"}
+DOC_NAMES = {
+    "AUTHORS",
+    "CHANGELOG",
+    "CODE_OF_CONDUCT",
+    "CONTRIBUTING",
+    "HISTORY",
+    "LICENCE",
+    "LICENSE",
+    "NOTICE",
+    "README",
+    "SECURITY",
+}
 GLOBAL_PATTERNS = (
     "package.json",
     "package-lock.json",
@@ -70,6 +85,20 @@ def is_test_file(rel):
     )
 
 
+def is_documentation(rel):
+    """A text file at the project root, under doc(s)/, or a README-style
+    name anywhere; other text files may be fixtures or raw imports."""
+    name = os.path.basename(rel)
+    if not name.endswith(DOC_SUFFIXES):
+        return False
+    parts = rel.split("/")
+    return (
+        len(parts) == 1
+        or parts[0] in DOC_DIRS
+        or os.path.splitext(name)[0].upper() in DOC_NAMES
+    )
+
+
 def target_for(root, rel):
     """The related target for ``rel``; "" to skip it, None for no mapping."""
     name = os.path.basename(rel)
@@ -77,8 +106,10 @@ def target_for(root, rel):
         return None
     if any(fnmatch.fnmatch(name, pattern) for pattern in GLOBAL_PATTERNS):
         return None
-    if name.endswith(DOC_SUFFIXES):
+    if is_documentation(rel):
         return ""
+    if name.endswith(DOC_SUFFIXES):
+        return None
     if not os.path.exists(os.path.join(root, rel)):
         return "" if is_test_file(rel) else None
     return rel
