@@ -441,3 +441,43 @@ def test_only_quota_or_access_errors_fall_back_to_the_next_model(
     assert calls == expected["calls"]
     for fragment in expected.get("error", []):
         assert fragment in result["error"]
+
+
+@pytest.mark.parametrize(
+    "first_reply, calls",
+    [
+        # Local failures switching models cannot fix.
+        (PermissionError("[Errno 13] Permission denied: '/repo/.git'"), 1),
+        (OSError("insufficient disk space"), 1),
+        (RuntimeError("could not access the repository: 403"), 1),
+        # A reviewer error that isn't about quota or access.
+        (pi_error("insufficient disk space to write the session"), 1),
+        (pi_error("permission to run tool bash denied"), 1),
+        # The reviewer process itself reporting a provider quota error.
+        ("process:pi exited 1 with no output: Error: 429 quota exceeded", 2),
+    ],
+)
+def test_only_provider_reported_quota_or_access_errors_fall_back(
+    repo, first_reply, calls
+):
+    from core.reviewers import ReviewerProcessError
+
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    replies = [first_reply, findings_reply()]
+    seen = []
+
+    def runner(argv, cwd, stdin):
+        seen.append(argv)
+        reply = replies.pop(0)
+        if isinstance(reply, BaseException):
+            raise reply
+        if reply.startswith("process:"):
+            raise ReviewerProcessError(reply.removeprefix("process:"))
+        return reply
+
+    manager = make_manager(repo, runner, config=FALLBACK_CONFIG)
+    result = manager.await_result(manager.start(f"{first}..HEAD"), timeout=10)
+
+    assert len(seen) == calls
+    assert result["status"] == ("done" if calls == 2 else "failed")

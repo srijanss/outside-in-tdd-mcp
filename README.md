@@ -361,7 +361,7 @@ adapter — `core/` has none. Only `adapterPath` is required.
 | `maxAdapterTimeoutSeconds` | no | Upper bound (positive integer, default 600) applied to the resolved adapter timeout, whichever source it came from. A per-call `timeoutSeconds` above it is refused. |
 | `reviewers.default` | no | Defaults for `start_review`: `{"reviewer": "pi" \| "claude", "model": "...", "thinking": "off\|minimal\|low\|medium\|high\|xhigh\|max"}`. Resolution order is the per-call argument, then this, then the reviewer tool's own default. |
 | `reviewers.allowedModels` | no | If set, `start_review` rejects any model not in this list. |
-| `reviewers.fallbackModels` | no | Models to try, in order, when a review fails on a quota, rate-limit, billing or access error (same reviewer and thinking). Models outside `allowedModels`, and the one that just failed, are skipped. Other failures are not retried. The round and findings record the model that actually reviewed; if every model fails, the error lists each attempt. Without it, such a review fails as before. |
+| `reviewers.fallbackModels` | no | Models to try, in order, when the reviewer reports a quota, rate-limit, billing or model-access error (same reviewer and thinking). Local failures (a missing binary, file permissions, disk space, timeouts) are not retried on another model. Models outside `allowedModels`, and the one that just failed, are skipped. Other failures are not retried. The round and findings record the model that actually reviewed; if every model fails, the error lists each attempt. Without it, such a review fails as before. |
 
 Built-in `testNamePattern` defaults, chosen by the `adapter` label (shown
 JSON-escaped, so you can paste one into `.tdd-config.json` as a starting

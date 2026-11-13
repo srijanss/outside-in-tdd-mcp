@@ -44,6 +44,7 @@ from core.review_range import default_review_range
 from core.review_rounds import latest_scope as latest_review_scope
 from core.review_rounds import list_rounds as _list_review_rounds
 from core.review_runner import ReviewManager
+from core.reviewers import ReviewerProcessError
 from core.review_findings import list_review_findings as _list_review_findings
 from core.review_findings import record_review_finding as _record_review_finding
 from core.research_log import list_research as _list_research_entries
@@ -782,7 +783,9 @@ def _run_reviewer_subprocess(argv: list[str], cwd: str, stdin: str) -> str:
     )
     if not result.stdout.strip():
         tail = result.stderr.strip()[-500:]
-        raise RuntimeError(f"{argv[0]} exited {result.returncode} with no output: {tail}")
+        raise ReviewerProcessError(
+            f"{argv[0]} exited {result.returncode} with no output: {tail}"
+        )
     return result.stdout
 
 

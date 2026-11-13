@@ -4,8 +4,8 @@ import uuid
 from contextlib import nullcontext
 from pathlib import Path
 
-from core.claude_output import parse_claude_output
-from core.pi_events import parse_pi_events
+from core.claude_output import ClaudeReviewError, parse_claude_output
+from core.pi_events import PiReviewError, parse_pi_events
 from core.review_decision import decide
 from core.review_findings import list_review_findings, record_review_finding
 from core.review_findings_parser import CATEGORIES, FindingsParseError, parse_findings
@@ -13,6 +13,7 @@ from core.review_prompt import build_review_prompt
 from core.review_range import resolve_review_range
 from core.review_rounds import list_rounds, record_round
 from core.reviewers import (
+    ReviewerProcessError,
     build_reviewer_command,
     fallback_models,
     is_quota_or_access_error,
@@ -48,6 +49,15 @@ def review_scope(start: str, categories=None) -> str:
         return f"review:{start}"
     wanted = ",".join(c for c in CATEGORIES if c in categories)
     return f"review:{start}[{wanted}]"
+
+
+# Errors the reviewer itself reported, as opposed to local failures that a
+# different model cannot fix.
+REVIEWER_ERRORS = (PiReviewError, ClaudeReviewError, ReviewerProcessError)
+
+
+def _model_unavailable(exc: Exception) -> bool:
+    return isinstance(exc, REVIEWER_ERRORS) and is_quota_or_access_error(str(exc))
 
 
 class ReviewManager:
@@ -173,7 +183,7 @@ class ReviewManager:
                 break
             except Exception as exc:
                 failures.append(f"{command['model'] or 'default model'}: {exc}")
-                if command is commands[-1] or not is_quota_or_access_error(str(exc)):
+                if command is commands[-1] or not _model_unavailable(exc):
                     error = "; ".join(failures) if len(failures) > 1 else str(exc)
                     return {"status": "failed", "error": error}
 

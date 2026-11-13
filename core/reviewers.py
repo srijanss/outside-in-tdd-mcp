@@ -5,6 +5,10 @@ class ReviewerConfigError(ValueError):
     pass
 
 
+class ReviewerProcessError(RuntimeError):
+    """The reviewer process failed without producing any output."""
+
+
 # Isolation: no session, no MCP (the reviewer must not reach this server),
 # no extensions/skills/prompt templates/context files (AGENTS.md is written
 # for the implementer), and only the read tool (no bash/edit/write).
@@ -76,11 +80,15 @@ def build_reviewer_command(
     }
 
 
-# Errors meaning the model can't serve this caller right now (quota, rate
-# limit, billing, auth/access) rather than a problem with the review itself.
+# Provider phrasings meaning the model can't serve this caller right now
+# (quota, rate limit, billing, auth/model access), not a problem with the
+# review itself. Only matched against errors the reviewer reported.
 QUOTA_OR_ACCESS_ERROR = re.compile(
-    r"quota|rate.?limit|\b429\b|\b40[13]\b|unauthori[sz]ed|forbidden|"
-    r"permission|access|billing|credit|usage.?limit|insufficient",
+    r"quota|rate.?limit|too many requests|\b429\b|\b40[13]\b|"
+    r"unauthori[sz]ed|forbidden|billing|credit balance|out of credits|"
+    r"usage.?limit|invalid.?api.?key|"
+    r"(?:no|denied|lacks?|does not have|doesn't have|don't have) access to (?:the )?model|"
+    r"model\b[^.]*\bnot (?:available|enabled|allowed)",
     re.IGNORECASE,
 )
 
