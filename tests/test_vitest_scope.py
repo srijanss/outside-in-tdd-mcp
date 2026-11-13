@@ -239,3 +239,22 @@ def test_a_config_importing_an_alias_gives_no_mapping(tmp_path):
     )
     # The aliased module may declare setup files we can't see.
     assert scope(tmp_path, "src/util.ts") is None
+
+
+def test_a_setup_file_importing_a_linked_workspace_package_gives_no_mapping(tmp_path):
+    write(
+        tmp_path,
+        {
+            "src/util.ts": "",
+            "vitest.config.ts": "export default { test: { setupFiles: ['./tests/init.ts'] } }\n",
+            "tests/init.ts": "import { seed } from '@acme/fixtures'\n",
+            "packages/fixtures/package.json": '{"name": "@acme/fixtures"}',
+            "packages/fixtures/index.ts": "",
+        },
+    )
+    # Workspace packages are linked into node_modules but are project source.
+    (tmp_path / "node_modules/@acme").mkdir(parents=True)
+    (tmp_path / "node_modules/@acme/fixtures").symlink_to(
+        tmp_path / "packages/fixtures", target_is_directory=True
+    )
+    assert scope(tmp_path, "src/util.ts", "packages/fixtures/index.ts") is None

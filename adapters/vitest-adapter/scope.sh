@@ -24,7 +24,7 @@ whole suite):
     directories aren't searched);
   - any file, when a config module or setup file imports a specifier that
     is neither relative, a Node builtin nor an installed package (an
-    alias) -> null;
+    alias, or a workspace package linked into node_modules) -> null;
   - a file outside the project root -> null.
 """
 
@@ -209,7 +209,9 @@ def relative_imports(root, rel):
 def is_external(root, rel, specifier):
     """A Node builtin or a package installed in a node_modules directory
     at or above ``rel``'s; anything else (an alias such as "@/x" or a
-    tsconfig path) may name a project file we can't resolve."""
+    tsconfig path) may name a project file we can't resolve. A package
+    whose real location is project source (a workspace package linked into
+    node_modules) isn't external either."""
     if specifier.startswith("node:"):
         return True
     parts = specifier.split("/")
@@ -218,11 +220,19 @@ def is_external(root, rel, specifier):
         return True
     directory = os.path.dirname(rel)
     while True:
-        if os.path.isdir(os.path.join(root, directory, "node_modules", package)):
-            return True
+        installed = os.path.join(root, directory, "node_modules", package)
+        if os.path.isdir(installed):
+            return not is_project_source(root, installed)
         if not directory:
             return False
         directory = os.path.dirname(directory)
+
+
+def is_project_source(root, path):
+    """``path`` really lives inside the project, outside any node_modules."""
+    real = os.path.relpath(os.path.realpath(path), os.path.realpath(root))
+    parts = real.split(os.sep)
+    return parts[0] != ".." and "node_modules" not in parts
 
 
 def has_unresolved_import(root, rel):
