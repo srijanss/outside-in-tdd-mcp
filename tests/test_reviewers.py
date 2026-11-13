@@ -125,3 +125,21 @@ def test_fallback_models_must_be_a_list_of_non_empty_model_names(fallbacks):
         ReviewerConfigError, match="fallbackModels must be a list of non-empty model names"
     ):
         fallback_models(config, "openai/a")
+
+
+@pytest.mark.parametrize(
+    "message, expected",
+    [
+        ("429 You exceeded your current quota", True),
+        ("Your credit balance is too low", True),
+        ("Disk quota exceeded", False),
+        ("OSError: [Errno 122] Disk quota exceeded", False),
+        ("[Errno 28] No space left on device", False),
+        ("EACCES: permission denied, open '/x' (403)", False),
+        ("Read-only file system: quota.json", False),
+    ],
+)
+def test_local_system_errors_are_never_read_as_provider_quota_errors(message, expected):
+    from core.reviewers import is_quota_or_access_error
+
+    assert is_quota_or_access_error(message) is expected

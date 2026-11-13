@@ -94,7 +94,20 @@ QUOTA_OR_ACCESS_ERROR = re.compile(
 )
 
 
+# Operating-system failures on this machine (disk quota, full disk, file
+# permissions, errno reports). Another model would fail the same way, so
+# these never count as a provider quota/access error even if they also
+# contain one of the words above.
+LOCAL_SYSTEM_ERROR = re.compile(
+    r"disk quota|no space left|\[errno \d+\]|\be(?:acces|perm|dquot|nospc|rofs)\b|"
+    r"permission denied|read-only file system",
+    re.IGNORECASE,
+)
+
+
 def is_quota_or_access_error(message: str) -> bool:
+    if LOCAL_SYSTEM_ERROR.search(message):
+        return False
     return bool(QUOTA_OR_ACCESS_ERROR.search(message))
 
 

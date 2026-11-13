@@ -481,3 +481,32 @@ def test_only_provider_reported_quota_or_access_errors_fall_back(
 
     assert len(seen) == calls
     assert result["status"] == ("done" if calls == 2 else "failed")
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "pi exited 1 with no output: Disk quota exceeded",
+        "pi exited 1 with no output: OSError: [Errno 122] Disk quota exceeded",
+        "pi exited 1 with no output: [Errno 28] No space left on device",
+        "pi exited 1 with no output: EACCES: permission denied, open '/x' (403)",
+    ],
+)
+def test_a_local_failure_reported_by_the_reviewer_process_does_not_fall_back(
+    repo, stderr
+):
+    from core.reviewers import ReviewerProcessError
+
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    seen = []
+
+    def runner(argv, cwd, stdin):
+        seen.append(argv)
+        raise ReviewerProcessError(stderr)
+
+    manager = make_manager(repo, runner, config=FALLBACK_CONFIG)
+    result = manager.await_result(manager.start(f"{first}..HEAD"), timeout=10)
+
+    assert len(seen) == 1
+    assert result["status"] == "failed"
