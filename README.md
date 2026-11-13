@@ -399,7 +399,10 @@ the server running the reviewer and tracking the rounds. Used by the
   reviewer binary must be on `PATH`. `categories` limits the review to a
   non-empty subset of `bugs`, `missing-tests`, `security` and
   `performance` (all four when omitted): the reviewer is asked only for
-  those, and findings in any other category are dropped.
+  those, and findings in any other category are dropped. A subset gets
+  its own scope and round history, `review:<startSha>[bugs,security]`
+  (categories in that order), so reviewing other categories later covers
+  the whole range again.
 - `await_review(reviewId?, timeoutSeconds?)` — waits on `reviewId`, or on
   the most recently started review when it's omitted (an error if none
   was started). Returns `pending`, `failed` (with the

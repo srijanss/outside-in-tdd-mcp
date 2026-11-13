@@ -8,7 +8,7 @@ from core.claude_output import parse_claude_output
 from core.pi_events import parse_pi_events
 from core.review_decision import decide
 from core.review_findings import list_review_findings, record_review_finding
-from core.review_findings_parser import FindingsParseError, parse_findings
+from core.review_findings_parser import CATEGORIES, FindingsParseError, parse_findings
 from core.review_prompt import build_review_prompt
 from core.review_range import resolve_review_range
 from core.review_rounds import list_rounds, record_round
@@ -33,6 +33,17 @@ def _ledger(rounds: list[dict], live: list[dict]) -> list[dict]:
             entry["reason"] = current["reason"]
         ledger.append(entry)
     return ledger
+
+
+def review_scope(start: str, categories=None) -> str:
+    """The findings/rounds scope of a review of ``start``. Each category
+    subset keeps its own round history: rounds only review what changed since
+    the last round, so a subset sharing the full review's history would never
+    check the earlier commits for the categories it skipped."""
+    if categories is None or set(CATEGORIES) <= set(categories):
+        return f"review:{start}"
+    wanted = ",".join(c for c in CATEGORIES if c in categories)
+    return f"review:{start}[{wanted}]"
 
 
 class ReviewManager:
@@ -69,7 +80,7 @@ class ReviewManager:
         """categories: the subset of review categories to ask for and keep
         (all when None)."""
         resolved = resolve_review_range(range_spec, repo=self.project_root)
-        scope = f"review:{resolved['start']}"
+        scope = review_scope(resolved["start"], categories)
         # Rounds are chained (each diff starts at the last round's head), so
         # two reviews of one scope in flight would record out of order.
         with self._in_flight_lock:
@@ -85,7 +96,7 @@ class ReviewManager:
             )
             threading.Thread(
                 target=self._job,
-                args=(review_id, command, resolved, categories),
+                args=(review_id, command, resolved, scope, categories),
                 daemon=True,
             ).start()
         except BaseException:
@@ -132,18 +143,17 @@ class ReviewManager:
         self._reviews[review_id] = {"done": threading.Event(), "result": None}
         return review_id, command
 
-    def _job(self, review_id, command, resolved, categories) -> None:
+    def _job(self, review_id, command, resolved, scope, categories) -> None:
         review = self._reviews[review_id]
         try:
-            review["result"] = self._run(command, resolved, categories)
+            review["result"] = self._run(command, resolved, scope, categories)
         except Exception as exc:  # e.g. the findings store itself failing
             review["result"] = {"status": "failed", "error": str(exc)}
         finally:
-            self._release(f"review:{resolved['start']}")
+            self._release(scope)
             review["done"].set()
 
-    def _run(self, command, resolved, categories=None) -> dict:
-        scope = f"review:{resolved['start']}"
+    def _run(self, command, resolved, scope, categories) -> dict:
         # Any failure must end in a terminal "failed" result: a review that
         # errors out must never look like one that found nothing.
         try:

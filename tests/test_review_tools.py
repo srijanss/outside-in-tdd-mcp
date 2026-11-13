@@ -600,7 +600,8 @@ def test_start_review_with_categories_asks_for_and_keeps_only_those(repo):
     result = call(server, "await_review", timeoutSeconds=10)
 
     assert [f["id"] for f in result["findings"]] == ["token-in-log"]
-    stored = call(server, "list_review_findings", scope=f"review:{first}")
+    assert result["scope"] == f"review:{first}[security]"
+    stored = call(server, "list_review_findings", scope=result["scope"])
     assert [f["id"] for f in stored["findings"]] == ["token-in-log"]
     prompt = runner.stdins[0]
     assert "security" in prompt
@@ -616,3 +617,24 @@ def test_start_review_rejects_categories_outside_the_four(repo, categories):
     result = call(server, "start_review", range=f"{first}..HEAD", categories=categories)
 
     assert "bugs, missing-tests, security, performance" in result["error"]
+
+
+def test_reviews_for_other_categories_of_a_range_cover_the_whole_range(repo):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    runner = FakeRunner(findings_reply(), findings_reply(), findings_reply())
+    server = make_server(repo, runner)
+
+    # A security-only review does not stop a later bugs-only or full review
+    # of the same, unchanged range from checking all of it.
+    call(server, "start_review", range=f"{first}..HEAD", categories=["security"])
+    security = call(server, "await_review", timeoutSeconds=10)
+    call(server, "start_review", range=f"{first}..HEAD", categories=["bugs"])
+    bugs = call(server, "await_review", timeoutSeconds=10)
+    call(server, "start_review", range=f"{first}..HEAD")
+    full = call(server, "await_review", timeoutSeconds=10)
+
+    assert [r["status"] for r in (security, bugs, full)] == ["done"] * 3
+    assert all("+b.py" in prompt for prompt in runner.stdins)
+    assert [security["scope"], bugs["scope"], full["scope"]] == [
+        f"review:{first}[security]", f"review:{first}[bugs]", f"review:{first}"]

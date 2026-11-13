@@ -314,5 +314,28 @@ def test_a_review_for_some_categories_asks_for_and_keeps_only_those(repo):
     assert [f["id"] for f in result["findings"]] == ["token-in-log"]
     assert "missing-tests" not in stdins[0]
     rounds = json.loads((repo / ".tdd-review-rounds.json").read_text())
-    [round_entry] = rounds[f"review:{first}"]
+    [round_entry] = rounds[f"review:{first}[security]"]
     assert [f["id"] for f in round_entry["findings"]] == ["token-in-log"]
+
+
+@pytest.mark.parametrize(
+    "categories, suffix",
+    [
+        (None, ""),
+        (["security", "bugs"], "[bugs,security]"),
+        (["performance", "security", "missing-tests", "bugs"], ""),
+    ],
+)
+def test_each_category_subset_keeps_its_own_round_history(repo, categories, suffix):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    manager = make_manager(repo, lambda argv, cwd, stdin: findings_reply())
+
+    review_id = manager.start(f"{first}..HEAD", categories=categories)
+    result = manager.await_result(review_id, timeout=10)
+
+    # Subsets are named in canonical order; all four is the plain scope.
+    assert result["scope"] == f"review:{first}{suffix}"
+    assert manager.latest_review_scope == result["scope"]
+    rounds = json.loads((repo / ".tdd-review-rounds.json").read_text())
+    assert list(rounds) == [result["scope"]]
