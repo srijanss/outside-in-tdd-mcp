@@ -152,3 +152,38 @@ def test_setup_files_declared_in_an_imported_config_module_give_no_mapping(tmp_p
     )
     for changed in ("tests/init.ts", "config/global.ts", "config/shared.ts"):
         assert scope(tmp_path, "src/util.ts", changed) is None, changed
+
+
+def test_setup_imports_written_with_js_extensions_resolve_to_typescript_sources(
+    tmp_path,
+):
+    write(
+        tmp_path,
+        {
+            "src/util.ts": "",
+            "vitest.config.ts": "export default { test: { setupFiles: ['./tests/init.ts'] } }\n",
+            "tests/init.ts": "import { db } from './db.js'\nimport './dom.mjs'\n",
+            "tests/db.ts": "",
+            "tests/dom.mts": "",
+        },
+    )
+    for changed in ("tests/db.ts", "tests/dom.mts"):
+        assert scope(tmp_path, "src/util.ts", changed) is None, changed
+
+
+def test_setup_files_with_unresolvable_bare_imports_give_no_mapping(tmp_path):
+    files = {
+        "src/util.ts": "",
+        "vitest.config.ts": "export default { test: { setupFiles: ['./tests/init.ts'] } }\n",
+        "tests/init.ts": "import fs from 'node:fs'\nimport path from 'path'\n"
+        "import { expect } from 'vitest'\nimport '@testing-library/jest-dom'\n",
+        "node_modules/vitest/package.json": "{}",
+        "node_modules/@testing-library/jest-dom/package.json": "{}",
+    }
+    write(tmp_path, files)
+    # Builtins and installed packages are not part of the project.
+    assert scope(tmp_path, "src/util.ts") == "related src/util.ts"
+
+    # An alias (resolve.alias / tsconfig paths) may name any project file.
+    write(tmp_path, {"tests/init.ts": "import { seed } from '@/fixtures/seed'\n"})
+    assert scope(tmp_path, "src/util.ts") is None
