@@ -9,7 +9,8 @@ workspace crate that depends on it, directly or transitively — or
 whole suite):
   - each file maps to the deepest crate directory containing it; crates are
     the workspace members from the root Cargo.toml (globs and `exclude`
-    honored) plus the root package, if any;
+    honored), the root package, if any, and — as cargo does — every path
+    dependency of a crate that lies inside the workspace root;
   - the root Cargo.toml, Cargo.lock, .cargo/ and rust-toolchain files -> null;
   - docs (.md/.rst/.txt) are ignored;
   - any other file outside every crate, or an unreadable manifest -> null.
@@ -32,42 +33,86 @@ def load(path):
         return tomllib.load(handle)
 
 
-def crate_dirs(root, manifest):
-    """Relative crate directories ("" for the root package)."""
+def workspace_dependencies(manifest):
+    """The root's ``workspace.dependencies`` table."""
+    return manifest.get("workspace", {}).get("dependencies", {})
+
+
+def crate_manifests(root, manifest):
+    """Workspace crates as {relative dir: manifest} ("" for the root package).
+
+    Members are those listed in ``workspace.members`` (globs) plus, as in
+    cargo, every path dependency of a member that lies inside the workspace
+    root — transitively; ``exclude`` prefixes keep a path out of both.
+    """
     workspace = manifest.get("workspace", {})
+    inherited = workspace_dependencies(manifest)
     excluded = {
         os.path.normpath(path)
         for pattern in workspace.get("exclude", [])
         for path in glob.glob(pattern, root_dir=root)
     }
-    dirs = set()
+
+    def is_member(path):
+        return (
+            path != ""
+            and path != ".."
+            and not path.startswith("../")
+            and not any(path == e or path.startswith(e + "/") for e in excluded)
+            and os.path.isfile(os.path.join(root, path, "Cargo.toml"))
+        )
+
+    pending = [""] if "package" in manifest else []
     for pattern in workspace.get("members", []):
         for path in glob.glob(pattern, root_dir=root):
             path = os.path.normpath(path)
-            if path not in excluded and os.path.isfile(
-                os.path.join(root, path, "Cargo.toml")
-            ):
-                dirs.add(path)
-    if "package" in manifest:
-        dirs.add("")
-    return dirs
+            if is_member(path):
+                pending.append(path)
+    crates = {}
+    while pending:
+        crate = pending.pop()
+        if crate in crates:
+            continue
+        crates[crate] = (
+            manifest if crate == "" else load(os.path.join(root, crate, "Cargo.toml"))
+        )
+        for path in path_dependencies(root, crate, crates[crate], inherited):
+            if path not in crates and is_member(path):
+                pending.append(path)
+    return crates
 
 
-def dependency_names(manifest, inherited):
-    """Crate names ``manifest`` depends on; ``inherited`` is the root's
-    ``workspace.dependencies``, which ``{ workspace = true }`` entries take
-    their ``package`` rename from."""
+def dependency_specs(manifest, inherited):
+    """(key, spec, from_root) per dependency; ``{ workspace = true }``
+    entries are resolved against the root's ``workspace.dependencies``,
+    whose paths are relative to the root (``from_root``)."""
     tables = [manifest.get(name, {}) for name in DEPENDENCY_TABLES]
     for target in manifest.get("target", {}).values():
         tables.extend(target.get(name, {}) for name in DEPENDENCY_TABLES)
     for table in tables:
         for key, spec in table.items():
             if isinstance(spec, dict) and spec.get("workspace") is True:
-                spec = inherited[key]
-            if isinstance(spec, dict) and isinstance(spec.get("package"), str):
-                yield spec["package"]
+                yield key, inherited[key], True
             else:
-                yield key
+                yield key, spec, False
+
+
+def dependency_names(manifest, inherited):
+    """Crate names ``manifest`` depends on, honoring ``package`` renames."""
+    for key, spec, _ in dependency_specs(manifest, inherited):
+        if isinstance(spec, dict) and isinstance(spec.get("package"), str):
+            yield spec["package"]
+        else:
+            yield key
+
+
+def path_dependencies(root, crate, manifest, inherited):
+    """Root-relative directories of ``manifest``'s path dependencies."""
+    for _, spec, from_root in dependency_specs(manifest, inherited):
+        if isinstance(spec, dict) and isinstance(spec.get("path"), str):
+            base = os.path.join(root, "" if from_root else crate)
+            path = os.path.relpath(os.path.join(base, spec["path"]), root)
+            yield "" if path == "." else path
 
 
 def owning_crate(rel, dirs):
@@ -84,15 +129,12 @@ def scope(root, changed):
     if not os.path.isfile(root_manifest):
         return None
     manifest = load(root_manifest)
-    dirs = crate_dirs(root, manifest)
-    manifests = {
-        crate: manifest if crate == "" else load(os.path.join(root, crate, "Cargo.toml"))
-        for crate in dirs
-    }
+    manifests = crate_manifests(root, manifest)
+    dirs = set(manifests)
     names = {crate: manifests[crate]["package"]["name"] for crate in dirs}
     workspace_names = set(names.values())
     dependents = {name: set() for name in workspace_names}
-    inherited = manifest.get("workspace", {}).get("dependencies", {})
+    inherited = workspace_dependencies(manifest)
     for crate in dirs:
         for dependency in dependency_names(manifests[crate], inherited):
             if dependency in workspace_names:

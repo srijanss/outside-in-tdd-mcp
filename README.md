@@ -460,8 +460,9 @@ the server running the reviewer and tracking the rounds. Used by the
     `tests/` directory above it give `null`.
     The cargo adapter's `scope.sh` gives `-p <crate>` for each crate owning
     a changed file — workspace members from the root `Cargo.toml` (globs and
-    `exclude` honored) plus the root package — and every workspace crate
-    depending on one of them; the root `Cargo.toml`, `Cargo.lock`,
+    `exclude` honored), the root package and in-workspace path dependencies
+    — and every workspace crate depending on one of them; the root
+    `Cargo.toml`, `Cargo.lock`,
     `.cargo/`, toolchain files or a file outside every crate give `null`.
   - `recreateDb: true` — prepend `recreateDbArgs` (see the table above).
   - `advance: true` — also perform the `verify()` step in the same call when

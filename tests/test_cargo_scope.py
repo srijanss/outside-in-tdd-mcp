@@ -104,3 +104,29 @@ def test_an_inherited_renamed_workspace_dependency_resolves_to_the_real_crate(tm
         },
     )
     assert scope(tmp_path, "crates/core/src/lib.rs") == "-p cli -p core-lib"
+
+
+def test_unlisted_path_dependencies_inside_the_workspace_are_members_too(tmp_path):
+    write(
+        tmp_path,
+        {
+            "Cargo.toml": '[workspace]\nmembers = ["crates/core", "tools/cli"]\n'
+            'exclude = ["vendor"]\n',
+            "crates/core/Cargo.toml": '[package]\nname = "core-lib"\n',
+            "crates/core/src/lib.rs": "",
+            "tools/cli/Cargo.toml": '[package]\nname = "cli"\n[dependencies]\n'
+            'helper = { path = "../../libs/helper" }\n'
+            'shim = { path = "../../vendor/shim" }\n',
+            "tools/cli/src/main.rs": "",
+            # Implicit member, reached only through cli's path dependency.
+            "libs/helper/Cargo.toml": '[package]\nname = "helper"\n[dependencies]\n'
+            'core-lib = { path = "../../crates/core" }\n',
+            "libs/helper/src/lib.rs": "",
+            # Excluded: not a member even though cli depends on it by path.
+            "vendor/shim/Cargo.toml": '[package]\nname = "shim"\n',
+            "vendor/shim/src/lib.rs": "",
+        },
+    )
+    assert scope(tmp_path, "crates/core/src/lib.rs") == "-p cli -p core-lib -p helper"
+    assert scope(tmp_path, "libs/helper/src/lib.rs") == "-p cli -p helper"
+    assert scope(tmp_path, "vendor/shim/src/lib.rs") is None
