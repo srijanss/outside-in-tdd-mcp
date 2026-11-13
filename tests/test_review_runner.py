@@ -510,3 +510,23 @@ def test_a_local_failure_reported_by_the_reviewer_process_does_not_fall_back(
 
     assert len(seen) == 1
     assert result["status"] == "failed"
+
+
+def test_a_provider_permission_denied_error_falls_back_to_the_next_model(repo):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    replies = [
+        pi_error("403 Permission denied: model not available for this account"),
+        findings_reply(),
+    ]
+    seen = []
+
+    def runner(argv, cwd, stdin):
+        seen.append(argv)
+        return replies.pop(0)
+
+    manager = make_manager(repo, runner, config=FALLBACK_CONFIG)
+    result = manager.await_result(manager.start(f"{first}..HEAD"), timeout=10)
+
+    assert len(seen) == 2
+    assert result["status"] == "done"

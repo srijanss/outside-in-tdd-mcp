@@ -143,3 +143,18 @@ def test_local_system_errors_are_never_read_as_provider_quota_errors(message, ex
     from core.reviewers import is_quota_or_access_error
 
     assert is_quota_or_access_error(message) is expected
+
+
+@pytest.mark.parametrize(
+    "message, expected",
+    [
+        ("403 Permission denied: model not available for this account", True),
+        ("Error: permission denied for model openai/b (403)", True),
+        ("EACCES: permission denied, open '/x'", False),
+        ("PermissionError: [Errno 13] Permission denied: '/repo/.git' (403)", False),
+    ],
+)
+def test_a_provider_permission_denied_still_counts_as_an_access_error(message, expected):
+    from core.reviewers import is_quota_or_access_error
+
+    assert is_quota_or_access_error(message) is expected
