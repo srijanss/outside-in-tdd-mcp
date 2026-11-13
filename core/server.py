@@ -36,6 +36,7 @@ from core.adapter_contract import (
     DEFAULT_TIMEOUT_S,
     AdapterError,
     AdapterTimeoutError,
+    default_recreate_db_args,
     run_adapter,
     scope_for_changed_files,
 )
@@ -2117,10 +2118,15 @@ class TDDServer:
         if recreate_db:
             recreate_db_args = (config.get("recreateDbArgs") or "").strip()
             if not recreate_db_args:
+                recreate_db_args = default_recreate_db_args(
+                    adapter_path, self.project_root
+                )
+            if not recreate_db_args:
                 return {
                     "error": (
                         "recreateDb requires 'recreateDbArgs' to be set in "
-                        ".tdd-config.json (e.g. \"--create-db\")."
+                        ".tdd-config.json (e.g. \"--create-db\"); this "
+                        "adapter has no default for this project."
                     )
                 }
             run_target = f"{recreate_db_args} {run_target}"

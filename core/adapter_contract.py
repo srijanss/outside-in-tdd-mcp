@@ -195,29 +195,17 @@ def _kill_process_group(proc: subprocess.Popen) -> None:
         pass
 
 
-def scope_for_changed_files(
-    adapter_path: str,
-    project_root: str,
-    changed_files: list[str],
-    timeout_s: int = 30,
-) -> str | None:
-    """The adapter's own regression scope for ``changed_files``, or None.
-
-    Optional extension of the adapter contract: an executable ``scope.sh``
-    next to the adapter, called as ``scope.sh <project_root> <file>...``,
-    prints ``{"scope": "<test target expression>"}`` — or ``{"scope":
-    null}`` when it can't map the files. A missing, failing, hanging or
-    malformed script means no mapping, so the caller falls back to the
-    whole suite.
-    """
-    if not changed_files:
-        return None
-    script = os.path.join(os.path.dirname(adapter_path), "scope.sh")
+def _run_sibling_script(
+    adapter_path: str, name: str, args: list[str], timeout_s: int
+) -> dict | None:
+    """JSON object printed by the executable ``name`` next to the adapter,
+    or None when it is missing, fails, hangs or prints anything else."""
+    script = os.path.join(os.path.dirname(adapter_path), name)
     if not os.access(script, os.X_OK):
         return None
     try:
         proc = subprocess.Popen(
-            [script, project_root, *changed_files],
+            [script, *args],
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
@@ -239,7 +227,51 @@ def scope_for_changed_files(
         data = json.loads(stdout)
     except ValueError:
         return None
-    scope = data.get("scope") if isinstance(data, dict) else None
-    if not isinstance(scope, str) or not scope.strip():
+    return data if isinstance(data, dict) else None
+
+
+def _non_blank(value) -> str | None:
+    if not isinstance(value, str) or not value.strip():
         return None
-    return scope.strip()
+    return value.strip()
+
+
+def scope_for_changed_files(
+    adapter_path: str,
+    project_root: str,
+    changed_files: list[str],
+    timeout_s: int = 30,
+) -> str | None:
+    """The adapter's own regression scope for ``changed_files``, or None.
+
+    Optional extension of the adapter contract: an executable ``scope.sh``
+    next to the adapter, called as ``scope.sh <project_root> <file>...``,
+    prints ``{"scope": "<test target expression>"}`` — or ``{"scope":
+    null}`` when it can't map the files. A missing, failing, hanging or
+    malformed script means no mapping, so the caller falls back to the
+    whole suite.
+    """
+    if not changed_files:
+        return None
+    data = _run_sibling_script(
+        adapter_path, "scope.sh", [project_root, *changed_files], timeout_s
+    )
+    return _non_blank((data or {}).get("scope"))
+
+
+def default_recreate_db_args(
+    adapter_path: str, project_root: str, timeout_s: int = 30
+) -> str | None:
+    """The adapter's own runner arguments for rebuilding a cached test
+    database, used when ``recreateDbArgs`` is unset, or None.
+
+    Optional extension of the adapter contract: an executable
+    ``recreate-db.sh`` next to the adapter, called as ``recreate-db.sh
+    <project_root>``, prints ``{"args": "<runner arguments>"}`` — or
+    ``{"args": null}`` when the project has no such flag. A missing,
+    failing, hanging or malformed script means no default.
+    """
+    data = _run_sibling_script(
+        adapter_path, "recreate-db.sh", [project_root], timeout_s
+    )
+    return _non_blank((data or {}).get("args"))

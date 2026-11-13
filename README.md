@@ -219,6 +219,8 @@ core/               server.py, state_machine.py, adapter_contract.py — the "co
 adapters/
   pytest-adapter/    run.sh — the only language-specific piece for pytest
                      scope.sh — maps changed files to a regression scope
+                     recreate-db.sh — default recreateDbArgs (--create-db
+                     when the project has pytest-django)
   cargo-adapter/     run.sh, scope.sh — the same pair for cargo
   vitest-adapter/    run.sh, scope.sh — the same pair for vitest
 tests/               unit tests for state_machine.py (pytest)
@@ -356,7 +358,7 @@ adapter — `core/` has none. Only `adapterPath` is required.
 | `adapterPath` | yes | The adapter executable: an absolute path, a path relative to the project root, or a bare command name found next to the server's interpreter / on `PATH`. |
 | `defaultTestDir` | no | Whole-suite target used for the regression sweep when a base-level REFACTOR closes. Same shell-word syntax as a test target. |
 | `testNamePattern` | no | Regex whose **first capture group is a test's name** (matched line-by-line across the test file), used for the one-test-per-cycle warning on `write_test`. Defaults per `adapter` label (`pytest-adapter`, `vitest-adapter`, `cargo-adapter` — see below); set it to override, or for a custom adapter. No pattern and no built-in default = the warning is off. Must be a valid regex (checked at config load). |
-| `recreateDbArgs` | no | Extra runner arguments that `run_tests(recreateDb=true)` prepends to the test target, to rebuild a cached test database after a schema change (e.g. `--create-db` for pytest-django with `--reuse-db`). Unset = `recreateDb` returns a clear error. |
+| `recreateDbArgs` | no | Extra runner arguments that `run_tests(recreateDb=true)` prepends to the test target, to rebuild a cached test database after a schema change (e.g. `--create-db` for pytest-django with `--reuse-db`). Unset = the adapter's default from its optional `recreate-db.sh` (the bundled pytest adapter gives `--create-db` when pytest-django is installed); with no default, `recreateDb` returns a clear error. |
 | `adapterTimeoutSeconds` | no | Seconds a `run_tests` adapter call may take before it is killed (positive integer). Precedence: the `TDD_ADAPTER_TIMEOUT_S` env var, then this, then 120. A timed-out run returns an error and leaves the phase unchanged; the error carries `retryTimeoutSeconds` (double the timeout used, capped) to pass back as `run_tests(timeoutSeconds=...)`, or a `hint` when already at the cap. |
 | `maxAdapterTimeoutSeconds` | no | Upper bound (positive integer, default 600) applied to the resolved adapter timeout, whichever source it came from. A per-call `timeoutSeconds` above it is refused. |
 | `reviewers.default` | no | Defaults for `start_review`: `{"reviewer": "pi" \| "claude", "model": "...", "thinking": "off\|minimal\|low\|medium\|high\|xhigh\|max"}`. Resolution order is the per-call argument, then this, then the reviewer tool's own default. |
@@ -494,6 +496,14 @@ the server running the reviewer and tracking the rounds. Used by the
     package linked into `node_modules` counts as project source) or a
     relative path that names no file.
   - `recreateDb: true` — prepend `recreateDbArgs` (see the table above).
+    When it is unset, the adapter's optional `recreate-db.sh` (next to the
+    adapter executable), called as `recreate-db.sh <project_root>`, supplies
+    the default by printing `{"args": "<runner arguments>"}`, or
+    `{"args": null}` for none. Without the script — or when it fails, hangs
+    (30s) or prints anything else — `recreateDb` keeps the clear error.
+    The bundled pytest adapter's script gives `--create-db` when
+    pytest-django is installed: in the project's `.venv` when that has a
+    pytest (as `run.sh` prefers it), else in the Python running the script.
   - `advance: true` — also perform the `verify()` step in the same call when
     the result is exactly the expected checkpoint: an assertion failure in
     RED, or green coming out of IMPLEMENT. It never advances a missing-name

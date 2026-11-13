@@ -18,8 +18,10 @@ COPY adapters/ /mcp/adapters/
 # in the project's own venv instead of via Docker).
 RUN pip install --no-cache-dir "pytest" "pytest-json-report" /mcp
 COPY adapters/pytest-adapter/run.sh /adapters/pytest-adapter/run.sh
+COPY adapters/pytest-adapter/recreate-db.sh /adapters/pytest-adapter/recreate-db.sh
 COPY adapters/vitest-adapter/run.sh /adapters/vitest-adapter/run.sh
-RUN chmod +x /adapters/pytest-adapter/run.sh /adapters/vitest-adapter/run.sh
+RUN chmod +x /adapters/pytest-adapter/run.sh /adapters/pytest-adapter/recreate-db.sh \
+    /adapters/vitest-adapter/run.sh
 ENV TDD_PROJECT_ROOT=/app
 ENV TDD_CONFIG_PATH=/app/.tdd-config.json
 ENTRYPOINT ["outside-in-tdd-mcp"]

@@ -3529,3 +3529,50 @@ def test_record_review_finding_rejects_manual_fixed_status_for_review_scopes(tmp
     }
     findings = call(server, "list_review_findings", scope="review:abc123")
     assert [f["id"] for f in findings["findings"]] == ["missing-lock"]
+
+
+def with_recreate_db_script(tmp_path, args):
+    script = tmp_path / "recreate-db.sh"
+    script.write_text(
+        "#!/usr/bin/env python3\nimport json\n"
+        f"print(json.dumps({{'args': {args!r}}}))\n"
+    )
+    script.chmod(0o755)
+
+
+def test_run_tests_recreate_db_uses_the_adapters_default_args_when_none_are_configured(
+    tmp_path,
+):
+    server = make_recording_adapter_server(tmp_path)
+    with_recreate_db_script(tmp_path, "--create-db")
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
+
+    payload = call(server, "run_tests", recreateDb=True)
+
+    assert payload["testTarget"] == "--create-db own_test.py"
+    assert (tmp_path / "targets.log").read_text() == "--create-db own_test.py\n"
+
+
+def test_run_tests_recreate_db_prefers_configured_args_over_the_adapters_default(
+    tmp_path,
+):
+    server = make_recording_adapter_server(tmp_path, recreateDbArgs="--reuse-db=0")
+    with_recreate_db_script(tmp_path, "--create-db")
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
+
+    payload = call(server, "run_tests", recreateDb=True)
+
+    assert payload["testTarget"] == "--reuse-db=0 own_test.py"
+
+
+def test_run_tests_recreate_db_keeps_the_clear_error_when_the_adapter_has_no_default(
+    tmp_path,
+):
+    server = make_recording_adapter_server(tmp_path)
+    with_recreate_db_script(tmp_path, None)
+    call(server, "init_feature", featureName="f", testFile="own_test.py", targetFiles=[])
+
+    payload = call(server, "run_tests", recreateDb=True)
+
+    assert "recreateDbArgs" in payload["error"]
+    assert not (tmp_path / "targets.log").exists()

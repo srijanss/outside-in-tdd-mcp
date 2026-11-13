@@ -26,4 +26,4 @@ vitest-adapter-runner = "core.adapter_entrypoints:vitest_adapter_main"
 packages = ["core", "adapters"]
 
 [tool.setuptools.package-data]
-adapters = ["*/run.sh"]
+adapters = ["*/*.sh"]
