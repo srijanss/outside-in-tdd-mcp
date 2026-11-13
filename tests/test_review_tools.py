@@ -460,15 +460,29 @@ class GatedRunner:
 
     def __init__(self, *gated_replies):
         self.gated_replies = list(gated_replies)
+        self.entered = [threading.Event() for _ in gated_replies]
+        self.calls = 0
         self.lock = threading.Lock()
 
     def __call__(self, argv, cwd, stdin):
         with self.lock:
-            gate, reply = self.gated_replies.pop(0)
-        gate.wait(10)
+            index = self.calls
+            self.calls += 1
+        gate, reply = self.gated_replies[index]
+        self.entered[index].set()
+        if not gate.wait(10):
+            raise AssertionError(f"gate {index} was never opened")
         if isinstance(reply, BaseException):
             raise reply
         return reply
+
+    def started(self, index):
+        """Wait until call ``index`` has claimed its gate."""
+        assert self.entered[index].wait(10), f"call {index} never reached the runner"
+
+    def release_all(self):
+        for gate, _ in self.gated_replies:
+            gate.set()
 
 
 def test_the_default_findings_scope_is_the_latest_started_review_then_the_latest_round(
@@ -480,18 +494,25 @@ def test_the_default_findings_scope_is_the_latest_started_review_then_the_latest
     commit(repo, "d.py")
     other = {**FINDING, "id": "unchecked-input", "file": "c.py"}
     gate_a, gate_b, gate_c = threading.Event(), threading.Event(), threading.Event()
-    server = make_server(
-        repo,
-        GatedRunner(
-            (gate_a, findings_reply(FINDING)),
-            (gate_b, findings_reply(other)),
-            (gate_c, OSError("reviewer crashed")),
-        ),
+    runner = GatedRunner(
+        (gate_a, findings_reply(FINDING)),
+        (gate_b, findings_reply(other)),
+        (gate_c, OSError("reviewer crashed")),
     )
+    server = make_server(repo, runner)
+    try:
+        check_default_scope_order(server, runner, repo, first, second, third)
+    finally:
+        runner.release_all()
 
+
+def check_default_scope_order(server, runner, repo, first, second, third):
+    gate_a, gate_b, gate_c = (gate for gate, _ in runner.gated_replies)
     # Started A then B, but B finishes (and records its round) first.
     review_a = call(server, "start_review", range=f"{first}..HEAD")["reviewId"]
+    runner.started(0)
     review_b = call(server, "start_review", range=f"{second}..HEAD")["reviewId"]
+    runner.started(1)
     gate_b.set()
     assert call(server, "await_review", reviewId=review_b, timeoutSeconds=10)[
         "status"
