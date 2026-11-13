@@ -477,7 +477,7 @@ the server running the reviewer and tracking the rounds. Used by the
     `globalSetup`, …; configs under `node_modules`, build output, `vendor/`
     or `tmp/` aren't searched), one those import by relative path, an imported
     config module, a deleted source file or a file outside the project
-    give `null` — as does any file once a setup file imports an alias
+    give `null` — as does any file once a config module or setup file imports an alias
     (neither relative, a Node builtin nor an installed package).
   - `recreateDb: true` — prepend `recreateDbArgs` (see the table above).
   - `advance: true` — also perform the `verify()` step in the same call when

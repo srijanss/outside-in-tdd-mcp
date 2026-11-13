@@ -224,3 +224,18 @@ def test_documentation_names_count_only_at_the_root_or_a_package_root(tmp_path):
         "packages/web/docs/intro.md",
     ):
         assert scope(tmp_path, "src/util.ts", doc) == "related src/util.ts", doc
+
+
+def test_a_config_importing_an_alias_gives_no_mapping(tmp_path):
+    write(
+        tmp_path,
+        {
+            "src/util.ts": "",
+            "vitest.config.ts": "import { defineConfig } from 'vitest/config'\n"
+            "import shared from '~config/shared'\n"
+            "export default defineConfig(shared)\n",
+            "node_modules/vitest/package.json": "{}",
+        },
+    )
+    # The aliased module may declare setup files we can't see.
+    assert scope(tmp_path, "src/util.ts") is None

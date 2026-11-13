@@ -22,8 +22,9 @@ whole suite):
     runs around every test without being imported by one (configs under
     node_modules, dist/build/coverage/out/target, vendor/, tmp/ or dot
     directories aren't searched);
-  - any file, when such a setup file imports a specifier that is neither
-    relative, a Node builtin nor an installed package (an alias) -> null;
+  - any file, when a config module or setup file imports a specifier that
+    is neither relative, a Node builtin nor an installed package (an
+    alias) -> null;
   - a file outside the project root -> null.
 """
 
@@ -241,8 +242,9 @@ def setup_files(root):
     against the module's directory and the top-level config's; a change to
     one of them is global as well.
 
-    None when a setup file imports something that is neither relative nor
-    external: its dependencies can't be known."""
+    None when a config module or setup file imports something that is
+    neither relative nor external (an alias): what it brings in can't be
+    known."""
     configs = [(config, os.path.dirname(config)) for config in config_files(root)]
     modules = set()
     pending = []
@@ -251,6 +253,8 @@ def setup_files(root):
         if module in modules:
             continue
         modules.add(module)
+        if has_unresolved_import(root, module):
+            return None
         imported = set(relative_imports(root, module))
         configs.extend((path, config_dir) for path in imported)
         base = os.path.dirname(module)
