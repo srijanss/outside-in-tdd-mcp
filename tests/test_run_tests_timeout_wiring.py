@@ -70,3 +70,59 @@ def test_run_tests_advertises_timeout_seconds_and_retry_timeout_seconds():
 
     assert tool.inputSchema["properties"]["timeoutSeconds"]["type"] == "integer"
     assert "retryTimeoutSeconds" in tool.description
+
+
+def test_a_timeout_in_the_own_target_recheck_offers_a_retry_and_keeps_the_phase(
+    tmp_path, monkeypatch
+):
+    from core.adapter_contract import AdapterResult
+
+    seen = []
+    replies = [
+        AdapterResult(passed=1, failed=0),  # RED run: own target passes
+        AdapterResult(  # closing sweep: something failed
+            passed=0, failed=1, failures=[{"name": "t", "message": "m"}]
+        ),
+        None,  # own-target recheck: times out
+    ]
+
+    def fake_run_adapter(adapter_path, target, project_root, timeout_s=None):
+        seen.append(timeout_s)
+        reply = replies.pop(0)
+        if reply is None:
+            raise AdapterTimeoutError(
+                f"Adapter timed out after {timeout_s}s", timeout_s
+            )
+        return reply
+
+    monkeypatch.setattr(server_module, "run_adapter", fake_run_adapter)
+    adapter = tmp_path / "run.sh"
+    adapter.write_text("#!/bin/sh\n")
+    adapter.chmod(0o755)
+    config_path = tmp_path / ".tdd-config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "adapterPath": str(adapter),
+                "defaultTestDir": "tests/",
+                "adapterTimeoutSeconds": 60,
+                "maxAdapterTimeoutSeconds": 300,
+            }
+        )
+    )
+    server = server_module.TDDServer(
+        project_root=str(tmp_path), config_path=str(config_path)
+    )
+    server.call_tool(
+        "init_feature",
+        {"featureName": "t", "testFile": "tests/test_t.py", "targetFiles": []},
+    )
+    run_tests(server)
+    server.call_tool("verify", {})
+    assert server.sm.phase == "refactor"
+
+    result = run_tests(server, regressionScope="tests/", timeoutSeconds=100)
+
+    assert seen == [60, 100, 100]
+    assert result["retryTimeoutSeconds"] == 200
+    assert server.sm.phase == "refactor"
