@@ -638,3 +638,52 @@ def test_reviews_for_other_categories_of_a_range_cover_the_whole_range(repo):
     assert all("+b.py" in prompt for prompt in runner.stdins)
     assert [security["scope"], bugs["scope"], full["scope"]] == [
         f"review:{first}[security]", f"review:{first}[bugs]", f"review:{first}"]
+
+
+def pi_error(message):
+    events = [
+        {"type": "agent_start"},
+        {"type": "message_end", "message": {
+            "role": "assistant", "content": [], "stopReason": "error",
+            "errorMessage": message}},
+        {"type": "agent_settled", "aborted": False},
+    ]
+    return "\n".join(json.dumps(e) for e in events) + "\n"
+
+
+def test_a_review_that_hits_a_quota_error_falls_back_to_the_next_allowed_model(repo):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    runner = FakeRunner(
+        pi_error("429 You exceeded your current quota"), findings_reply(FINDING))
+    server = make_server(repo, runner)
+    (repo / ".tdd-config.json").write_text(json.dumps({
+        "adapterPath": "pytest-adapter-runner",
+        "reviewers": {
+            "default": {"model": "openai/a"},
+            "allowedModels": ["openai/a", "openai/c"],
+            # openai/b is not allowed, so it is skipped.
+            "fallbackModels": ["openai/b", "openai/c"],
+        },
+    }))
+
+    result = run_review(server, first)
+
+    assert result["status"] == "done"
+    assert [f["model"] for f in result["findings"]] == ["openai/c"]
+    assert ["openai/a" in runner.calls[0], "openai/c" in runner.calls[1]] == [True, True]
+    [round_entry] = call(server, "list_review_rounds", scope=f"review:{first}")["rounds"]
+    assert round_entry["model"] == "openai/c"
+
+
+def test_without_fallback_models_a_quota_error_still_fails_the_review(repo):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    runner = FakeRunner(pi_error("429 You exceeded your current quota"))
+    server = make_server(repo, runner)
+
+    result = run_review(server, first)
+
+    assert result["status"] == "failed"
+    assert "quota" in result["error"]
+    assert len(runner.calls) == 1

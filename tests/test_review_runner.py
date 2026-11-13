@@ -381,3 +381,63 @@ def test_switching_categories_between_rounds_reviews_each_subset_from_the_start(
         f"review:{first}": 2,
         f"review:{first}[performance]": 1,
     }
+
+
+def pi_error(message):
+    events = [
+        {"type": "message_end", "message": {
+            "role": "assistant", "content": [], "stopReason": "error",
+            "errorMessage": message}},
+        {"type": "agent_settled", "aborted": False},
+    ]
+    return "\n".join(json.dumps(e) for e in events) + "\n"
+
+
+def claude_error(message):
+    return json.dumps({"type": "result", "subtype": "success", "is_error": True,
+                       "result": message})
+
+
+FALLBACK_CONFIG = {"reviewers": {"default": {"model": "m/a"},
+                                 "fallbackModels": ["m/a", "m/b"]}}
+
+
+@pytest.mark.parametrize(
+    "reviewer, replies, expected",
+    [
+        # Only quota/access errors move on to the next model.
+        ("pi", [pi_error("connection reset by peer")],
+         {"status": "failed", "calls": ["m/a"], "error": ["connection reset"]}),
+        # Every model out of quota: the error names each attempt.
+        ("pi", [pi_error("429 rate limit exceeded"), pi_error("insufficient_quota")],
+         {"status": "failed", "calls": ["m/a", "m/b"],
+          "error": ["m/a", "rate limit", "m/b", "insufficient_quota"]}),
+        ("claude", [claude_error("Credit balance is too low"),
+                    json.dumps({"type": "result", "subtype": "success",
+                                "is_error": False, "terminal_reason": "completed",
+                                "result": '```json\n{"findings": []}\n```'})],
+         {"status": "done", "calls": ["m/a", "m/b"]}),
+        ("pi", [pi_error("403 Forbidden: no access to model m/a"),
+                pi_stream("not json"), findings_reply()],
+         {"status": "done", "calls": ["m/a", "m/b", "m/b"]}),
+    ],
+)
+def test_only_quota_or_access_errors_fall_back_to_the_next_model(
+    repo, reviewer, replies, expected
+):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    calls = []
+
+    def runner(argv, cwd, stdin):
+        calls.append(argv[argv.index("--model") + 1])
+        return replies.pop(0)
+
+    manager = make_manager(repo, runner, config=FALLBACK_CONFIG)
+    result = manager.await_result(
+        manager.start(f"{first}..HEAD", reviewer=reviewer), timeout=10)
+
+    assert result["status"] == expected["status"]
+    assert calls == expected["calls"]
+    for fragment in expected.get("error", []):
+        assert fragment in result["error"]

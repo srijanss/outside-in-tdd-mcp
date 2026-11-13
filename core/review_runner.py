@@ -12,7 +12,11 @@ from core.review_findings_parser import CATEGORIES, FindingsParseError, parse_fi
 from core.review_prompt import build_review_prompt
 from core.review_range import resolve_review_range
 from core.review_rounds import list_rounds, record_round
-from core.reviewers import build_reviewer_command
+from core.reviewers import (
+    build_reviewer_command,
+    fallback_models,
+    is_quota_or_access_error,
+)
 
 
 def _ledger(rounds: list[dict], live: list[dict]) -> list[dict]:
@@ -91,12 +95,12 @@ class ReviewManager:
                 )
             self._in_flight.add(scope)
         try:
-            review_id, command = self._prepare(
+            review_id, commands = self._prepare(
                 scope, resolved, reviewer, model, thinking, categories
             )
             threading.Thread(
                 target=self._job,
-                args=(review_id, command, resolved, scope, categories),
+                args=(review_id, commands, resolved, scope, categories),
                 daemon=True,
             ).start()
         except BaseException:
@@ -130,41 +134,48 @@ class ReviewManager:
             capture_output=True,
             text=True,
         ).stdout
-        command = build_reviewer_command(
-            build_review_prompt(
-                diff, ledger=_ledger(rounds, live), categories=categories
-            ),
-            reviewer=reviewer,
-            model=model,
-            thinking=thinking,
+        prompt = build_review_prompt(
+            diff, ledger=_ledger(rounds, live), categories=categories
+        )
+        primary = build_reviewer_command(
+            prompt, reviewer=reviewer, model=model, thinking=thinking,
             config=self.config,
         )
+        # Tried in order, moving on only after a quota/access error.
+        commands = [primary] + [
+            build_reviewer_command(
+                prompt, reviewer=primary["reviewer"], model=fallback,
+                thinking=primary["thinking"], config=self.config,
+            )
+            for fallback in fallback_models(self.config, primary["model"])
+        ]
         review_id = uuid.uuid4().hex
         self._reviews[review_id] = {"done": threading.Event(), "result": None}
-        return review_id, command
+        return review_id, commands
 
-    def _job(self, review_id, command, resolved, scope, categories) -> None:
+    def _job(self, review_id, commands, resolved, scope, categories) -> None:
         review = self._reviews[review_id]
         try:
-            review["result"] = self._run(command, resolved, scope, categories)
+            review["result"] = self._run(commands, resolved, scope, categories)
         except Exception as exc:  # e.g. the findings store itself failing
             review["result"] = {"status": "failed", "error": str(exc)}
         finally:
             self._release(scope)
             review["done"].set()
 
-    def _run(self, command, resolved, scope, categories) -> dict:
+    def _run(self, commands, resolved, scope, categories) -> dict:
         # Any failure must end in a terminal "failed" result: a review that
         # errors out must never look like one that found nothing.
-        try:
+        failures = []
+        for command in commands:
             try:
-                findings = self._review_once(command)
-            except FindingsParseError:
-                # Models occasionally botch the JSON; one retry is cheap.
-                # Pi-level failures are not retried.
-                findings = self._review_once(command)
-        except Exception as exc:
-            return {"status": "failed", "error": str(exc)}
+                findings = self._review_with_retry(command)
+                break
+            except Exception as exc:
+                failures.append(f"{command['model'] or 'default model'}: {exc}")
+                if command is commands[-1] or not is_quota_or_access_error(str(exc)):
+                    error = "; ".join(failures) if len(failures) > 1 else str(exc)
+                    return {"status": "failed", "error": error}
 
         tagged = [
             {
@@ -198,6 +209,14 @@ class ReviewManager:
             "findings": tagged,
             **decide(round_entry["round"], live),
         }
+
+    def _review_with_retry(self, command) -> list[dict]:
+        try:
+            return self._review_once(command)
+        except FindingsParseError:
+            # Models occasionally botch the JSON; one retry is cheap.
+            # Pi-level failures are not retried.
+            return self._review_once(command)
 
     def _review_once(self, command) -> list[dict]:
         output = self.runner(command["argv"], self.project_root, command["stdin"])

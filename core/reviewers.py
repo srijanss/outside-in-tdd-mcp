@@ -1,3 +1,6 @@
+import re
+
+
 class ReviewerConfigError(ValueError):
     pass
 
@@ -71,3 +74,31 @@ def build_reviewer_command(
         "argv": argv,
         "stdin": prompt,
     }
+
+
+# Errors meaning the model can't serve this caller right now (quota, rate
+# limit, billing, auth/access) rather than a problem with the review itself.
+QUOTA_OR_ACCESS_ERROR = re.compile(
+    r"quota|rate.?limit|\b429\b|\b40[13]\b|unauthori[sz]ed|forbidden|"
+    r"permission|access|billing|credit|usage.?limit|insufficient",
+    re.IGNORECASE,
+)
+
+
+def is_quota_or_access_error(message: str) -> bool:
+    return bool(QUOTA_OR_ACCESS_ERROR.search(message))
+
+
+def fallback_models(config: dict | None, model: str | None) -> list[str]:
+    """reviewers.fallbackModels to try, in order, after ``model`` fails on a
+    quota/access error: itself and models outside allowedModels skipped."""
+    reviewers = (config or {}).get("reviewers") or {}
+    allowed = reviewers.get("allowedModels")
+    fallbacks = []
+    for candidate in reviewers.get("fallbackModels") or []:
+        if candidate == model or candidate in fallbacks:
+            continue
+        if allowed and candidate not in allowed:
+            continue
+        fallbacks.append(candidate)
+    return fallbacks
