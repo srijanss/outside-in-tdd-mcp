@@ -479,7 +479,8 @@ the server running the reviewer and tracking the rounds. Used by the
     config module, a deleted source file or a file outside the project
     give `null` — as does any file once a config module or setup file imports an alias
     (neither relative, a Node builtin nor an installed package; a workspace
-    package linked into `node_modules` counts as project source).
+    package linked into `node_modules` counts as project source) or a
+    relative path that names no file.
   - `recreateDb: true` — prepend `recreateDbArgs` (see the table above).
   - `advance: true` — also perform the `verify()` step in the same call when
     the result is exactly the expected checkpoint: an assertion failure in

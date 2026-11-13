@@ -24,7 +24,8 @@ whole suite):
     directories aren't searched);
   - any file, when a config module or setup file imports a specifier that
     is neither relative, a Node builtin nor an installed package (an
-    alias, or a workspace package linked into node_modules) -> null;
+    alias, or a workspace package linked into node_modules) or a relative
+    path naming no file -> null;
   - a file outside the project root -> null.
 """
 
@@ -236,10 +237,16 @@ def is_project_source(root, path):
 
 
 def has_unresolved_import(root, rel):
-    return any(
-        not specifier.startswith(("./", "../")) and not is_external(root, rel, specifier)
-        for specifier in imports(root, rel)
-    )
+    """An import of ``rel``'s that is an alias, or a relative path naming
+    no file (a deleted dependency fails every test the module sets up)."""
+    base = os.path.dirname(rel)
+    for specifier in imports(root, rel):
+        if specifier.startswith(("./", "../")):
+            if resolve(root, base, specifier) is None:
+                return True
+        elif not is_external(root, rel, specifier):
+            return True
+    return False
 
 
 def setup_files(root):
@@ -253,8 +260,8 @@ def setup_files(root):
     one of them is global as well.
 
     None when a config module or setup file imports something that is
-    neither relative nor external (an alias): what it brings in can't be
-    known."""
+    neither relative nor external (an alias), or a relative path that
+    names no file: what it brings in can't be known."""
     configs = [(config, os.path.dirname(config)) for config in config_files(root)]
     visited = set()
     modules = set()

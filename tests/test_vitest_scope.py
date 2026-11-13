@@ -276,3 +276,18 @@ def test_a_config_module_shared_by_two_packages_resolves_against_each(tmp_path):
     # setup.ts is relative to each package's config, not the shared module.
     for changed in ("packages/a/setup.ts", "packages/b/setup.ts"):
         assert scope(tmp_path, "src/util.ts", changed) is None, changed
+
+
+def test_a_setup_file_importing_a_missing_relative_file_gives_no_mapping(tmp_path):
+    write(
+        tmp_path,
+        {
+            "src/util.ts": "",
+            "vitest.config.ts": "export default { test: { setupFiles: ['./tests/init.ts'] } }\n",
+            "tests/init.ts": "import { db } from './db.spec'\n",
+        },
+    )
+    # The deleted dependency looks like a skippable deleted test, but the
+    # setup file that imports it now fails for every test.
+    assert scope(tmp_path, "src/util.ts", "tests/db.spec.ts") is None
+    assert scope(tmp_path, "src/util.ts") is None
