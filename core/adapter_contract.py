@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 from dataclasses import dataclass, field
 from typing import Any
@@ -121,24 +122,31 @@ def run_adapter(
                     f"TDD_ADAPTER_TIMEOUT_S must be an integer, got {raw_timeout!r}"
                 ) from exc
     try:
-        proc = subprocess.run(
+        # Own session/process group, so a timeout can kill the whole tree —
+        # an adapter that forks (no exec) would otherwise leave its children
+        # running and holding the stdout pipe open.
+        proc = subprocess.Popen(
             [adapter_path, test_target, project_root],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=timeout_s,
+            start_new_session=True,
         )
     except FileNotFoundError as exc:
         raise AdapterError(f"Adapter not found at '{adapter_path}'") from exc
+    try:
+        raw_stdout, raw_stderr = proc.communicate(timeout=max(timeout_s, 0))
     except subprocess.TimeoutExpired as exc:
+        _kill_process_group(proc)
         raise AdapterError(
             f"Adapter timed out after {timeout_s}s: {adapter_path}"
         ) from exc
 
-    stdout = proc.stdout.strip()
+    stdout = raw_stdout.strip()
     if not stdout:
         raise AdapterError(
             f"Adapter produced no stdout output (exit code {proc.returncode}). "
-            f"stderr: {proc.stderr[-1000:]}"
+            f"stderr: {raw_stderr[-1000:]}"
         )
 
     try:
@@ -149,3 +157,12 @@ def run_adapter(
         ) from exc
 
     return AdapterResult.from_json(data)
+
+
+def _kill_process_group(proc: subprocess.Popen) -> None:
+    """SIGKILL the adapter's whole process group, then reap the adapter."""
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    proc.communicate()
