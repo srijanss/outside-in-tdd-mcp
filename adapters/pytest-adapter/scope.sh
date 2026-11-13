@@ -90,7 +90,12 @@ def main(argv):
     kept = sorted(t for t in targets if not covered(t, dirs))
     if not kept:
         return {"scope": None}
-    return {"scope": " ".join(shlex.quote(t) for t in kept)}
+    return {"scope": " ".join(shlex.quote(as_argument(t)) for t in kept)}
+
+
+def as_argument(target):
+    """A leading "./" keeps pytest from reading e.g. "--collect-only" as an option."""
+    return "./" + target if target.startswith("-") else target
 
 
 if __name__ == "__main__":

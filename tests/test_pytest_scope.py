@@ -79,3 +79,12 @@ def test_dependency_manifests_fall_back_to_the_whole_suite(tmp_path):
     ):
         assert scope(tmp_path, "pkg/tests/test_a.py", manifest) is None, manifest
     assert scope(tmp_path, "pkg/tests/test_a.py", "NOTES.txt") == "pkg/tests/test_a.py"
+
+
+def test_targets_starting_with_a_dash_are_not_read_as_pytest_options(tmp_path):
+    import shlex
+
+    tree(tmp_path, "--collect-only/conftest.py", "-k/tests/test_x.py")
+    assert shlex.split(
+        scope(tmp_path, "--collect-only/conftest.py", "-k/tests/test_x.py")
+    ) == ["./--collect-only", "./-k/tests/test_x.py"]
