@@ -151,3 +151,26 @@ def test_a_broken_member_manifest_falls_back_to_the_whole_suite(tmp_path):
             assert scope(tmp_path, "crates/core/src/lib.rs") is None
         finally:
             manifest.chmod(0o644)
+
+
+def test_an_inherited_path_dependency_is_discovered_relative_to_the_root(tmp_path):
+    write(
+        tmp_path,
+        {
+            "Cargo.toml": '[workspace]\nmembers = ["apps/web/server"]\n'
+            '[workspace.dependencies]\n'
+            'store = { path = "libs/store" }\n',
+            "apps/web/server/Cargo.toml": '[package]\nname = "server"\n'
+            '[dependencies]\nstore = { workspace = true }\n',
+            "apps/web/server/src/main.rs": "",
+            # Unlisted; reached only through the inherited, root-relative path.
+            "libs/store/Cargo.toml": '[package]\nname = "store"\n[dependencies]\n'
+            'codec = { path = "../codec" }\n',
+            "libs/store/src/lib.rs": "",
+            # Unlisted; reached transitively through store's own path dep.
+            "libs/codec/Cargo.toml": '[package]\nname = "codec"\n',
+            "libs/codec/src/lib.rs": "",
+        },
+    )
+    assert scope(tmp_path, "libs/store/src/lib.rs") == "-p server -p store"
+    assert scope(tmp_path, "libs/codec/src/lib.rs") == "-p codec -p server -p store"
