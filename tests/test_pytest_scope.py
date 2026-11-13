@@ -88,3 +88,13 @@ def test_targets_starting_with_a_dash_are_not_read_as_pytest_options(tmp_path):
     assert shlex.split(
         scope(tmp_path, "--collect-only/conftest.py", "-k/tests/test_x.py")
     ) == ["./--collect-only", "./-k/tests/test_x.py"]
+
+
+def test_lone_test_files_are_their_own_targets_and_round_trip_through_shlex(
+    tmp_path,
+):
+    import shlex
+
+    files = ["a/test_one.py", "b/two_test.py", "c d/test_sp ace.py", "e/test_it's.py"]
+    tree(tmp_path, *files)
+    assert shlex.split(scope(tmp_path, *files)) == sorted(files)
