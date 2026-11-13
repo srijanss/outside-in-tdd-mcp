@@ -64,3 +64,18 @@ def test_unmappable_or_config_changes_fall_back_to_the_whole_suite(tmp_path):
 def test_a_package_conftest_maps_to_its_directory(tmp_path):
     tree(tmp_path, "pkg/conftest.py", "pkg/tests/test_a.py")
     assert scope(tmp_path, "pkg/conftest.py", "pkg/tests/test_a.py") == "pkg"
+
+
+def test_dependency_manifests_fall_back_to_the_whole_suite(tmp_path):
+    tree(tmp_path, "pkg/tests/test_a.py")
+    for manifest in (
+        "requirements.txt",
+        "requirements-dev.txt",
+        "constraints.txt",
+        "setup.py",
+        "uv.lock",
+        "poetry.lock",
+        "Pipfile.lock",
+    ):
+        assert scope(tmp_path, "pkg/tests/test_a.py", manifest) is None, manifest
+    assert scope(tmp_path, "pkg/tests/test_a.py", "NOTES.txt") == "pkg/tests/test_a.py"

@@ -454,7 +454,8 @@ the server running the reviewer and tracking the rounds. Used by the
     The bundled pytest adapter's `scope.sh` maps each changed test file to
     itself and any other source file to the nearest `tests/` directory of
     its package (walking up from the file); `conftest.py` maps to its
-    directory, docs are ignored, and pytest config changes or a file with no
+    directory, docs are ignored, and pytest config or dependency manifest
+    (`requirements*.txt`, `setup.py`, `*.lock`, …) changes or a file with no
     `tests/` directory above it give `null`.
   - `recreateDb: true` — prepend `recreateDbArgs` (see the table above).
   - `advance: true` — also perform the `verify()` step in the same call when

@@ -7,19 +7,30 @@ Prints {"scope": "<space-separated pytest targets>"} or {"scope": null}
 when the files can't be mapped (the caller then runs the whole suite):
   - a test file (test_*.py / *_test.py) that still exists is its own target;
   - conftest.py maps to its own directory (null at the project root);
-  - pytest config (pyproject.toml, setup.cfg, pytest.ini, tox.ini) -> null;
+  - pytest config (pyproject.toml, setup.cfg, pytest.ini, tox.ini) and
+    dependency manifests (requirements*.txt, constraints*.txt, setup.py,
+    *.lock, Pipfile) -> null;
   - docs (.md/.rst/.txt) are ignored;
   - any other file maps to the nearest tests/ directory of its package:
     walking up from its directory, the first directory that is named
     "tests" or contains a "tests/" subdirectory.
 """
 
+import fnmatch
 import json
 import os
 import shlex
 import sys
 
 CONFIG_FILES = {"pyproject.toml", "setup.cfg", "pytest.ini", "tox.ini"}
+# Dependency manifests and lock files: a change can break anything.
+DEPENDENCY_PATTERNS = (
+    "requirements*.txt",
+    "constraints*.txt",
+    "setup.py",
+    "*.lock",
+    "Pipfile",
+)
 DOC_SUFFIXES = (".md", ".rst", ".txt")
 
 
@@ -47,7 +58,9 @@ def target_for(root, rel):
     rel = os.path.normpath(rel)
     name = os.path.basename(rel)
     rel_dir = os.path.dirname(rel)
-    if name in CONFIG_FILES:
+    if name in CONFIG_FILES or any(
+        fnmatch.fnmatch(name, pattern) for pattern in DEPENDENCY_PATTERNS
+    ):
         return None
     if name.endswith(DOC_SUFFIXES):
         return ""
