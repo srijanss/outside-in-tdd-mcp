@@ -426,3 +426,28 @@ def test_await_review_without_a_review_id_waits_on_the_latest_review(repo):
     call(server, "start_review", range=f"{first}..HEAD")
     result = call(server, "await_review", timeoutSeconds=10)
     assert (result["status"], result["findings"]) == ("done", [])
+
+
+def test_list_review_findings_without_a_scope_lists_the_latest_reviews_findings(repo):
+    first = commit(repo, "a.py")
+    second = commit(repo, "b.py")
+    commit(repo, "c.py")
+    other = {**FINDING, "id": "unchecked-input", "file": "c.py"}
+    server = make_server(
+        repo, FakeRunner(findings_reply(FINDING), findings_reply(other))
+    )
+
+    assert "start_review" in call(server, "list_review_findings")["error"]
+
+    call(server, "start_review", range=f"{first}..HEAD")
+    call(server, "await_review", timeoutSeconds=10)
+    call(server, "start_review", range=f"{second}..HEAD")
+    call(server, "await_review", timeoutSeconds=10)
+
+    listed = call(server, "list_review_findings")
+    assert listed["scope"] == f"review:{second}"
+    assert [f["id"] for f in listed["findings"]] == ["unchecked-input"]
+
+    # A restarted server finds the latest review from the recorded rounds.
+    restarted = make_server(repo, FakeRunner())
+    assert call(restarted, "list_review_findings")["scope"] == f"review:{second}"

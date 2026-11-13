@@ -39,6 +39,7 @@ from core.adapter_contract import (
     run_adapter,
     scope_for_changed_files,
 )
+from core.review_rounds import latest_scope as latest_review_scope
 from core.review_rounds import list_rounds as _list_review_rounds
 from core.review_runner import ReviewManager
 from core.review_findings import list_review_findings as _list_review_findings
@@ -428,11 +429,14 @@ TOOLS = [
     ),
     types.Tool(
         name="list_review_findings",
-        description="List persisted review findings for a feature or diff scope.",
+        description=(
+            "List persisted review findings for a feature or diff scope — "
+            "scope, or the latest review's scope when omitted."
+        ),
         inputSchema={
             "type": "object",
             "properties": {"scope": {"type": "string"}},
-            "required": ["scope"],
+            "required": [],
         },
     ),
     types.Tool(
@@ -1517,6 +1521,14 @@ class TDDServer:
             )
         return self._review_manager_instance
 
+    def _latest_review_scope(self) -> str | None:
+        """The scope of the review this server started last, else the one
+        whose round was recorded most recently."""
+        manager = self._review_manager_instance
+        if manager is not None and manager.latest_review_scope is not None:
+            return manager.latest_review_scope
+        return latest_review_scope(self.review_rounds_path)
+
     def _await_review(self, arguments: dict[str, Any]) -> list[types.TextContent]:
         manager = self._review_manager_instance
         review_id = arguments.get("reviewId") or (
@@ -1950,13 +1962,17 @@ class TDDServer:
                 return self._text({"scope": arguments["scope"], "rounds": rounds})
 
             if name == "list_review_findings":
+                scope = arguments.get("scope") or self._latest_review_scope()
+                if scope is None:
+                    return self._error(
+                        "No review has been run for this project — call "
+                        "start_review first, or pass a scope."
+                    )
                 with self._review_findings_lock():
                     findings = _list_review_findings(
-                        arguments["scope"], path=self.review_findings_path
+                        scope, path=self.review_findings_path
                     )
-                return self._text(
-                    {"scope": arguments["scope"], "findings": findings}
-                )
+                return self._text({"scope": scope, "findings": findings})
 
             if name == "list_research":
                 with self._research_lock():

@@ -49,3 +49,14 @@ def record_round(scope: str, entry: dict, path: str) -> dict:
 
 def list_rounds(scope: str, path: str) -> list[dict]:
     return _load(path).get(scope, [])
+
+
+def latest_scope(path: str, prefix: str = "review:") -> str | None:
+    """The ``prefix`` scope whose last round was recorded most recently."""
+    latest = None
+    for scope, rounds in _load(path).items():
+        if scope.startswith(prefix) and rounds:
+            recorded = rounds[-1].get("recordedAt", "")
+            if latest is None or recorded > latest[0]:
+                latest = (recorded, scope)
+    return latest[1] if latest else None

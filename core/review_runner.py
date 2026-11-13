@@ -58,6 +58,8 @@ class ReviewManager:
         self._reviews: dict[str, dict] = {}
         # What await_review waits on when it isn't given a reviewId.
         self.latest_review_id: str | None = None
+        # What list_review_findings lists when it isn't given a scope.
+        self.latest_review_scope: str | None = None
         self._in_flight: set[str] = set()
         self._in_flight_lock = threading.Lock()
 
@@ -84,6 +86,7 @@ class ReviewManager:
             self._release(scope)
             raise
         self.latest_review_id = review_id
+        self.latest_review_scope = scope
         return review_id
 
     def _release(self, scope) -> None:
