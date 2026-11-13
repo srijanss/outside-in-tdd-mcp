@@ -218,6 +218,7 @@ verified before clearing and what the response tells Claude happened.
 core/               server.py, state_machine.py, adapter_contract.py — the "core" package
 adapters/
   pytest-adapter/    run.sh — the only language-specific piece for pytest
+                     scope.sh — maps changed files to a regression scope
 tests/               unit tests for state_machine.py (pytest)
 pyproject.toml       packages core/, declares deps, installs the `outside-in-tdd-mcp` console script
 Dockerfile           bakes core + pytest adapter + pytest itself into one image
@@ -450,6 +451,11 @@ the server running the reviewer and tracking the rounds. Used by the
     expression>"}`, or `{"scope": null}` when it can't map them. Without the
     script — or when it fails, hangs (30s) or prints anything else —
     `suggestedScope` is `defaultTestDir`.
+    The bundled pytest adapter's `scope.sh` maps each changed test file to
+    itself and any other source file to the nearest `tests/` directory of
+    its package (walking up from the file); `conftest.py` maps to its
+    directory, docs are ignored, and pytest config changes or a file with no
+    `tests/` directory above it give `null`.
   - `recreateDb: true` — prepend `recreateDbArgs` (see the table above).
   - `advance: true` — also perform the `verify()` step in the same call when
     the result is exactly the expected checkpoint: an assertion failure in
