@@ -88,3 +88,19 @@ def test_no_root_manifest_or_a_malformed_one_gives_no_mapping(tmp_path):
     assert scope(tmp_path, "src/lib.rs") is None
     write(tmp_path, {"Cargo.toml": "[workspace\n"})
     assert scope(tmp_path, "src/lib.rs") is None
+
+
+def test_an_inherited_renamed_workspace_dependency_resolves_to_the_real_crate(tmp_path):
+    write(
+        tmp_path,
+        {
+            **WORKSPACE,
+            "Cargo.toml": '[workspace]\nmembers = ["crates/*", "tools/cli"]\n'
+            '[workspace.dependencies]\n'
+            'engine = { package = "core-lib", path = "crates/core" }\n',
+            "tools/cli/Cargo.toml": '[package]\nname = "cli"\n'
+            '[target.\'cfg(unix)\'.build-dependencies]\n'
+            'engine = { workspace = true }\n',
+        },
+    )
+    assert scope(tmp_path, "crates/core/src/lib.rs") == "-p cli -p core-lib"

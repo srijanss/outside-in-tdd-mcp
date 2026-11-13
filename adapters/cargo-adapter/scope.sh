@@ -53,12 +53,17 @@ def crate_dirs(root, manifest):
     return dirs
 
 
-def dependency_names(manifest):
+def dependency_names(manifest, inherited):
+    """Crate names ``manifest`` depends on; ``inherited`` is the root's
+    ``workspace.dependencies``, which ``{ workspace = true }`` entries take
+    their ``package`` rename from."""
     tables = [manifest.get(name, {}) for name in DEPENDENCY_TABLES]
     for target in manifest.get("target", {}).values():
         tables.extend(target.get(name, {}) for name in DEPENDENCY_TABLES)
     for table in tables:
         for key, spec in table.items():
+            if isinstance(spec, dict) and spec.get("workspace") is True:
+                spec = inherited[key]
             if isinstance(spec, dict) and isinstance(spec.get("package"), str):
                 yield spec["package"]
             else:
@@ -87,8 +92,9 @@ def scope(root, changed):
     names = {crate: manifests[crate]["package"]["name"] for crate in dirs}
     workspace_names = set(names.values())
     dependents = {name: set() for name in workspace_names}
+    inherited = manifest.get("workspace", {}).get("dependencies", {})
     for crate in dirs:
-        for dependency in dependency_names(manifests[crate]):
+        for dependency in dependency_names(manifests[crate], inherited):
             if dependency in workspace_names:
                 dependents[dependency].add(names[crate])
 
