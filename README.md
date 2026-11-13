@@ -219,6 +219,7 @@ core/               server.py, state_machine.py, adapter_contract.py — the "co
 adapters/
   pytest-adapter/    run.sh — the only language-specific piece for pytest
                      scope.sh — maps changed files to a regression scope
+  cargo-adapter/     run.sh, scope.sh — the same pair for cargo
 tests/               unit tests for state_machine.py (pytest)
 pyproject.toml       packages core/, declares deps, installs the `outside-in-tdd-mcp` console script
 Dockerfile           bakes core + pytest adapter + pytest itself into one image
@@ -457,6 +458,11 @@ the server running the reviewer and tracking the rounds. Used by the
     directory, docs are ignored, and pytest config or dependency manifest
     (`requirements*.txt`, `setup.py`, `*.lock`, …) changes or a file with no
     `tests/` directory above it give `null`.
+    The cargo adapter's `scope.sh` gives `-p <crate>` for each crate owning
+    a changed file — workspace members from the root `Cargo.toml` (globs and
+    `exclude` honored) plus the root package — and every workspace crate
+    depending on one of them; the root `Cargo.toml`, `Cargo.lock`,
+    `.cargo/`, toolchain files or a file outside every crate give `null`.
   - `recreateDb: true` — prepend `recreateDbArgs` (see the table above).
   - `advance: true` — also perform the `verify()` step in the same call when
     the result is exactly the expected checkpoint: an assertion failure in
