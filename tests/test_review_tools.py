@@ -3,6 +3,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 
 import pytest
 
@@ -451,3 +452,67 @@ def test_list_review_findings_without_a_scope_lists_the_latest_reviews_findings(
     # A restarted server finds the latest review from the recorded rounds.
     restarted = make_server(repo, FakeRunner())
     assert call(restarted, "list_review_findings")["scope"] == f"review:{second}"
+
+
+class GatedRunner:
+    """Each call blocks until its gate opens, then returns its reply (or
+    raises it, if it's an exception)."""
+
+    def __init__(self, *gated_replies):
+        self.gated_replies = list(gated_replies)
+        self.lock = threading.Lock()
+
+    def __call__(self, argv, cwd, stdin):
+        with self.lock:
+            gate, reply = self.gated_replies.pop(0)
+        gate.wait(10)
+        if isinstance(reply, BaseException):
+            raise reply
+        return reply
+
+
+def test_the_default_findings_scope_is_the_latest_started_review_then_the_latest_round(
+    repo,
+):
+    first = commit(repo, "a.py")
+    second = commit(repo, "b.py")
+    third = commit(repo, "c.py")
+    commit(repo, "d.py")
+    other = {**FINDING, "id": "unchecked-input", "file": "c.py"}
+    gate_a, gate_b, gate_c = threading.Event(), threading.Event(), threading.Event()
+    server = make_server(
+        repo,
+        GatedRunner(
+            (gate_a, findings_reply(FINDING)),
+            (gate_b, findings_reply(other)),
+            (gate_c, OSError("reviewer crashed")),
+        ),
+    )
+
+    # Started A then B, but B finishes (and records its round) first.
+    review_a = call(server, "start_review", range=f"{first}..HEAD")["reviewId"]
+    review_b = call(server, "start_review", range=f"{second}..HEAD")["reviewId"]
+    gate_b.set()
+    assert call(server, "await_review", reviewId=review_b, timeoutSeconds=10)[
+        "status"
+    ] == "done"
+    gate_a.set()
+    assert call(server, "await_review", reviewId=review_a, timeoutSeconds=10)[
+        "status"
+    ] == "done"
+
+    assert call(server, "list_review_findings")["scope"] == f"review:{second}"
+    restarted = make_server(repo, FakeRunner())
+    assert call(restarted, "list_review_findings")["scope"] == f"review:{first}"
+
+    # A started review that fails records no round: the live server still
+    # defaults to it, a restarted one to the latest recorded round.
+    call(server, "start_review", range=f"{third}..HEAD")
+    gate_c.set()
+    assert call(server, "await_review", timeoutSeconds=10)["status"] == "failed"
+    assert call(server, "list_review_findings") == {
+        "scope": f"review:{third}",
+        "findings": [],
+    }
+    restarted = make_server(repo, FakeRunner())
+    assert call(restarted, "list_review_findings")["scope"] == f"review:{first}"
