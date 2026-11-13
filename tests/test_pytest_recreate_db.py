@@ -2,16 +2,18 @@ import sys
 from pathlib import Path
 
 from core.adapter_contract import default_recreate_db_args
+from tests.isolated_python import isolated_python
 
 REPO = Path(__file__).resolve().parents[1]
 PYTEST_ADAPTER = str(REPO / "adapters" / "pytest-adapter" / "run.sh")
 
 
-def venv_pytest(root):
-    """A project .venv whose pytest runs on this test run's interpreter."""
+def venv_pytest(root, interpreter=sys.executable):
+    """A project .venv whose pytest runs on interpreter (by default this
+    test run's)."""
     pytest = root / ".venv" / "bin" / "pytest"
-    pytest.parent.mkdir(parents=True)
-    pytest.write_text(f"#!{sys.executable}\nraise SystemExit(0)\n")
+    pytest.parent.mkdir(parents=True, exist_ok=True)
+    pytest.write_text(f"#!{interpreter}\nraise SystemExit(0)\n")
     pytest.chmod(0o755)
 
 
@@ -29,7 +31,9 @@ def test_a_project_venv_with_pytest_django_defaults_to_create_db(
 
 
 def test_a_project_venv_without_pytest_django_has_no_default(tmp_path, monkeypatch):
-    venv_pytest(tmp_path)
+    # Not this run's interpreter: a pytest-django installed on the host
+    # must not leak into the "without" case.
+    venv_pytest(tmp_path, isolated_python(tmp_path / ".venv"))
     monkeypatch.delenv("PYTHONPATH", raising=False)
 
     assert default_recreate_db_args(PYTEST_ADAPTER, str(tmp_path)) is None

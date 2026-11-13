@@ -5,10 +5,10 @@ site-packages would miss it."""
 
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 from core.adapter_contract import default_recreate_db_args
+from tests.isolated_python import isolated_python
 
 PYTEST_ADAPTER = str(
     Path(__file__).resolve().parents[1] / "adapters" / "pytest-adapter" / "run.sh"
@@ -27,12 +27,8 @@ def pytest_script(path, interpreter):
     path.chmod(0o755)
 
 
-def real_venv(root, *flags):
-    subprocess.run(
-        [sys.executable, "-m", "venv", "--without-pip", *flags, str(root)],
-        check=True,
-    )
-    python = root / "bin" / "python"
+def real_venv(root):
+    python = isolated_python(root)
     pytest_script(root / "bin" / "pytest", python)
     purelib = subprocess.run(
         [str(python), "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"],
@@ -44,8 +40,10 @@ def real_venv(root, *flags):
 def test_without_a_project_venv_the_path_pytests_interpreter_decides(
     tmp_path, monkeypatch
 ):
+    # An isolated interpreter, not this run's: a pytest-django installed on
+    # the host must not leak into the "without" case.
     bin_dir = tmp_path / "bin"
-    pytest_script(bin_dir / "pytest", sys.executable)
+    pytest_script(bin_dir / "pytest", isolated_python(tmp_path / "host"))
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
     project = tmp_path / "project"
     project.mkdir()
