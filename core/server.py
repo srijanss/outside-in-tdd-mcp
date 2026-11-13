@@ -32,7 +32,7 @@ from mcp import types
 from mcp.server import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
 
-from core.adapter_contract import AdapterError, run_adapter
+from core.adapter_contract import DEFAULT_TIMEOUT_S, AdapterError, run_adapter
 from core.review_rounds import list_rounds as _list_review_rounds
 from core.review_runner import ReviewManager
 from core.review_findings import list_review_findings as _list_review_findings
@@ -602,6 +602,8 @@ def load_config(config_path: str) -> dict[str, Any]:
     _require_string(config, "defaultTestDir", config_path, required=False)
     _require_string(config, "recreateDbArgs", config_path, required=False)
     _require_string(config, "testNamePattern", config_path, required=False)
+    for field in ("adapterTimeoutSeconds", "maxAdapterTimeoutSeconds"):
+        _require_positive_int(config, field, config_path)
     if "testNamePattern" in config:
         try:
             re.compile(config["testNamePattern"])
@@ -629,6 +631,40 @@ def _require_string(
             if required
             else f"'{config_path}' field '{field}' must be a string."
         )
+
+
+def _require_positive_int(
+    config: dict[str, Any], field: str, config_path: str
+) -> None:
+    if field not in config:
+        return
+    value = config[field]
+    # bool is an int subclass — reject it explicitly.
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ConfigError(
+            f"'{config_path}' field '{field}' must be a positive integer "
+            f"(seconds), got {value!r}."
+        )
+
+
+DEFAULT_MAX_ADAPTER_TIMEOUT_S = 600
+
+
+def resolve_adapter_timeout(config: dict[str, Any]) -> int:
+    raw_env = os.environ.get("TDD_ADAPTER_TIMEOUT_S")
+    if raw_env is not None:
+        try:
+            timeout = int(raw_env)
+        except ValueError as exc:
+            raise AdapterError(
+                f"TDD_ADAPTER_TIMEOUT_S must be an integer, got {raw_env!r}"
+            ) from exc
+    else:
+        timeout = config.get("adapterTimeoutSeconds", DEFAULT_TIMEOUT_S)
+    return min(
+        timeout,
+        config.get("maxAdapterTimeoutSeconds", DEFAULT_MAX_ADAPTER_TIMEOUT_S),
+    )
 
 
 REVIEW_TIMEOUT_SECONDS = 1800
@@ -1933,7 +1969,10 @@ class TDDServer:
             run_target = f"{recreate_db_args} {run_target}"
 
         try:
-            result = run_adapter(adapter_path, run_target, self.project_root)
+            timeout_s = resolve_adapter_timeout(config)
+            result = run_adapter(
+                adapter_path, run_target, self.project_root, timeout_s=timeout_s
+            )
         except AdapterError as exc:
             return {"error": f"Adapter failed: {exc}"}
 
@@ -1944,7 +1983,9 @@ class TDDServer:
             # this cycle's own test or a pre-existing regression elsewhere,
             # only now that we actually need to know (rare path).
             try:
-                own_result = run_adapter(adapter_path, test_target, self.project_root)
+                own_result = run_adapter(
+                    adapter_path, test_target, self.project_root, timeout_s=timeout_s
+                )
             except AdapterError as exc:
                 return {"error": f"Adapter failed: {exc}"}
             own_target_broke = own_result.failed > 0
