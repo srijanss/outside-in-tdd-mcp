@@ -39,6 +39,7 @@ from core.adapter_contract import (
     run_adapter,
     scope_for_changed_files,
 )
+from core.review_range import default_review_range
 from core.review_rounds import latest_scope as latest_review_scope
 from core.review_rounds import list_rounds as _list_review_rounds
 from core.review_runner import ReviewManager
@@ -461,7 +462,8 @@ TOOLS = [
             "(pi by default) sees only the diff, never the implementer's "
             "reasoning, and its validated findings are saved under scope "
             "'review:<startSha>'. Poll with await_review. range is "
-            "'<sha>..HEAD'; reviewer/model/thinking override the "
+            "'<sha>..HEAD', or from the merge-base with the main branch "
+            "when omitted; reviewer/model/thinking override the "
             ".tdd-config.json 'reviewers.default' values."
         ),
         inputSchema={
@@ -472,7 +474,7 @@ TOOLS = [
                 "model": {"type": "string"},
                 "thinking": {"type": "string"},
             },
-            "required": ["range"],
+            "required": [],
         },
     ),
     types.Tool(
@@ -1567,7 +1569,8 @@ class TDDServer:
                     return self._error(manager)
                 try:
                     review_id = manager.start(
-                        arguments["range"],
+                        arguments.get("range")
+                        or default_review_range(self.project_root),
                         reviewer=arguments.get("reviewer"),
                         model=arguments.get("model"),
                         thinking=arguments.get("thinking"),

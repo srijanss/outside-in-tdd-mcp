@@ -537,3 +537,33 @@ def check_default_scope_order(server, runner, repo, first, second, third):
     }
     restarted = make_server(repo, FakeRunner())
     assert call(restarted, "list_review_findings")["scope"] == f"review:{first}"
+
+
+def test_start_review_without_a_range_reviews_from_the_main_branch_merge_base(repo):
+    base = commit(repo, "a.py")
+    git(repo, "branch", "-M", "main")
+    server = make_server(repo, FakeRunner(findings_reply(FINDING)))
+
+    # On main itself there is nothing past the merge-base to review.
+    assert "no new commits" in call(server, "start_review")["error"].lower()
+
+    git(repo, "checkout", "-q", "-b", "feature")
+    commit(repo, "b.py")
+    git(repo, "checkout", "-q", "main")
+    commit(repo, "main-only.py")  # moves main past the merge-base
+    git(repo, "checkout", "-q", "feature")
+    commit(repo, "c.py")
+
+    call(server, "start_review")
+    result = call(server, "await_review", timeoutSeconds=10)
+    assert result["scope"] == f"review:{base}"
+
+    # No commits since that round: refused, as with an explicit range.
+    assert "No new commits" in call(server, "start_review")["error"]
+
+
+def test_start_review_without_a_range_needs_a_main_branch(repo):
+    commit(repo, "a.py")
+    git(repo, "branch", "-M", "trunk-ish")
+    server = make_server(repo, FakeRunner())
+    assert "main branch" in call(server, "start_review")["error"]

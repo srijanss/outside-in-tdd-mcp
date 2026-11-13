@@ -388,8 +388,11 @@ An external model reviews committed work and Claude fixes the findings, with
 the server running the reviewer and tracking the rounds. Used by the
 `/implement-and-review` and `/review-and-fix` skills.
 
-- `start_review(range, reviewer?, model?, thinking?)` — `range` is
-  `<sha>..HEAD`. Runs the reviewer in the background (read-only, no MCP,
+- `start_review(range?, reviewer?, model?, thinking?)` — `range` is
+  `<sha>..HEAD`; when omitted it runs from the merge-base with the main
+  branch (`origin/HEAD`, else `main`, `master`, `origin/main`,
+  `origin/master`) to HEAD, and errors if there is no such branch or no
+  commits past it. Runs the reviewer in the background (read-only, no MCP,
   no repo instructions) and returns a `reviewId`. Refused while a TDD
   feature is in progress. Reviewers: `pi` (`pi -p --mode json`) and
   `claude` (headless `claude -p`; `thinking` maps to `--effort`). The
