@@ -39,6 +39,7 @@ from core.adapter_contract import (
     run_adapter,
     scope_for_changed_files,
 )
+from core.review_findings_parser import CATEGORIES as REVIEW_CATEGORIES
 from core.review_range import default_review_range
 from core.review_rounds import latest_scope as latest_review_scope
 from core.review_rounds import list_rounds as _list_review_rounds
@@ -464,7 +465,10 @@ TOOLS = [
             "'review:<startSha>'. Poll with await_review. range is "
             "'<sha>..HEAD', or from the merge-base with the main branch "
             "when omitted; reviewer/model/thinking override the "
-            ".tdd-config.json 'reviewers.default' values."
+            ".tdd-config.json 'reviewers.default' values. categories "
+            "limits the review to a non-empty subset of bugs, "
+            "missing-tests, security and performance (all four when "
+            "omitted); findings outside it are dropped."
         ),
         inputSchema={
             "type": "object",
@@ -473,6 +477,10 @@ TOOLS = [
                 "reviewer": {"type": "string"},
                 "model": {"type": "string"},
                 "thinking": {"type": "string"},
+                "categories": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": list(REVIEW_CATEGORIES)},
+                },
             },
             "required": [],
         },
@@ -1556,6 +1564,17 @@ class TDDServer:
     ) -> list[types.TextContent]:
         try:
             if name == "start_review":
+                categories = arguments.get("categories")
+                if categories is not None and (
+                    not isinstance(categories, list)
+                    or not categories
+                    or not set(categories) <= set(REVIEW_CATEGORIES)
+                ):
+                    return self._error(
+                        "categories must be a non-empty list drawn from "
+                        + ", ".join(REVIEW_CATEGORIES)
+                        + " (omit it to review all four)."
+                    )
                 in_progress = self.sm.status()["featureName"]
                 if in_progress:
                     return self._error(
@@ -1574,6 +1593,7 @@ class TDDServer:
                         reviewer=arguments.get("reviewer"),
                         model=arguments.get("model"),
                         thinking=arguments.get("thinking"),
+                        categories=categories,
                     )
                 except ValueError as exc:
                     return self._error(str(exc))

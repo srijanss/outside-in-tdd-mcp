@@ -295,3 +295,24 @@ def test_a_completed_review_is_recorded_as_a_round_but_a_failed_one_is_not(repo)
     assert (round_one["round"], round_one["start"], round_one["head"]) == (1, first, head)
     assert (round_one["reviewer"], round_one["model"]) == ("pi", "openai/m")
     assert round_one["findings"] == ok["findings"]
+
+
+def test_a_review_for_some_categories_asks_for_and_keeps_only_those(repo):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    leak = {**FINDING, "id": "token-in-log", "category": "security"}
+    stdins = []
+
+    def runner(argv, cwd, stdin):
+        stdins.append(stdin)
+        return findings_reply(FINDING, leak)
+
+    manager = make_manager(repo, runner)
+    review_id = manager.start(f"{first}..HEAD", categories=["security"])
+    result = manager.await_result(review_id, timeout=10)
+
+    assert [f["id"] for f in result["findings"]] == ["token-in-log"]
+    assert "missing-tests" not in stdins[0]
+    rounds = json.loads((repo / ".tdd-review-rounds.json").read_text())
+    [round_entry] = rounds[f"review:{first}"]
+    assert [f["id"] for f in round_entry["findings"]] == ["token-in-log"]

@@ -587,3 +587,32 @@ def test_the_default_range_only_counts_branches_not_tags_named_like_one(repo):
     assert call(server, "await_review", timeoutSeconds=10)["scope"] == (
         f"review:{tagged}"
     )
+
+
+def test_start_review_with_categories_asks_for_and_keeps_only_those(repo):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    leak = {**FINDING, "id": "token-in-log", "category": "security"}
+    runner = FakeRunner(findings_reply(FINDING, leak))
+    server = make_server(repo, runner)
+
+    call(server, "start_review", range=f"{first}..HEAD", categories=["security"])
+    result = call(server, "await_review", timeoutSeconds=10)
+
+    assert [f["id"] for f in result["findings"]] == ["token-in-log"]
+    stored = call(server, "list_review_findings", scope=f"review:{first}")
+    assert [f["id"] for f in stored["findings"]] == ["token-in-log"]
+    prompt = runner.stdins[0]
+    assert "security" in prompt
+    assert "missing-tests" not in prompt
+
+
+@pytest.mark.parametrize("categories", [[], ["style"], "security"])
+def test_start_review_rejects_categories_outside_the_four(repo, categories):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    server = make_server(repo, FakeRunner())
+
+    result = call(server, "start_review", range=f"{first}..HEAD", categories=categories)
+
+    assert "bugs, missing-tests, security, performance" in result["error"]

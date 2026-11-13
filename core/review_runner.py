@@ -63,7 +63,11 @@ class ReviewManager:
         self._in_flight: set[str] = set()
         self._in_flight_lock = threading.Lock()
 
-    def start(self, range_spec, reviewer=None, model=None, thinking=None) -> str:
+    def start(
+        self, range_spec, reviewer=None, model=None, thinking=None, categories=None
+    ) -> str:
+        """categories: the subset of review categories to ask for and keep
+        (all when None)."""
         resolved = resolve_review_range(range_spec, repo=self.project_root)
         scope = f"review:{resolved['start']}"
         # Rounds are chained (each diff starts at the last round's head), so
@@ -76,10 +80,12 @@ class ReviewManager:
                 )
             self._in_flight.add(scope)
         try:
-            review_id, command = self._prepare(scope, resolved, reviewer, model, thinking)
+            review_id, command = self._prepare(
+                scope, resolved, reviewer, model, thinking, categories
+            )
             threading.Thread(
                 target=self._job,
-                args=(review_id, command, resolved),
+                args=(review_id, command, resolved, categories),
                 daemon=True,
             ).start()
         except BaseException:
@@ -93,7 +99,7 @@ class ReviewManager:
         with self._in_flight_lock:
             self._in_flight.discard(scope)
 
-    def _prepare(self, scope, resolved, reviewer, model, thinking):
+    def _prepare(self, scope, resolved, reviewer, model, thinking, categories):
         with self.findings_lock():
             rounds = list_rounds(scope, path=self.rounds_path)
             live = list_review_findings(scope, path=self.findings_path)
@@ -114,7 +120,9 @@ class ReviewManager:
             text=True,
         ).stdout
         command = build_reviewer_command(
-            build_review_prompt(diff, ledger=_ledger(rounds, live)),
+            build_review_prompt(
+                diff, ledger=_ledger(rounds, live), categories=categories
+            ),
             reviewer=reviewer,
             model=model,
             thinking=thinking,
@@ -124,17 +132,17 @@ class ReviewManager:
         self._reviews[review_id] = {"done": threading.Event(), "result": None}
         return review_id, command
 
-    def _job(self, review_id, command, resolved) -> None:
+    def _job(self, review_id, command, resolved, categories) -> None:
         review = self._reviews[review_id]
         try:
-            review["result"] = self._run(command, resolved)
+            review["result"] = self._run(command, resolved, categories)
         except Exception as exc:  # e.g. the findings store itself failing
             review["result"] = {"status": "failed", "error": str(exc)}
         finally:
             self._release(f"review:{resolved['start']}")
             review["done"].set()
 
-    def _run(self, command, resolved) -> dict:
+    def _run(self, command, resolved, categories=None) -> dict:
         scope = f"review:{resolved['start']}"
         # Any failure must end in a terminal "failed" result: a review that
         # errors out must never look like one that found nothing.
@@ -156,6 +164,8 @@ class ReviewManager:
                 "model": command["model"],
             }
             for finding in findings
+            # Findings outside the requested categories were not asked for.
+            if categories is None or finding["category"] in categories
         ]
         with self.findings_lock():
             for finding in tagged:
