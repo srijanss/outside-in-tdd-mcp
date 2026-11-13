@@ -473,7 +473,8 @@ the server running the reviewer and tracking the rounds. Used by the
     fixtures), package manifests, lockfiles, `tsconfig*.json`, vite/vitest
     config, workspace or setup files, dotenv files, a file a vite/vitest
     config — or a config module it imports — references (`setupFiles`,
-    `globalSetup`, …), one those import by relative path, an imported
+    `globalSetup`, …; configs under `node_modules`, build output, `vendor/`
+    or `tmp/` aren't searched), one those import by relative path, an imported
     config module, a deleted source file or a file outside the project
     give `null` — as does any file once a setup file imports an alias
     (neither relative, a Node builtin nor an installed package).

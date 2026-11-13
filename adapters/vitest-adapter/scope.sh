@@ -18,7 +18,9 @@ whole suite):
     former importers can't be found;
   - a file a vite/vitest config references (setupFiles, globalSetup, ...)
     or one such a file imports by relative path, transitively -> null: it
-    runs around every test without being imported by one;
+    runs around every test without being imported by one (configs under
+    node_modules, dist/build/coverage/out/target, vendor/, tmp/ or dot
+    directories aren't searched);
   - any file, when such a setup file imports a specifier that is neither
     relative, a Node builtin nor an installed package (an alias) -> null;
   - a file outside the project root -> null.
@@ -71,7 +73,18 @@ CONFIG_PATTERNS = (
     "vitest.workspace.*",
     "vitest.projects.*",
 )
-SKIPPED_DIRS = {"node_modules"}
+# Dependencies, build output and caches: never where a project's own
+# config lives, and often large.
+SKIPPED_DIRS = {
+    "build",
+    "coverage",
+    "dist",
+    "node_modules",
+    "out",
+    "target",
+    "tmp",
+    "vendor",
+}
 SOURCE_EXTENSIONS = (".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs")
 STRING_LITERAL = re.compile(r"""(['"`])([^'"`\\\n]+)\1""")
 IMPORT = re.compile(

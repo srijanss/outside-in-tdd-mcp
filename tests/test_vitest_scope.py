@@ -187,3 +187,14 @@ def test_setup_files_with_unresolvable_bare_imports_give_no_mapping(tmp_path):
     # An alias (resolve.alias / tsconfig paths) may name any project file.
     write(tmp_path, {"tests/init.ts": "import { seed } from '@/fixtures/seed'\n"})
     assert scope(tmp_path, "src/util.ts") is None
+
+
+def test_build_output_and_vendored_trees_are_not_searched_for_configs(tmp_path):
+    files = {"src/util.ts": "", "src/setup.ts": ""}
+    for tree in ("dist", "build", "coverage", "out", "target", "vendor", "tmp"):
+        files[f"{tree}/pkg/vitest.config.js"] = (
+            "export default { test: { setupFiles: ['../../src/setup.ts'] } }\n"
+        )
+    write(tmp_path, files)
+    # Copies of a config in build output don't make src/setup.ts global.
+    assert scope(tmp_path, "src/setup.ts") == "related src/setup.ts"
