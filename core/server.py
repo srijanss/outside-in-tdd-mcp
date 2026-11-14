@@ -608,26 +608,41 @@ DEFAULT_TEST_NAME_PATTERNS: dict[str, str] = {
 MAX_FAILURE_MESSAGE_CHARS = 500
 
 
-def _scope_paths(scope: str, project_root: str) -> list[str]:
-    """The path tokens of a scope expression, normalised relative to
-    project_root (options such as "-k" are dropped)."""
+def _split_scope(scope: str, project_root: str) -> tuple[list[str], set[str]]:
+    """A scope expression's path tokens, normalised relative to
+    project_root, and its other tokens (options and their values). The
+    token right after a bare option (e.g. "smoke" in "-k smoke") counts as
+    the option's value unless it exists on disk — with no adapter
+    knowledge, an option's arity is unknown."""
     paths = []
+    others = set()
+    after_bare_option = False
     for token in shlex.split(scope):
         if token.startswith("-"):
+            after_bare_option = "=" not in token
+            others.add(token)
             continue
+        if after_bare_option:
+            after_bare_option = False
+            if not os.path.exists(os.path.join(project_root, token)):
+                others.add(token)
+                continue
         if os.path.isabs(token):
             token = os.path.relpath(token, project_root)
         paths.append(os.path.normpath(token))
-    return paths
+    return paths, others
 
 
 def _covers_full_suite(scope: str, default_test_dir: str, project_root: str) -> bool:
     """Whether running scope would run every path in default_test_dir: each
-    of them is named in scope, or sits under a directory scope names."""
+    of them is named in scope, or sits under a directory scope names, and
+    scope adds no option (a filter such as "-k smoke") of its own."""
     try:
-        scope_paths = _scope_paths(scope, project_root)
-        suite_paths = _scope_paths(default_test_dir, project_root)
+        scope_paths, scope_others = _split_scope(scope, project_root)
+        suite_paths, suite_others = _split_scope(default_test_dir, project_root)
     except ValueError:
+        return False
+    if not scope_others <= suite_others:
         return False
     return bool(suite_paths) and all(
         any(

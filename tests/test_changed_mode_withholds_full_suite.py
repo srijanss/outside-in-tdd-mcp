@@ -85,6 +85,38 @@ def test_changed_mode_refuses_other_spellings_of_the_full_suite(tmp_path):
         assert server.sm.phase == "refactor", name
 
 
+def test_an_option_value_in_default_test_dir_is_not_a_suite_path(tmp_path):
+    for name, default_test_dir in {
+        "separate-value": "tests -k smoke",
+        "joined-value": "tests --deselect=tests/test_slow.py",
+        "option-first": "-k smoke tests",
+    }.items():
+        server = changed_project(tmp_path / name, defaultTestDir=default_test_dir)
+        (tmp_path / name / "proj" / "tests").mkdir()
+        before = adapter_calls(tmp_path / name)
+
+        payload = sweep(server, "tests")
+
+        assert "gate" in payload.get("error", ""), name
+        assert adapter_calls(tmp_path / name) == before, name
+
+
+def test_a_bare_option_value_that_is_no_path_is_skipped(tmp_path):
+    from core.server import _covers_full_suite
+
+    (tmp_path / "tests").mkdir()
+
+    assert _covers_full_suite("tests", "tests -k smoke", str(tmp_path))
+    assert _covers_full_suite("tests", "-x tests", str(tmp_path))
+
+
+def test_a_scope_with_its_own_options_counts_as_narrowed(tmp_path):
+    from core.server import _covers_full_suite
+
+    for scope in ("tests -k smoke", "tests --deselect=tests/test_slow.py"):
+        assert not _covers_full_suite(scope, "tests", str(tmp_path)), scope
+
+
 def test_changed_mode_still_runs_narrower_scopes_and_skip(tmp_path):
     for name, scope, expected in [
         ("file", "tests/test_x.py", "tests/test_x.py"),
