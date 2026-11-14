@@ -39,8 +39,10 @@ def pytest_candidates(project_root):
 
 
 def shebang(executable):
-    """The interpreter argv from an executable script's #! line (or the
-    python a pip /bin/sh trampoline execs), or None."""
+    """(interpreter argv, launched) from an executable script's #! line,
+    or None. For a pip /bin/sh trampoline the argv is the python it execs
+    and launched is True: /bin/sh itself starts, so run.sh runs it (and
+    sees it fail) rather than falling back to the next pytest."""
     if not os.access(executable, os.X_OK):
         return None
     try:
@@ -55,17 +57,18 @@ def shebang(executable):
     if argv == ["/bin/sh"]:
         trampoline = TRAMPOLINE.match(second.decode(errors="replace"))
         if trampoline:
-            return [trampoline.group(1) or trampoline.group(2)]
-    return argv or None
+            return [trampoline.group(1) or trampoline.group(2)], True
+    return (argv, False) if argv else None
 
 
 def has_pytest_django(project_root):
     """Whether pytest_django imports for the first pytest that runs, or
     None when no pytest candidate runs at all."""
     for candidate in pytest_candidates(project_root):
-        interpreter = shebang(candidate)
-        if interpreter is None:
+        found = shebang(candidate)
+        if found is None:
             continue
+        interpreter, launched = found
         try:
             probe = subprocess.run(
                 [*interpreter, "-c", PROBE],
@@ -75,6 +78,8 @@ def has_pytest_django(project_root):
                 timeout=PROBE_TIMEOUT_S,
             )
         except OSError:
+            if launched:
+                return False
             continue
         return probe.returncode == 0
     return None

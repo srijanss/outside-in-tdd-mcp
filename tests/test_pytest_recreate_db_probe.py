@@ -4,6 +4,7 @@ or the PATH pytest when that one can't run — whether pytest_django is
 importable."""
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -61,7 +62,12 @@ def test_asks_the_venv_pytests_own_interpreter(tmp_path, monkeypatch):
     assert default_recreate_db_args(PYTEST_ADAPTER, str(project)) == "--create-db"
 
 
-def test_a_sh_trampoline_to_a_missing_interpreter_falls_back(tmp_path, monkeypatch):
+def test_a_sh_trampoline_to_a_missing_interpreter_does_not_fall_back(
+    tmp_path, monkeypatch
+):
+    """The trampoline itself starts (and exits 127), so run.sh stops there
+    rather than trying the PATH pytest; the default must not come from the
+    PATH pytest either."""
     project = tmp_path / "project"
     trampoline = project / ".venv" / "bin" / "pytest"
     trampoline.parent.mkdir(parents=True)
@@ -71,7 +77,12 @@ def test_a_sh_trampoline_to_a_missing_interpreter_falls_back(tmp_path, monkeypat
         "' '''\n"
     )
     trampoline.chmod(0o755)
+    (project / "test_ok.py").write_text("def test_ok():\n    assert True\n")
     path_pytest(tmp_path, monkeypatch, sys.executable)
     monkeypatch.setenv("PYTHONPATH", importable_django_plugin(tmp_path / "site"))
 
-    assert default_recreate_db_args(PYTEST_ADAPTER, str(project)) == "--create-db"
+    ran = subprocess.run(
+        [PYTEST_ADAPTER, "test_ok.py", str(project)], capture_output=True, text=True
+    )
+    assert (ran.returncode, ran.stdout) == (1, "")  # no fallback: no report
+    assert default_recreate_db_args(PYTEST_ADAPTER, str(project)) is None

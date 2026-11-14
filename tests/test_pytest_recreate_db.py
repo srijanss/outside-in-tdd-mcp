@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -45,3 +46,26 @@ def test_the_recreate_db_script_ships_with_the_package_and_image():
 
     assert '"*/*.sh"' in pyproject
     assert "/adapters/pytest-adapter/recreate-db.sh" in dockerfile
+
+
+def test_a_venv_pytest_that_starts_but_cannot_reach_python_is_not_skipped(
+    tmp_path, monkeypatch
+):
+    """pip's /bin/sh trampoline starts even when the python it execs is
+    gone, so like run.sh the helper must not move on to the PATH pytest."""
+    pytest = tmp_path / ".venv" / "bin" / "pytest"
+    pytest.parent.mkdir(parents=True)
+    pytest.write_text(
+        "#!/bin/sh\n'\'\'exec' \"/nonexistent dir/python\" \"$0\" \"$@\"\n' \'\'\'\n"
+    )
+    pytest.chmod(0o755)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "pytest").write_text(f"#!{sys.executable}\nraise SystemExit(0)\n")
+    (bin_dir / "pytest").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    (tmp_path / "site" / "pytest_django").mkdir(parents=True)
+    (tmp_path / "site" / "pytest_django" / "__init__.py").write_text("")
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path / "site"))
+
+    assert default_recreate_db_args(PYTEST_ADAPTER, str(tmp_path)) is None
