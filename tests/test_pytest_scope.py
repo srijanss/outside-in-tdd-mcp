@@ -309,6 +309,22 @@ def test_changed_mode_ignores_tests_inside_virtualenvs_and_node_modules(tmp_path
     assert scope(tmp_path, "shop/cart.py", mode="changed") == "tests/test_cart.py"
 
 
+def test_changed_mode_resolves_relative_imports_into_a_namespace_package(
+    tmp_path,
+):
+    write(
+        tmp_path,
+        {
+            "shop/cart.py": "",
+            "shop/tests/__init__.py": "",
+            "shop/tests/test_cart.py": "from ..cart import Cart\n",
+        },
+    )
+    assert scope(tmp_path, "shop/cart.py", mode="changed") == (
+        "shop/tests/test_cart.py"
+    )
+
+
 def test_changed_mode_ignores_relative_imports_beyond_the_top_package(tmp_path):
     write(
         tmp_path,

@@ -191,24 +191,33 @@ def imported_modules(root, rel):
     except (OSError, SyntaxError, ValueError):
         # Unreadable or unparseable: skipped, not a reason to give up.
         return frozenset()
-    package = module_name(root, rel).split(".")[:-1]
+    # The test's own package under each name it may be imported as (its
+    # directories above may be namespace packages or sys.path entries).
+    packages = [name.split(".")[:-1] for name in module_names(root, rel)]
     names = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             names.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
-            if node.level:
-                if node.level > len(package):
-                    continue  # beyond the top-level package: an ImportError
-                base = package[: len(package) - (node.level - 1)]
-                if node.module:
-                    base = base + node.module.split(".")
-            else:
-                base = node.module.split(".")
-            names.add(".".join(base))
-            # "from a import b" may import the module a.b.
-            names.update(".".join(base + [alias.name]) for alias in node.names)
+            for base in import_bases(node, packages):
+                names.add(".".join(base))
+                # "from a import b" may import the module a.b.
+                names.update(".".join(base + [alias.name]) for alias in node.names)
     return frozenset(names)
+
+
+def import_bases(node, packages):
+    """The absolute module an ImportFrom names, under each candidate package
+    of the importing file (one for an absolute import)."""
+    if not node.level:
+        return [node.module.split(".")]
+    bases = []
+    for package in packages:
+        if node.level > len(package):
+            continue  # beyond the top-level package: an ImportError
+        base = package[: len(package) - (node.level - 1)]
+        bases.append(base + (node.module.split(".") if node.module else []))
+    return bases
 
 
 @functools.lru_cache(maxsize=None)
