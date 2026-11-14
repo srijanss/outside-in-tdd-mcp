@@ -1,6 +1,7 @@
 {
   "adapter": "pytest-adapter",
   "adapterPath": "pytest-adapter-runner",
+  "regressionScopeDefault": "changed",
   "defaultTestDir": "tests/",
   "reviewers": {
     "default": {
