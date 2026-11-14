@@ -14,9 +14,21 @@ when the files can't be mapped (the caller then runs the whole suite):
   - any other file maps to the nearest tests/ directory of its package:
     walking up from its directory, the first directory that is named
     "tests" or contains a "tests/" subdirectory.
+
+With TDD_SCOPE_MODE=changed it prints only the tests closest to the change:
+the changed test files that still exist, a changed conftest.py's directory,
+and every test file that directly imports a changed .py module (import a.b,
+from a.b import x, from a import b, relative imports). Test files are found
+under defaultTestDir's directories, else in every tests/ directory; one that
+doesn't parse is skipped. Transitive importers and re-exports are not
+followed. Other non-.py files add nothing; if nothing is added at all it
+prints {"scope": null, "empty": true}. Everything above that prints null
+still does.
 """
 
+import ast
 import fnmatch
+import functools
 import json
 import os
 import shlex
@@ -32,6 +44,7 @@ DEPENDENCY_PATTERNS = (
     "Pipfile",
 )
 DOC_SUFFIXES = (".md", ".rst", ".txt")
+SKIP_DIRS = {"node_modules", "__pycache__", "site-packages"}
 
 
 def is_test_file(name):
@@ -53,14 +66,19 @@ def nearest_tests_dir(root, rel_dir):
         current = os.path.dirname(current)
 
 
+def affects_everything(name):
+    """pytest config and dependency manifests: a change can break anything."""
+    return name in CONFIG_FILES or any(
+        fnmatch.fnmatch(name, pattern) for pattern in DEPENDENCY_PATTERNS
+    )
+
+
 def target_for(root, rel):
     """A pytest target for one changed file; "" to skip it, None if unmappable."""
     rel = os.path.normpath(rel)
     name = os.path.basename(rel)
     rel_dir = os.path.dirname(rel)
-    if name in CONFIG_FILES or any(
-        fnmatch.fnmatch(name, pattern) for pattern in DEPENDENCY_PATTERNS
-    ):
+    if affects_everything(name):
         return None
     if name.endswith(DOC_SUFFIXES):
         return ""
@@ -69,6 +87,121 @@ def target_for(root, rel):
     if is_test_file(name):
         return rel if os.path.isfile(os.path.join(root, rel)) else ""
     return nearest_tests_dir(root, rel_dir)
+
+
+def changed_mode():
+    return os.environ.get("TDD_SCOPE_MODE") == "changed"
+
+
+def module_name(root, rel):
+    """The dotted module name of a source file, walking up its packages."""
+    parts = [os.path.splitext(os.path.basename(rel))[0]]
+    current = os.path.dirname(rel)
+    while current and os.path.isfile(os.path.join(root, current, "__init__.py")):
+        parts.insert(0, os.path.basename(current))
+        current = os.path.dirname(current)
+    return ".".join(parts)
+
+
+def default_test_dirs(root):
+    """defaultTestDir's directories inside the project, from the server's
+    config (TDD_CONFIG_PATH, else .tdd-config.json); [] when unset."""
+    path = os.environ.get("TDD_CONFIG_PATH") or ".tdd-config.json"
+    try:
+        with open(os.path.join(root, path), encoding="utf-8") as handle:
+            value = json.load(handle).get("defaultTestDir")
+        entries = shlex.split(value)
+    except (OSError, ValueError, AttributeError, TypeError):
+        return []
+    dirs = []
+    for entry in entries:
+        rel = os.path.normpath(entry)
+        if os.path.isabs(rel) or rel == ".." or rel.startswith("../"):
+            continue
+        if os.path.isdir(os.path.join(root, rel)):
+            dirs.append("" if rel == "." else rel)
+    return dirs
+
+
+def skipped_dir(path):
+    """Dot dirs, caches, installed packages and virtualenvs hold no project tests."""
+    name = os.path.basename(path)
+    return (
+        name.startswith(".")
+        or name in SKIP_DIRS
+        or os.path.isfile(os.path.join(path, "pyvenv.cfg"))
+    )
+
+
+@functools.lru_cache(maxsize=None)
+def test_files(root):
+    """Test files under defaultTestDir's directories, else every tests/ dir
+    (walked once per run)."""
+    return tuple(sorted(set(walk_test_files(root))))
+
+
+def walk_test_files(root):
+    configured = default_test_dirs(root)
+    for start in configured or [""]:
+        for dirpath, dirnames, filenames in os.walk(os.path.join(root, start)):
+            dirnames[:] = [
+                d for d in dirnames if not skipped_dir(os.path.join(dirpath, d))
+            ]
+            rel_dir = os.path.relpath(dirpath, root)
+            if not configured and "tests" not in rel_dir.split(os.sep):
+                continue
+            for name in filenames:
+                if is_test_file(name):
+                    yield os.path.normpath(os.path.join(rel_dir, name))
+
+
+@functools.lru_cache(maxsize=None)
+def imported_modules(root, rel):
+    """Every module name one test file imports (parsed once per run)."""
+    try:
+        with open(os.path.join(root, rel), encoding="utf-8") as handle:
+            tree = ast.parse(handle.read(), filename=rel)
+    except (OSError, SyntaxError, ValueError):
+        # Unreadable or unparseable: skipped, not a reason to give up.
+        return frozenset()
+    package = module_name(root, rel).split(".")[:-1]
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                if node.level > len(package):
+                    continue  # beyond the top-level package: an ImportError
+                base = package[: len(package) - (node.level - 1)]
+                if node.module:
+                    base = base + node.module.split(".")
+            else:
+                base = node.module.split(".")
+            names.add(".".join(base))
+            # "from a import b" may import the module a.b.
+            names.update(".".join(base + [alias.name]) for alias in node.names)
+    return frozenset(names)
+
+
+def importers(root, module):
+    return {
+        rel for rel in test_files(root) if module in imported_modules(root, rel)
+    }
+
+
+def changed_target_for(root, rel):
+    """Changed mode's targets for one changed file; None if unmappable."""
+    rel = os.path.normpath(rel)
+    name = os.path.basename(rel)
+    if name == "conftest.py" or is_test_file(name) or affects_everything(name):
+        target = target_for(root, rel)
+        if target is None:
+            return None
+        return {target} if target else set()
+    if not name.endswith(".py"):
+        return set()
+    return importers(root, module_name(root, rel))
 
 
 def covered(path, dirs):
@@ -81,15 +214,19 @@ def main(argv):
     root, changed = argv[0], argv[1:]
     targets = set()
     for rel in changed:
-        target = target_for(root, rel)
-        if target is None:
+        if changed_mode():
+            found = changed_target_for(root, rel)
+        else:
+            target = target_for(root, rel)
+            found = None if target is None else {target} - {""}
+        if found is None:
             return {"scope": None}
-        if target:
-            targets.add(target)
+        targets |= found
     dirs = {t for t in targets if os.path.isdir(os.path.join(root, t))}
     kept = sorted(t for t in targets if not covered(t, dirs))
     if not kept:
-        return {"scope": None}
+        # Changed mode: nothing beyond the cycle's own target needs to run.
+        return {"scope": None, "empty": True} if changed_mode() else {"scope": None}
     return {"scope": " ".join(shlex.quote(as_argument(t)) for t in kept)}
 
 
