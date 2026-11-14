@@ -27,9 +27,20 @@ whole suite):
     alias, or a workspace package linked into node_modules) or a relative
     path naming no file -> null;
   - a file outside the project root -> null.
+
+With TDD_SCOPE_MODE=changed it prints plain paths instead, which run.sh
+runs as `vitest run <file>...`: the changed test files that still exist,
+plus every test file (*.test.*, *.spec.*, or under __tests__/, skipping
+the directories configs aren't searched in) that directly imports a
+changed file by relative path (import, export ... from, import(),
+require). Transitive importers are not followed. A changed file no test
+imports adds nothing; if nothing is added at all it prints
+{"scope": null, "empty": true}. Everything above that prints null still
+does.
 """
 
 import fnmatch
+import functools
 import json
 import os
 import re
@@ -185,12 +196,41 @@ def resolve(root, base, specifier):
     return None
 
 
-def config_files(root):
+@functools.lru_cache(maxsize=None)
+def project_files(root):
+    """Every file of the project's own, outside dependencies, build output,
+    caches and dot directories (walked once per run)."""
+    found = []
     for directory, dirs, files in os.walk(root):
         dirs[:] = [d for d in dirs if d not in SKIPPED_DIRS and not d.startswith(".")]
         for name in files:
-            if any(fnmatch.fnmatch(name, pattern) for pattern in CONFIG_PATTERNS):
-                yield os.path.relpath(os.path.join(directory, name), root)
+            found.append(os.path.relpath(os.path.join(directory, name), root))
+    return tuple(found)
+
+
+def config_files(root):
+    for rel in project_files(root):
+        name = os.path.basename(rel)
+        if any(fnmatch.fnmatch(name, pattern) for pattern in CONFIG_PATTERNS):
+            yield rel
+
+
+@functools.lru_cache(maxsize=None)
+def importer_index(root):
+    """Root-relative path -> the test files importing it directly by
+    relative path (built once per run). Test files whose real location is
+    outside the project (a symlink out of it) aren't read."""
+    real_root = os.path.realpath(root)
+    index = {}
+    for rel in project_files(root):
+        if not (rel.endswith(SOURCE_EXTENSIONS) and is_test_file(rel)):
+            continue
+        real = os.path.realpath(os.path.join(root, rel))
+        if os.path.commonpath([real_root, real]) != real_root:
+            continue
+        for found in relative_imports(root, rel):
+            index.setdefault(found, set()).add(rel)
+    return index
 
 
 def imports(root, rel):
@@ -301,7 +341,13 @@ def as_argument(target):
     return "./" + target if target.startswith("-") else target
 
 
-def scope(root, changed):
+def changed_mode():
+    return os.environ.get("TDD_SCOPE_MODE") == "changed"
+
+
+def scope(root, changed, narrow=False):
+    """The scope expression; None for no mapping, "" (narrow only) when
+    nothing needs to run."""
     targets = set()
     setup = ()
     for path in changed:
@@ -314,18 +360,24 @@ def scope(root, changed):
                 setup = setup_files(root)
             if setup is None or target in setup:
                 return None
-            targets.add(target)
+            if not narrow or is_test_file(target):
+                targets.add(target)
+            else:
+                targets |= importer_index(root).get(target, set())
     if not targets:
-        return None
-    return "related " + " ".join(
-        shlex.quote(as_argument(target)) for target in sorted(targets)
-    )
+        return "" if narrow else None
+    quoted = " ".join(shlex.quote(as_argument(target)) for target in sorted(targets))
+    return quoted if narrow else "related " + quoted
 
 
 def main(argv):
     if len(argv) < 2:
         return {"scope": None}
-    return {"scope": scope(argv[0], argv[1:])}
+    result = scope(argv[0], argv[1:], narrow=changed_mode())
+    if result == "":
+        # Changed mode: nothing beyond the cycle's own target needs to run.
+        return {"scope": None, "empty": True}
+    return {"scope": result}
 
 
 if __name__ == "__main__":

@@ -24,8 +24,10 @@ def write(root, files):
         target.write_text(body)
 
 
-def scope(root, *changed):
-    return scope_for_changed_files(VITEST_ADAPTER, str(root), list(changed))
+def scope(root, *changed, mode=None):
+    return scope_for_changed_files(
+        VITEST_ADAPTER, str(root), list(changed), mode=mode
+    )
 
 
 def test_changed_files_map_to_a_sorted_quoted_related_target(tmp_path):
@@ -291,3 +293,90 @@ def test_a_setup_file_importing_a_missing_relative_file_gives_no_mapping(tmp_pat
     # setup file that imports it now fails for every test.
     assert scope(tmp_path, "src/util.ts", "tests/db.spec.ts") is None
     assert scope(tmp_path, "src/util.ts") is None
+
+
+def test_changed_mode_runs_direct_importers_but_not_transitive_ones(tmp_path):
+    write(
+        tmp_path,
+        {
+            "src/price.ts": "export const price = 1\n",
+            "src/cart.ts": "import { price } from './price'\n",
+            "src/price.test.ts": "import { price } from './price'\n",
+            "src/cart.test.ts": "import { cart } from './cart'\n",
+            "tests/__tests__/total.ts": 'const { price } = require("../../src/price.ts")\n',
+        },
+    )
+    assert scope(tmp_path, "src/price.ts", mode="changed") == (
+        "src/price.test.ts tests/__tests__/total.ts"
+    )
+
+
+def test_changed_mode_counts_re_exports_and_dynamic_imports(tmp_path):
+    write(
+        tmp_path,
+        {
+            "src/price.ts": "",
+            "src/barrel.spec.ts": "export * from './price'\n",
+            "src/lazy.test.ts": "const m = await import('./price.js')\n",
+            "src/other.test.ts": "import './unrelated'\n",
+        },
+    )
+    assert scope(tmp_path, "src/price.ts", mode="changed") == (
+        "src/barrel.spec.ts src/lazy.test.ts"
+    )
+
+
+def test_changed_mode_resolves_a_directory_import_to_its_index(tmp_path):
+    write(
+        tmp_path,
+        {
+            "src/shop/index.ts": "",
+            "src/shop.test.ts": "import { shop } from './shop'\n",
+        },
+    )
+    assert scope(tmp_path, "src/shop/index.ts", mode="changed") == "src/shop.test.ts"
+
+
+def test_changed_mode_still_gives_no_mapping_for_a_changed_setup_file(tmp_path):
+    write(
+        tmp_path,
+        {
+            "src/util.ts": "",
+            "src/util.test.ts": "import './util'\n",
+            "vitest.config.ts": "export default { test: { setupFiles: ['./tests/init.ts'] } }\n",
+            "tests/init.ts": "",
+        },
+    )
+    assert scope(tmp_path, "src/util.ts", "tests/init.ts", mode="changed") is None
+    assert scope(tmp_path, "src/util.ts", "package.json", mode="changed") is None
+    assert scope(tmp_path, "src/util.ts", "src/gone.ts", mode="changed") is None
+
+
+def test_changed_mode_gives_empty_when_no_test_imports_the_changed_file(tmp_path):
+    write(
+        tmp_path,
+        {
+            "src/util.ts": "",
+            "src/orphan.ts": "",
+            "src/util.test.ts": "import './util'\n",
+        },
+    )
+    assert scope(tmp_path, "src/orphan.ts", mode="changed") == "skip"
+    # A changed test file that still exists runs itself; a deleted one adds nothing.
+    assert scope(
+        tmp_path, "src/orphan.ts", "src/util.test.ts", "src/gone.test.ts", mode="changed"
+    ) == "src/util.test.ts"
+
+
+def test_changed_mode_ignores_test_files_under_skipped_directories(tmp_path):
+    files = {"src/util.ts": "", "src/util.test.ts": "import './util'\n"}
+    for tree in ("node_modules/pkg", "dist", ".cache", "vendor/lib"):
+        files[f"{tree}/util.test.ts"] = "import '../src/util'\nimport '../../src/util'\n"
+    write(tmp_path, files)
+    assert scope(tmp_path, "src/util.ts", mode="changed") == "src/util.test.ts"
+
+
+def test_without_the_mode_the_scope_is_still_related(tmp_path):
+    write(tmp_path, {"src/util.ts": "", "src/util.test.ts": "import './util'\n"})
+    assert scope(tmp_path, "src/util.ts") == "related src/util.ts"
+    assert scope(tmp_path, "src/util.ts", mode="broad") == "related src/util.ts"
