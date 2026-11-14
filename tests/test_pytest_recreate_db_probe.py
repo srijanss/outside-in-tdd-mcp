@@ -52,10 +52,12 @@ def test_falls_back_to_the_path_pytest_when_the_venv_one_cannot_run(
     tmp_path, monkeypatch
 ):
     project = tmp_path / "project"
-    fake_pytest(project / ".venv" / "bin" / "pytest", interpreter="/nonexistent/sh")
-    path_pytest(tmp_path, monkeypatch, plugins=())
+    fake_pytest(
+        project / ".venv" / "bin" / "pytest", plugins=(), interpreter="/nonexistent/sh"
+    )
+    path_pytest(tmp_path, monkeypatch)  # only it lists pytest-django
 
-    assert default_recreate_db_args(PYTEST_ADAPTER, str(project)) is None
+    assert default_recreate_db_args(PYTEST_ADAPTER, str(project)) == "--create-db"
 
 
 def test_a_non_executable_venv_pytest_also_falls_back(tmp_path, monkeypatch):
