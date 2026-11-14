@@ -608,7 +608,9 @@ DEFAULT_TEST_NAME_PATTERNS: dict[str, str] = {
 MAX_FAILURE_MESSAGE_CHARS = 500
 
 
-def _split_scope(scope: str, project_root: str) -> tuple[list[str], set[str]]:
+def _split_scope(
+    scope: str, project_root: str
+) -> tuple[list[str], set[str | tuple[str, str]]]:
     """A scope expression's path tokens, normalised relative to
     project_root, and its other tokens (options and their values). With no
     adapter knowledge an option's arity is unknown, so the token right
@@ -616,28 +618,30 @@ def _split_scope(scope: str, project_root: str) -> tuple[list[str], set[str]]:
     value, unless the scope names no other path ("-x tests") or the token
     is spelled as a path ("tests/unit" in "-x tests/unit tests/integration",
     "./tests", "tests/", an absolute path) and exists — a bare word that
-    happens to exist on disk ("smoke") stays an option value."""
+    happens to exist on disk ("smoke") stays an option value. A token read
+    as a path keeps its pairing with the option before it among the other
+    tokens, so "--ignore tests/unit" and "--ignore tests/integration"
+    differ."""
     paths = []
-    after_option = []
-    others = set()
-    after_bare_option = False
+    after_option: list[tuple[str, str]] = []
+    others: set[str | tuple[str, str]] = set()
+    bare_option = None
     for token in shlex.split(scope):
         if token.startswith("-"):
-            after_bare_option = "=" not in token
+            bare_option = None if "=" in token else token
             others.add(token)
-        elif after_bare_option:
-            after_bare_option = False
-            after_option.append(token)
+        elif bare_option is not None:
+            after_option.append((bare_option, token))
+            bare_option = None
         else:
             paths.append(token)
-    if not paths:
-        paths = after_option
-    else:
-        for token in after_option:
-            if _is_existing_path_spelling(token, project_root):
-                paths.append(token)
-            else:
-                others.add(token)
+    names_no_path = not paths
+    for option, token in after_option:
+        if names_no_path or _is_existing_path_spelling(token, project_root):
+            paths.append(token)
+            others.add((option, _normalise_scope_path(token, project_root)))
+        else:
+            others.add(token)
     return [_normalise_scope_path(p, project_root) for p in paths], others
 
 

@@ -188,6 +188,19 @@ def test_a_root_level_path_spelled_as_a_path_after_a_bare_option_stays_a_suite_p
         assert _covers_full_suite(suite, suite, str(tmp_path)), first
 
 
+def test_a_path_valued_option_keeps_its_own_value(tmp_path):
+    from core.server import _covers_full_suite
+
+    (tmp_path / "tests" / "unit").mkdir(parents=True)
+    (tmp_path / "tests" / "integration").mkdir(parents=True)
+    suite = "--ignore tests/unit tests"
+
+    assert not _covers_full_suite(
+        "--ignore tests/integration tests", suite, str(tmp_path)
+    )
+    assert _covers_full_suite("--ignore ./tests/unit/ tests", suite, str(tmp_path))
+
+
 def test_changed_mode_refuses_an_option_only_suite_but_runs_a_narrower_one(
     tmp_path,
 ):
