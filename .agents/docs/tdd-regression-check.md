@@ -19,8 +19,9 @@ Before running that sweep, `run_tests()` returns
   project may have made it the changed scope (`"changed"`) or the full
   suite (`"full"`).
 - `changedScope` — only the tests closest to the change. `"skip"` when
-  nothing beyond this cycle's own target needs to run (that target already
-  ran in the same call).
+  nothing beyond this cycle's own target needs to run (the follow-up
+  `run_tests(regressionScope="skip")` still runs that target, and a
+  failure there keeps REFACTOR open).
 - `fullSuiteScope` — the whole `defaultTestDir`.
 
 Re-call `run_tests(regressionScope=<suggestedScope>)` by default. Use

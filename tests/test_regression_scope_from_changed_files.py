@@ -31,7 +31,11 @@ def project(tmp_path, with_scope_script, scope_body=ECHO_SCOPE, extra_config=Non
     adapter_dir = tmp_path / "adapter"
     adapter_dir.mkdir(parents=True)
     run = adapter_dir / "run.sh"
-    run.write_text("#!/bin/sh\necho '{\"passed\": 1, \"failed\": 0}'\n")
+    # Logs each call's arguments, one line per call.
+    run.write_text(
+        f"#!/bin/sh\necho \"$*\" >> {adapter_dir / 'calls.log'}\n"
+        "echo '{\"passed\": 1, \"failed\": 0}'\n"
+    )
     run.chmod(0o755)
     if with_scope_script:
         scope = adapter_dir / "scope.sh"
@@ -170,6 +174,50 @@ def test_with_the_changed_default_an_unmapped_change_leaves_the_suite_to_the_gat
         assert payload["changedScope"] == "skip", name
         assert payload["suggestedScope"] == "skip", name
         assert "gate" in payload["regressionScopeNote"], name
+
+
+def test_accepting_a_skip_suggestion_runs_only_the_cycles_own_target(tmp_path):
+    server = project(
+        tmp_path,
+        with_scope_script=True,
+        scope_body=NULL_SCOPE,
+        extra_config={"regressionScopeDefault": "changed"},
+    )
+    calls = tmp_path / "adapter" / "calls.log"
+    before = calls.read_text().splitlines()
+
+    payload = closing_run(server)
+
+    assert payload["suggestedScope"] == "skip"
+    # The confirmation itself runs no tests.
+    assert calls.read_text().splitlines() == before
+
+    server.call_tool("run_tests", {"regressionScope": payload["suggestedScope"]})
+
+    last_call = calls.read_text().splitlines()[-1].split()
+    assert "tests/test_f.py" in last_call
+    assert "tests/" not in last_call
+    assert server.sm.phase == "red"
+
+
+def test_after_a_skip_suggestion_a_failing_own_target_blocks_completion(tmp_path):
+    server = project(
+        tmp_path,
+        with_scope_script=True,
+        scope_body=NULL_SCOPE,
+        extra_config={"regressionScopeDefault": "changed"},
+    )
+    payload = closing_run(server)
+    (tmp_path / "adapter" / "run.sh").write_text(
+        "#!/bin/sh\necho '{\"passed\": 0, \"failed\": 1, "
+        "\"failures\": [{\"name\": \"t\", \"message\": \"boom\"}]}'\n"
+    )
+
+    server.call_tool("run_tests", {"regressionScope": payload["suggestedScope"]})
+
+    assert server.sm.phase == "refactor"
+    done = json.loads(server.call_tool("complete_feature", {})[0].text)
+    assert "error" in done
 
 
 def test_a_script_that_ignores_the_mode_gives_its_broad_scope(tmp_path):

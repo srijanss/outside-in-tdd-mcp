@@ -2084,8 +2084,9 @@ class TDDServer:
             }
         scopes = {"fullSuiteScope": default_test_dir}
         if changed_scope is None:
-            # The cycle's own target already ran in the same call; the
-            # full suite is left to the orchestrator's gate.
+            # The follow-up run_tests(regressionScope="skip") still runs the
+            # cycle's own target; the full suite is left to the
+            # orchestrator's gate.
             changed_scope = "skip"
             scopes["regressionScopeNote"] = (
                 "The changed files map to no narrower scope; the full suite "
