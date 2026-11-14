@@ -158,6 +158,22 @@ def test_a_token_after_a_bare_option_is_a_path_only_when_no_other_path_is(
     assert _covers_full_suite("-x tests", "-x ./tests/", str(tmp_path))
 
 
+def test_an_existing_path_after_a_leading_bare_option_stays_a_suite_path(
+    tmp_path,
+):
+    from core.server import _covers_full_suite
+
+    (tmp_path / "tests" / "unit").mkdir(parents=True)
+    (tmp_path / "tests" / "integration").mkdir(parents=True)
+    suite = "-x tests/unit tests/integration"
+
+    assert not _covers_full_suite("tests/integration", suite, str(tmp_path))
+    assert not _covers_full_suite("-x tests/integration", suite, str(tmp_path))
+    assert _covers_full_suite(
+        "-x tests/unit tests/integration", suite, str(tmp_path)
+    )
+
+
 def test_a_bare_option_value_that_is_no_path_is_skipped(tmp_path):
     from core.server import _covers_full_suite
 
