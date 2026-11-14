@@ -38,6 +38,35 @@ def test_cargo_test_runs_are_denied(command):
 @pytest.mark.parametrize(
     "command",
     [
+        "cargo --offline test",
+        "cargo --locked test --workspace",
+        "cargo +nightly --quiet test",
+        "cargo -C crates/a test",
+        "cargo --color always nextest run",
+        "cargo --config build.jobs=2 -Z unstable-options t",
+        "cargo --frozen --verbose test",
+    ],
+)
+def test_cargo_test_after_global_options_is_denied(command):
+    assert _decision(command) == "deny"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cargo --locked check",
+        "cargo -C crates/a build",
+        "cargo --config build.jobs=2 clippy",
+        "cargo +nightly --quiet fmt",
+    ],
+)
+def test_other_cargo_commands_after_global_options_are_allowed(command):
+    assert _decision(command) is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
         "cargo build",
         "cargo check --workspace",
         "cargo clippy -- -D warnings",
