@@ -198,10 +198,15 @@ def _kill_process_group(proc: subprocess.Popen) -> None:
 
 
 def _run_sibling_script(
-    adapter_path: str, name: str, args: list[str], timeout_s: int
+    adapter_path: str,
+    name: str,
+    args: list[str],
+    timeout_s: int,
+    env: dict[str, str] | None = None,
 ) -> dict | None:
     """JSON object printed by the executable ``name`` next to the adapter,
-    or None when it is missing, fails, hangs or prints anything else."""
+    or None when it is missing, fails, hangs or prints anything else.
+    ``env`` replaces the inherited environment when given."""
     script = os.path.join(os.path.dirname(adapter_path), name)
     bundled = bundled_adapter_dir(adapter_path)
     if not os.access(script, os.X_OK) and bundled is not None:
@@ -214,6 +219,7 @@ def _run_sibling_script(
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
+            env=env,
         )
     except OSError:
         return None
@@ -241,11 +247,18 @@ def _non_blank(value) -> str | None:
     return value.strip()
 
 
+# What scope_for_changed_files returns when scope.sh prints
+# {"scope": null, "empty": true}: nothing beyond the cycle's own target
+# needs to run. It is run_tests' own regressionScope value for that.
+NOTHING_TO_RUN = "skip"
+
+
 def scope_for_changed_files(
     adapter_path: str,
     project_root: str,
     changed_files: list[str],
     timeout_s: int = 30,
+    mode: str | None = None,
 ) -> str | None:
     """The adapter's own regression scope for ``changed_files``, or None.
 
@@ -255,13 +268,26 @@ def scope_for_changed_files(
     null}`` when it can't map the files. A missing, failing, hanging or
     malformed script means no mapping, so the caller falls back to the
     whole suite.
+
+    ``mode`` is passed to the script as ``TDD_SCOPE_MODE`` (e.g.
+    ``"changed"`` for only the tests closest to the change); a script that
+    ignores it returns its broad scope. ``{"scope": null, "empty": true}``
+    means nothing beyond the cycle's own target needs to run and returns
+    NOTHING_TO_RUN, unlike a plain null.
     """
     if not changed_files:
         return None
+    env = None
+    if mode is not None:
+        env = {**os.environ, "TDD_SCOPE_MODE": mode}
     data = _run_sibling_script(
-        adapter_path, "scope.sh", [project_root, *changed_files], timeout_s
+        adapter_path, "scope.sh", [project_root, *changed_files], timeout_s, env
     )
-    return _non_blank((data or {}).get("scope"))
+    if data is None:
+        return None
+    if data.get("scope") is None and data.get("empty") is True:
+        return NOTHING_TO_RUN
+    return _non_blank(data.get("scope"))
 
 
 def default_recreate_db_args(

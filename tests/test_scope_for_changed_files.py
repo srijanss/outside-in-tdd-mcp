@@ -1,4 +1,4 @@
-from core.adapter_contract import scope_for_changed_files
+from core.adapter_contract import NOTHING_TO_RUN, scope_for_changed_files
 
 
 def adapter_with_scope(tmp_path, scope_body):
@@ -24,6 +24,27 @@ def test_the_sibling_scope_script_maps_changed_files_to_a_scope(tmp_path):
         scope_for_changed_files(adapter, "/root", ["a.py", "b c.py"])
         == "/root|a.py b c.py"
     )
+
+
+def test_the_mode_reaches_the_scope_script_through_its_environment(tmp_path):
+    adapter = adapter_with_scope(
+        tmp_path,
+        "#!/usr/bin/env python3\n"
+        "import json, os\n"
+        "print(json.dumps({'scope': os.environ.get('TDD_SCOPE_MODE', 'unset')}))\n",
+    )
+
+    assert scope_for_changed_files(adapter, "/r", ["a"], mode="changed") == "changed"
+    assert scope_for_changed_files(adapter, "/r", ["a"]) == "unset"
+
+
+def test_an_empty_scope_is_told_apart_from_no_mapping(tmp_path):
+    empty = adapter_with_scope(
+        tmp_path, "#!/bin/sh\necho '{\"scope\": null, \"empty\": true}'\n"
+    )
+
+    assert scope_for_changed_files(empty, "/r", ["a"]) == NOTHING_TO_RUN
+    assert NOTHING_TO_RUN is not None
 
 
 def test_no_mapping_when_the_script_is_missing_fails_or_declines(tmp_path):

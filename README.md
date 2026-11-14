@@ -221,6 +221,8 @@ core/               server.py, state_machine.py, adapter_contract.py — the "co
 adapters/
   pytest-adapter/    run.sh — the only language-specific piece for pytest
                      scope.sh — maps changed files to a regression scope
+                     (TDD_SCOPE_MODE=changed in its environment asks for
+                     only the tests closest to the change)
                      recreate-db.sh — default recreateDbArgs (--create-db
                      when the project has pytest-django)
   cargo-adapter/     run.sh, scope.sh — the same pair for cargo
@@ -359,6 +361,7 @@ adapter — `core/` has none. Only `adapterPath` is required.
 | `adapter` | no | Free-text label (`pytest-adapter`, `cargo-adapter`, …); informational. |
 | `adapterPath` | yes | The adapter executable: an absolute path, a path relative to the project root, or a bare command name found next to the server's interpreter / on `PATH`. |
 | `defaultTestDir` | no | Whole-suite target used for the regression sweep when a base-level REFACTOR closes. Same shell-word syntax as a test target. |
+| `regressionScopeDefault` | no | Which scope the closing-REFACTOR sweep suggests as `suggestedScope`: `"affected"` (unset; what the changes can affect, as before), `"changed"` (`changedScope`: only the tests closest to the change, leaving broader regressions and unmapped changes to a later full-suite gate) or `"full"` (`fullSuiteScope`). Any other value is rejected at config load. |
 | `testNamePattern` | no | Regex whose **first capture group is a test's name** (matched line-by-line across the test file), used for the one-test-per-cycle warning on `write_test`. Defaults per `adapter` label (`pytest-adapter`, `vitest-adapter`, `cargo-adapter` — see below); set it to override, or for a custom adapter. No pattern and no built-in default = the warning is off. Must be a valid regex (checked at config load). |
 | `recreateDbArgs` | no | Extra runner arguments that `run_tests(recreateDb=true)` prepends to the test target, to rebuild a cached test database after a schema change (e.g. `--create-db` for pytest-django with `--reuse-db`). Unset = the adapter's default from its optional `recreate-db.sh` (the bundled pytest adapter gives `--create-db` when pytest-django is installed); with no default, `recreateDb` returns a clear error. |
 | `adapterTimeoutSeconds` | no | Seconds a `run_tests` adapter call may take before it is killed (positive integer). Precedence: the `TDD_ADAPTER_TIMEOUT_S` env var, then this, then 120. A timed-out run returns an error and leaves the phase unchanged; the error carries `retryTimeoutSeconds` (double the timeout used, capped) to pass back as `run_tests(timeoutSeconds=...)`, or a `hint` when already at the cap. |
@@ -469,6 +472,18 @@ the server running the reviewer and tracking the rounds. Used by the
     expression>"}`, or `{"scope": null}` when it can't map them. Without the
     script — or when it fails, hangs (30s) or prints anything else —
     `suggestedScope` is `defaultTestDir`.
+    The response also carries `changedScope`: the server calls `scope.sh` a
+    second time, with the same files and its own 30s timeout, with
+    `TDD_SCOPE_MODE=changed` in its environment, asking for only the tests
+    closest to the change. A script that ignores the variable gives its
+    broad scope, which is correct, just slower. A script may print
+    `{"scope": null, "empty": true}` when nothing beyond the cycle's own
+    target needs to run; `changedScope` is then `"skip"`. A plain `null`
+    (or no usable script) makes `changedScope` `defaultTestDir`, except
+    under `regressionScopeDefault: "changed"`, where it is `"skip"` and a
+    `regressionScopeNote` says the full suite runs at the gate.
+    `regressionScopeDefault` (see the table above) picks which scope
+    `suggestedScope` is.
     The bundled pytest adapter's `scope.sh` maps each changed test file to
     itself and any other source file to the nearest `tests/` directory of
     its package (walking up from the file); `conftest.py` maps to its

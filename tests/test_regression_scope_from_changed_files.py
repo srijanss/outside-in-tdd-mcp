@@ -1,6 +1,8 @@
 import json
 import subprocess
 
+import pytest
+
 from core.server import TDDServer
 
 
@@ -8,20 +10,32 @@ def git(cwd, *args):
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 
 
-def project(tmp_path, with_scope_script):
+# Echoes the changed files it was given back as the scope.
+ECHO_SCOPE = (
+    "#!/usr/bin/env python3\n"
+    "import json, sys\n"
+    "print(json.dumps({'scope': ' '.join(sorted(sys.argv[2:]))}))\n"
+)
+
+# Like ECHO_SCOPE, but prefixes the scope with TDD_SCOPE_MODE when it is set.
+MODE_AWARE_SCOPE = (
+    "#!/usr/bin/env python3\n"
+    "import json, os, sys\n"
+    "mode = os.environ.get('TDD_SCOPE_MODE')\n"
+    "files = ' '.join(sorted(sys.argv[2:]))\n"
+    "print(json.dumps({'scope': f'{mode}:{files}' if mode else files}))\n"
+)
+
+
+def project(tmp_path, with_scope_script, scope_body=ECHO_SCOPE, extra_config=None):
     adapter_dir = tmp_path / "adapter"
-    adapter_dir.mkdir()
+    adapter_dir.mkdir(parents=True)
     run = adapter_dir / "run.sh"
     run.write_text("#!/bin/sh\necho '{\"passed\": 1, \"failed\": 0}'\n")
     run.chmod(0o755)
     if with_scope_script:
-        # Echoes the changed files it was given back as the scope.
         scope = adapter_dir / "scope.sh"
-        scope.write_text(
-            "#!/usr/bin/env python3\n"
-            "import json, sys\n"
-            "print(json.dumps({'scope': ' '.join(sorted(sys.argv[2:]))}))\n"
-        )
+        scope.write_text(scope_body)
         scope.chmod(0o755)
 
     root = tmp_path / "proj"
@@ -37,7 +51,13 @@ def project(tmp_path, with_scope_script):
 
     config = tmp_path / ".tdd-config.json"
     config.write_text(
-        json.dumps({"adapterPath": str(run), "defaultTestDir": "tests/"})
+        json.dumps(
+            {
+                "adapterPath": str(run),
+                "defaultTestDir": "tests/",
+                **(extra_config or {}),
+            }
+        )
     )
     server = TDDServer(project_root=str(root), config_path=str(config))
     server.call_tool(
@@ -82,3 +102,133 @@ def test_a_rename_hands_both_its_source_and_destination_to_the_scope_script(
     payload = closing_run(server)
 
     assert payload["suggestedScope"] == "pkg/a.py pkg/b.py pkg/new.py pkg2/b.py"
+
+
+def test_the_response_carries_the_changed_scope_from_a_second_scope_call(tmp_path):
+    payload = closing_run(
+        project(tmp_path, with_scope_script=True, scope_body=MODE_AWARE_SCOPE)
+    )
+
+    assert payload["suggestedScope"] == "pkg/a.py pkg/new.py"
+    assert payload["changedScope"] == "changed:pkg/a.py pkg/new.py"
+    assert payload["fullSuiteScope"] == "tests/"
+
+
+def changed_default_run(tmp_path, scope_body=MODE_AWARE_SCOPE, **kwargs):
+    return closing_run(
+        project(
+            tmp_path,
+            scope_body=scope_body,
+            extra_config={"regressionScopeDefault": "changed"},
+            **kwargs,
+        )
+    )
+
+
+def test_the_changed_default_suggests_the_changed_scope(tmp_path):
+    payload = changed_default_run(tmp_path, with_scope_script=True)
+
+    assert payload["suggestedScope"] == "changed:pkg/a.py pkg/new.py"
+    assert payload["changedScope"] == "changed:pkg/a.py pkg/new.py"
+    assert payload["fullSuiteScope"] == "tests/"
+
+
+# Prints the "empty" answer under changed mode, the files otherwise.
+EMPTY_WHEN_CHANGED_SCOPE = (
+    "#!/usr/bin/env python3\n"
+    "import json, os, sys\n"
+    "if os.environ.get('TDD_SCOPE_MODE') == 'changed':\n"
+    "    print(json.dumps({'scope': None, 'empty': True}))\n"
+    "else:\n"
+    "    print(json.dumps({'scope': ' '.join(sorted(sys.argv[2:]))}))\n"
+)
+
+
+def test_an_empty_changed_scope_suggests_skipping_the_sweep(tmp_path):
+    payload = changed_default_run(
+        tmp_path, scope_body=EMPTY_WHEN_CHANGED_SCOPE, with_scope_script=True
+    )
+
+    assert payload["changedScope"] == "skip"
+    assert payload["suggestedScope"] == "skip"
+
+
+NULL_SCOPE = "#!/bin/sh\necho '{\"scope\": null}'\n"
+FAILING_SCOPE = "#!/bin/sh\nexit 1\n"
+
+
+def test_with_the_changed_default_an_unmapped_change_leaves_the_suite_to_the_gate(
+    tmp_path,
+):
+    for name, kwargs in {
+        "null": {"scope_body": NULL_SCOPE, "with_scope_script": True},
+        "failing": {"scope_body": FAILING_SCOPE, "with_scope_script": True},
+        "missing": {"with_scope_script": False},
+    }.items():
+        payload = changed_default_run(tmp_path / name, **kwargs)
+
+        assert payload["changedScope"] == "skip", name
+        assert payload["suggestedScope"] == "skip", name
+        assert "gate" in payload["regressionScopeNote"], name
+
+
+def test_a_script_that_ignores_the_mode_gives_its_broad_scope(tmp_path):
+    payload = changed_default_run(
+        tmp_path, scope_body=ECHO_SCOPE, with_scope_script=True
+    )
+
+    assert payload["changedScope"] == "pkg/a.py pkg/new.py"
+    assert payload["suggestedScope"] == "pkg/a.py pkg/new.py"
+    assert "regressionScopeNote" not in payload
+
+
+def test_without_the_changed_default_an_unmapped_change_suggests_the_whole_suite(
+    tmp_path,
+):
+    for name, extra in {"unset": None, "affected": "affected"}.items():
+        payload = closing_run(
+            project(
+                tmp_path / name,
+                with_scope_script=True,
+                scope_body=NULL_SCOPE,
+                extra_config=extra and {"regressionScopeDefault": extra},
+            )
+        )
+
+        assert payload["suggestedScope"] == "tests/", name
+        assert payload["changedScope"] == "tests/", name
+        assert "regressionScopeNote" not in payload, name
+
+
+def test_the_full_default_suggests_the_whole_suite(tmp_path):
+    payload = closing_run(
+        project(
+            tmp_path,
+            with_scope_script=True,
+            scope_body=MODE_AWARE_SCOPE,
+            extra_config={"regressionScopeDefault": "full"},
+        )
+    )
+
+    assert payload["suggestedScope"] == "tests/"
+    assert payload["changedScope"] == "changed:pkg/a.py pkg/new.py"
+    assert payload["fullSuiteScope"] == "tests/"
+
+
+def test_an_invalid_regression_scope_default_is_rejected_at_config_load(tmp_path):
+    from core.server import ConfigError, load_config
+
+    for value in ("narrow", "", 1, None):
+        config = tmp_path / f"{value!r}.json"
+        config.write_text(
+            json.dumps({"adapterPath": "run.sh", "regressionScopeDefault": value})
+        )
+        with pytest.raises(ConfigError, match="'regressionScopeDefault' must be one of"):
+            load_config(str(config))
+
+    for value in ("affected", "changed", "full"):
+        config = tmp_path / f"{value}.json"
+        config.write_text(
+            json.dumps({"adapterPath": "run.sh", "regressionScopeDefault": value})
+        )
+        assert load_config(str(config))["regressionScopeDefault"] == value

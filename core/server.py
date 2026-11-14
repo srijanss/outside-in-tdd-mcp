@@ -216,7 +216,11 @@ TOOLS = [
             "REFACTOR with defaultTestDir configured returns "
             "needsRegressionScopeConfirmation instead of running the full "
             "sweep, with suggestedScope (narrowed to the changed files when "
-            "the adapter ships a scope.sh) and fullSuiteScope — re-call with "
+            "the adapter ships a scope.sh; regressionScopeDefault in "
+            ".tdd-config.json may make it changedScope or fullSuiteScope), "
+            "changedScope (only the tests closest to the change; \"skip\" "
+            "when nothing beyond this cycle's target needs to run) and "
+            "fullSuiteScope — re-call with "
             "regressionScope set to suggestedScope (default), another "
             "path/expression, or \"skip\" to proceed. After a schema/model change, pass "
             "recreateDb=true to rebuild a cached test DB (needs "
@@ -264,7 +268,10 @@ TOOLS = [
                     "description": (
                         "Scope for the closing-REFACTOR regression sweep: a "
                         "path/target expression to use instead of "
-                        "defaultTestDir, or \"skip\" to skip it entirely."
+                        "defaultTestDir (usually suggestedScope, "
+                        "changedScope or fullSuiteScope from the "
+                        "needsRegressionScopeConfirmation response), or "
+                        "\"skip\" to skip it entirely."
                     ),
                 }
             },
@@ -615,6 +622,9 @@ class ConfigError(Exception):
     """Raised when .tdd-config.json is missing, malformed, or incomplete."""
 
 
+REGRESSION_SCOPE_DEFAULTS = ("affected", "changed", "full")
+
+
 def load_config(config_path: str) -> dict[str, Any]:
     path = Path(config_path)
     if not path.exists():
@@ -641,6 +651,15 @@ def load_config(config_path: str) -> dict[str, Any]:
     _require_string(config, "testNamePattern", config_path, required=False)
     for field in ("adapterTimeoutSeconds", "maxAdapterTimeoutSeconds"):
         _require_positive_int(config, field, config_path)
+    if (
+        "regressionScopeDefault" in config
+        and config["regressionScopeDefault"] not in REGRESSION_SCOPE_DEFAULTS
+    ):
+        raise ConfigError(
+            f"'{config_path}' field 'regressionScopeDefault' must be one of "
+            + ", ".join(repr(v) for v in REGRESSION_SCOPE_DEFAULTS)
+            + f", got {config['regressionScopeDefault']!r}."
+        )
     if "testNamePattern" in config:
         try:
             re.compile(config["testNamePattern"])
@@ -2032,6 +2051,52 @@ class TDDServer:
         except KeyError as exc:
             return self._error(f"Missing required argument: {exc}")
 
+    def _regression_scopes(
+        self, config: dict[str, Any], default_test_dir: str
+    ) -> dict[str, str]:
+        """suggestedScope, changedScope and fullSuiteScope (plus a
+        regressionScopeNote when the changed scope falls back to the gate)
+        for the closing-REFACTOR sweep.
+
+        The adapter's scope.sh may narrow the sweep to what the uncommitted
+        changes can affect ("affected", the default) or to the tests
+        closest to them ("changed"); regressionScopeDefault picks which one
+        is suggested. The whole defaultTestDir stays on offer.
+        """
+        adapter_path = config["adapterPath"]
+        default = config.get("regressionScopeDefault", "affected")
+        changed = sorted(set(self._changed_paths(rename_sources=True) or []))
+        changed_scope = scope_for_changed_files(
+            adapter_path, self.project_root, changed, mode="changed"
+        )
+        if default != "changed":
+            # No mapping means the whole suite, as before the key existed.
+            changed_scope = changed_scope or default_test_dir
+            affected = None
+            if default == "affected":
+                affected = scope_for_changed_files(
+                    adapter_path, self.project_root, changed
+                )
+            return {
+                "suggestedScope": affected or default_test_dir,
+                "changedScope": changed_scope,
+                "fullSuiteScope": default_test_dir,
+            }
+        scopes = {"fullSuiteScope": default_test_dir}
+        if changed_scope is None:
+            # The cycle's own target already ran in the same call; the
+            # full suite is left to the orchestrator's gate.
+            changed_scope = "skip"
+            scopes["regressionScopeNote"] = (
+                "The changed files map to no narrower scope; the full suite "
+                "runs at the gate."
+            )
+        return {
+            "suggestedScope": changed_scope,
+            "changedScope": changed_scope,
+            **scopes,
+        }
+
     def _run_tests(
         self,
         regression_scope: str | None = None,
@@ -2068,16 +2133,9 @@ class TDDServer:
         # before any adapter call happens. Once regression_scope is given,
         # proceed using it in place of defaultTestDir for this call only.
         if would_close_base_refactor and regression_scope is None:
-            # The adapter may narrow the sweep to what the uncommitted
-            # changes can affect; the whole defaultTestDir stays on offer.
-            changed = sorted(set(self._changed_paths(rename_sources=True) or []))
-            scoped = scope_for_changed_files(
-                adapter_path, self.project_root, changed
-            )
             return {
                 "needsRegressionScopeConfirmation": True,
-                "suggestedScope": scoped or default_test_dir,
-                "fullSuiteScope": default_test_dir,
+                **self._regression_scopes(config, default_test_dir),
                 **self.sm.status(),
             }
         if regression_scope == "skip":
