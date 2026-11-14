@@ -47,6 +47,15 @@
             "command": "\"$CLAUDE_PROJECT_DIR/.agents/hooks/project-mcp-reminder.sh\""
           }
         ]
+      },
+      {
+        "matcher": "mcp__outside-in-tdd__init_feature|mcp__outside-in-tdd__drill_down",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.agents/hooks/project-mcp-consult-gate.sh\" check"
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -56,6 +65,10 @@
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR/.agents/hooks/project-mcp-mark-consulted.sh\""
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.agents/hooks/project-mcp-consult-gate.sh\" mark"
           }
         ]
       }
