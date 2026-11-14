@@ -252,6 +252,28 @@ def test_changed_mode_scans_only_the_default_test_dirs_when_configured(
     assert scope(tmp_path, "shop/cart.py", mode="changed") == "tests/test_cart.py"
 
 
+def test_changed_mode_unions_the_importers_of_many_changed_modules(tmp_path):
+    write(
+        tmp_path,
+        {
+            "shop/__init__.py": "",
+            "shop/cart.py": "",
+            "shop/pay.py": "",
+            "shop/ship.py": "",
+            "tests/test_cart.py": "import shop.cart\n",
+            "tests/test_pay.py": "from shop import pay\n",
+            "tests/test_shop.py": "import shop\n",
+            "tests/test_other.py": "import os\n",
+        },
+    )
+    assert scope(
+        tmp_path, "shop/cart.py", "shop/pay.py", "shop/ship.py", mode="changed"
+    ) == "tests/test_cart.py tests/test_pay.py"
+    assert scope(tmp_path, "shop/__init__.py", mode="changed") == (
+        "tests/test_cart.py tests/test_pay.py tests/test_shop.py"
+    )
+
+
 def test_changed_mode_does_not_follow_symlinks_out_of_the_project(
     tmp_path, monkeypatch
 ):

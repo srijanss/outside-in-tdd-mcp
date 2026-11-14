@@ -211,17 +211,23 @@ def imported_modules(root, rel):
     return frozenset(names)
 
 
-def imports(names, module):
-    """Importing a.b.c also runs a.b's (and a's) __init__.py."""
-    return any(name == module or name.startswith(module + ".") for name in names)
+@functools.lru_cache(maxsize=None)
+def importer_index(root):
+    """Module name -> the test files importing it or a submodule of it
+    (built once per run). Importing a.b.c also runs a.b's (and a's)
+    __init__.py, so a.b.c is indexed under a.b.c, a.b and a."""
+    index = {}
+    for rel in test_files(root):
+        for name in imported_modules(root, rel):
+            parts = name.split(".")
+            for length in range(1, len(parts) + 1):
+                index.setdefault(".".join(parts[:length]), set()).add(rel)
+    return index
 
 
 def importers(root, modules):
-    return {
-        rel
-        for rel in test_files(root)
-        if any(imports(imported_modules(root, rel), m) for m in modules)
-    }
+    index = importer_index(root)
+    return set().union(*(index.get(m, ()) for m in modules))
 
 
 def changed_target_for(root, rel):
