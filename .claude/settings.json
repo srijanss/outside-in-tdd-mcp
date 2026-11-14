@@ -14,10 +14,6 @@
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR/.agents/hooks/danger-guard.sh\""
-          },
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR/.agents/hooks/project-mcp-session-gate.sh\""
           }
         ]
       },
@@ -27,24 +23,6 @@
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR/.agents/hooks/protect-sensitive-files.sh\""
-          }
-        ]
-      },
-      {
-        "matcher": "Read",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR/.agents/hooks/project-mcp-session-gate.sh\""
-          }
-        ]
-      },
-      {
-        "matcher": "mcp__outside-in-tdd__init_feature|mcp__outside-in-tdd__drill_down|mcp__outside-in-tdd__write_test|mcp__outside-in-tdd__write_test_skeleton|mcp__outside-in-tdd__write_code",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR/.agents/hooks/project-mcp-reminder.sh\""
           }
         ]
       },
@@ -62,10 +40,6 @@
       {
         "matcher": "mcp__project-mcp__find_symbol|mcp__project-mcp__get_symbol_context|mcp__project-mcp__get_dependencies|mcp__project-mcp__get_dependents|mcp__project-mcp__get_project_overview",
         "hooks": [
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR/.agents/hooks/project-mcp-mark-consulted.sh\""
-          },
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR/.agents/hooks/project-mcp-consult-gate.sh\" mark"
