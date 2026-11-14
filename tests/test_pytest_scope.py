@@ -301,6 +301,24 @@ def test_changed_mode_maps_a_package_init_to_everything_importing_the_package(
     )
 
 
+def test_changed_mode_finds_importers_of_namespace_package_modules(tmp_path):
+    write(
+        tmp_path,
+        {
+            "shop/cart.py": "",
+            "src/store/deep/item.py": "",
+            "tests/test_cart.py": "from shop.cart import Cart\n",
+            "tests/test_item.py": "import store.deep.item\n",
+            "tests/test_misc.py": "import shop.price\n",
+        },
+    )
+    assert scope(tmp_path, "shop/cart.py", mode="changed") == "tests/test_cart.py"
+    assert (
+        scope(tmp_path, "src/store/deep/item.py", mode="changed")
+        == "tests/test_item.py"
+    )
+
+
 def test_without_the_mode_the_scope_is_still_the_nearest_tests_dir(tmp_path):
     write(
         tmp_path,

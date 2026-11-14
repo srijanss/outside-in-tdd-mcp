@@ -105,6 +105,20 @@ def module_name(root, rel):
     return ".".join(parts)
 
 
+def module_names(root, rel):
+    """Every name a source file may be imported as: its package name, then
+    each longer one through the directories above it, which may be
+    namespace packages (no __init__.py) or sys.path entries."""
+    parts = os.path.splitext(rel)[0].split(os.sep)
+    if parts[-1] == "__init__":
+        parts.pop()
+    shortest = max(len(module_name(root, rel).split(".")), 1)
+    return [
+        ".".join(parts[-length:])
+        for length in range(shortest, len(parts) + 1)
+    ]
+
+
 def default_test_dirs(root):
     """defaultTestDir's directories inside the project, from the server's
     config (TDD_CONFIG_PATH, else .tdd-config.json); [] when unset."""
@@ -191,13 +205,11 @@ def imports(names, module):
     return any(name == module or name.startswith(module + ".") for name in names)
 
 
-def importers(root, module):
-    if not module:
-        return set()
+def importers(root, modules):
     return {
         rel
         for rel in test_files(root)
-        if imports(imported_modules(root, rel), module)
+        if any(imports(imported_modules(root, rel), m) for m in modules)
     }
 
 
@@ -212,7 +224,7 @@ def changed_target_for(root, rel):
         return {target} if target else set()
     if not name.endswith(".py"):
         return set()
-    return importers(root, module_name(root, rel))
+    return importers(root, module_names(root, rel))
 
 
 def covered(path, dirs):
