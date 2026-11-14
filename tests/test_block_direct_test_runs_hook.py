@@ -67,6 +67,21 @@ def test_other_cargo_commands_after_global_options_are_allowed(command):
 @pytest.mark.parametrize(
     "command",
     [
+        "cargo -C test build",
+        "cargo -C t check",
+        "cargo --config test check",
+        "cargo --color nextest build",
+        "cargo -Z test clippy",
+        "cargo +nightly -C test build",
+    ],
+)
+def test_cargo_option_value_named_like_a_runner_is_allowed(command):
+    assert _decision(command) is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
         "cargo build",
         "cargo check --workspace",
         "cargo clippy -- -D warnings",

@@ -14,9 +14,16 @@ cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // empty')"
 # end of string.
 # Accept executable paths and the common uv wrapper as well as bare runners.
 # This remains a command-text heuristic, not a shell parser or a sandbox.
-pattern='(^|[;&|])[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*=[^[:space:]]+[[:space:]]+)*(([^[:space:];&|]*/)?uv[[:space:]]+run[[:space:]]+(-[^[:space:]]+[[:space:]]+)*)?([^[:space:];&|]*/)?(python([0-9]+(\.[0-9]+)?)?[[:space:]]+-m[[:space:]]+(pytest|unittest)|py\.test|pytest|npx[[:space:]]+vitest|vitest|jest|go[[:space:]]+test|tox|mocha|ava|(npm|yarn|pnpm)[[:space:]]+(run[[:space:]]+)?test|cargo([[:space:]]+\+[^[:space:];&|]+)?([[:space:]]+((-C|-Z|--color|--config|--explain)[[:space:]]+[^[:space:];&|]+|-[^[:space:];&|]+))*[[:space:]]+(test|t|nextest))([[:space:];&|<>]|$)'
+pattern='(^|[;&|])[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*=[^[:space:]]+[[:space:]]+)*(([^[:space:];&|]*/)?uv[[:space:]]+run[[:space:]]+(-[^[:space:]]+[[:space:]]+)*)?([^[:space:];&|]*/)?(python([0-9]+(\.[0-9]+)?)?[[:space:]]+-m[[:space:]]+(pytest|unittest)|py\.test|pytest|npx[[:space:]]+vitest|vitest|jest|go[[:space:]]+test|tox|mocha|ava|(npm|yarn|pnpm)[[:space:]]+(run[[:space:]]+)?test|cargo([[:space:]]+\+[^[:space:];&|]+)?([[:space:]]+-[^[:space:];&|]+)*[[:space:]]+(test|t|nextest))([[:space:];&|<>]|$)'
 
-if printf '%s' "$cmd" | grep -Eiq "$pattern"; then
+# Cargo global options that take a separate value (-C <dir>, -Z <flag>,
+# --color <when>, --config <kv|path>, --explain <code>) are joined to that
+# value with '=' first, so a value such as a directory named "test" is
+# never read as the cargo subcommand.
+cargo_valued_opts='s/(^|[[:space:]])(-C|-Z|--color|--config|--explain)[[:space:]]+([^[:space:];&|<>]+)/\1\2=\3/g'
+normalized="$(printf '%s' "$cmd" | sed -E "$cargo_valued_opts")"
+
+if printf '%s' "$normalized" | grep -Eiq "$pattern"; then
   jq -n '{
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
