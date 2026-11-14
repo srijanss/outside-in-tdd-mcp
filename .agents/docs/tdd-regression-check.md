@@ -22,7 +22,9 @@ Before running that sweep, `run_tests()` returns
   nothing beyond this cycle's own target needs to run (the follow-up
   `run_tests(regressionScope="skip")` still runs that target, and a
   failure there keeps REFACTOR open).
-- `fullSuiteScope` — the whole `defaultTestDir`.
+- `fullSuiteScope` — the whole `defaultTestDir`. Not offered when
+  `regressionScopeDefault` is `"changed"`: the response carries
+  `fullSuite: "gate"` instead.
 
 Re-call `run_tests(regressionScope=<suggestedScope>)` by default. Use
 `fullSuiteScope` only when the change is broad (shared fixtures, config,
@@ -30,9 +32,10 @@ the adapter itself) or the user asks for it — the full suite still runs in
 review/CI. `"skip"` skips the sweep.
 
 When `regressionScopeDefault` is `"changed"`, the full suite runs at the
-orchestrator's gate, not here: never re-run `fullSuiteScope` as a
-double-check after a narrow sweep, and don't hand-run a full-suite sweep
-after review fixes. A `regressionScopeNote` in the response (the changes
+orchestrator's gate, not here: `run_tests` refuses a `regressionScope`
+that covers `defaultTestDir` (REFACTOR stays open; re-call with
+`suggestedScope`, `changedScope` or `"skip"`), and don't hand-run a
+full-suite sweep after review fixes. A `regressionScopeNote` in the response (the changes
 map to no narrower scope) means the same: take `suggestedScope` as given.
 
 This only fires at depth 1 (nested drill-down cycles skip it — running the

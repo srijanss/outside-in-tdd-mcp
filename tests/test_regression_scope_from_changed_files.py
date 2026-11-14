@@ -134,7 +134,7 @@ def test_the_changed_default_suggests_the_changed_scope(tmp_path):
 
     assert payload["suggestedScope"] == "changed:pkg/a.py pkg/new.py"
     assert payload["changedScope"] == "changed:pkg/a.py pkg/new.py"
-    assert payload["fullSuiteScope"] == "tests/"
+    assert payload["fullSuite"] == "gate"
 
 
 # Prints the "empty" answer under changed mode, the files otherwise.

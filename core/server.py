@@ -222,7 +222,11 @@ TOOLS = [
             "when nothing beyond this cycle's target needs to run) and "
             "fullSuiteScope — re-call with "
             "regressionScope set to suggestedScope (default), another "
-            "path/expression, or \"skip\" to proceed. After a schema/model change, pass "
+            "path/expression, or \"skip\" to proceed. Under "
+            "regressionScopeDefault \"changed\" the full suite runs at the "
+            "orchestrator's gate: the response carries fullSuite: \"gate\" "
+            "instead of fullSuiteScope, and a regressionScope covering "
+            "defaultTestDir is refused. After a schema/model change, pass "
             "recreateDb=true to rebuild a cached test DB (needs "
             "recreateDbArgs in .tdd-config.json). Pass advance=true to "
             "also do the verify() step in the same call when the result is "
@@ -271,7 +275,10 @@ TOOLS = [
                         "defaultTestDir (usually suggestedScope, "
                         "changedScope or fullSuiteScope from the "
                         "needsRegressionScopeConfirmation response), or "
-                        "\"skip\" to skip it entirely."
+                        "\"skip\" to skip it entirely. Under "
+                        "regressionScopeDefault \"changed\" (fullSuite: "
+                        "\"gate\" in that response) a scope covering "
+                        "defaultTestDir is refused."
                     ),
                 }
             },
@@ -599,6 +606,36 @@ DEFAULT_TEST_NAME_PATTERNS: dict[str, str] = {
     "pytest-adapter": r"^\s*(?:async\s+)?def\s+(test_\w+)",
 }
 MAX_FAILURE_MESSAGE_CHARS = 500
+
+
+def _scope_paths(scope: str, project_root: str) -> list[str]:
+    """The path tokens of a scope expression, normalised relative to
+    project_root (options such as "-k" are dropped)."""
+    paths = []
+    for token in shlex.split(scope):
+        if token.startswith("-"):
+            continue
+        if os.path.isabs(token):
+            token = os.path.relpath(token, project_root)
+        paths.append(os.path.normpath(token))
+    return paths
+
+
+def _covers_full_suite(scope: str, default_test_dir: str, project_root: str) -> bool:
+    """Whether running scope would run every path in default_test_dir: each
+    of them is named in scope, or sits under a directory scope names."""
+    try:
+        scope_paths = _scope_paths(scope, project_root)
+        suite_paths = _scope_paths(default_test_dir, project_root)
+    except ValueError:
+        return False
+    return bool(suite_paths) and all(
+        any(
+            s == "." or s == d or d.startswith(s + os.sep)
+            for s in scope_paths
+        )
+        for d in suite_paths
+    )
 
 
 def _cap_failures(failures: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -2061,7 +2098,8 @@ class TDDServer:
         The adapter's scope.sh may narrow the sweep to what the uncommitted
         changes can affect ("affected", the default) or to the tests
         closest to them ("changed"); regressionScopeDefault picks which one
-        is suggested. The whole defaultTestDir stays on offer.
+        is suggested. The whole defaultTestDir stays on offer, except in
+        "changed" mode, where fullSuite: "gate" replaces fullSuiteScope.
         """
         adapter_path = config["adapterPath"]
         default = config.get("regressionScopeDefault", "affected")
@@ -2082,7 +2120,9 @@ class TDDServer:
                 "changedScope": changed_scope,
                 "fullSuiteScope": default_test_dir,
             }
-        scopes = {"fullSuiteScope": default_test_dir}
+        # The full suite runs at the orchestrator's gate, so it is not on
+        # offer here (and run_tests refuses it as a regressionScope).
+        scopes = {"fullSuite": "gate"}
         if changed_scope is None:
             # The follow-up run_tests(regressionScope="skip") still runs the
             # cycle's own target; the full suite is left to the
@@ -2137,6 +2177,23 @@ class TDDServer:
             return {
                 "needsRegressionScopeConfirmation": True,
                 **self._regression_scopes(config, default_test_dir),
+                **self.sm.status(),
+            }
+        if (
+            would_close_base_refactor
+            and config.get("regressionScopeDefault") == "changed"
+            and regression_scope is not None
+            and _covers_full_suite(
+                regression_scope, default_test_dir, self.project_root
+            )
+        ):
+            return {
+                "error": (
+                    "regressionScopeDefault is \"changed\": the full suite "
+                    "runs at the orchestrator's gate, not here. Re-call "
+                    "run_tests with regressionScope set to suggestedScope, "
+                    "changedScope or \"skip\"."
+                ),
                 **self.sm.status(),
             }
         if regression_scope == "skip":
