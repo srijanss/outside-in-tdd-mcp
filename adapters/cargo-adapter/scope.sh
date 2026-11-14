@@ -14,6 +14,10 @@ whole suite):
   - the root Cargo.toml, Cargo.lock, .cargo/ and rust-toolchain files -> null;
   - docs (.md/.rst/.txt) are ignored;
   - any other file outside every crate, or an unreadable manifest -> null.
+
+With TDD_SCOPE_MODE=changed it prints -p only for each crate holding a
+changed file, without the crates depending on it; docs-only changes print
+{"scope": null, "empty": true}. Everything above that prints null still does.
 """
 
 import glob
@@ -26,6 +30,13 @@ import tomllib
 DOC_SUFFIXES = (".md", ".rst", ".txt")
 GLOBAL_FILES = {"Cargo.toml", "Cargo.lock", "rust-toolchain", "rust-toolchain.toml"}
 DEPENDENCY_TABLES = ("dependencies", "dev-dependencies", "build-dependencies")
+# scope()'s answer when, in changed mode, nothing beyond the cycle's own
+# target needs to run (docs-only changes).
+EMPTY = object()
+
+
+def changed_mode():
+    return os.environ.get("TDD_SCOPE_MODE") == "changed"
 
 
 def load(path):
@@ -153,14 +164,15 @@ def scope(root, changed):
             return None
         selected.add(names[crate])
 
-    pending = list(selected)
+    # Changed mode: only the changed crates, not their dependents.
+    pending = [] if changed_mode() else list(selected)
     while pending:
         for dependent in dependents[pending.pop()]:
             if dependent not in selected:
                 selected.add(dependent)
                 pending.append(dependent)
     if not selected:
-        return None
+        return EMPTY if changed_mode() else None
     return " ".join(f"-p {shlex.quote(name)}" for name in sorted(selected))
 
 
@@ -168,7 +180,10 @@ def main(argv):
     if len(argv) < 2:
         return {"scope": None}
     try:
-        return {"scope": scope(argv[0], argv[1:])}
+        result = scope(argv[0], argv[1:])
+        if result is EMPTY:
+            return {"scope": None, "empty": True}
+        return {"scope": result}
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         # Unreadable or malformed manifests: no mapping.
         return {"scope": None}

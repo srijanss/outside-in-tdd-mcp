@@ -14,8 +14,8 @@ def write(root, files):
         target.write_text(body)
 
 
-def scope(root, *changed):
-    return scope_for_changed_files(CARGO_ADAPTER, str(root), list(changed))
+def scope(root, *changed, mode=None):
+    return scope_for_changed_files(CARGO_ADAPTER, str(root), list(changed), mode=mode)
 
 
 WORKSPACE = {
@@ -174,3 +174,37 @@ def test_an_inherited_path_dependency_is_discovered_relative_to_the_root(tmp_pat
     )
     assert scope(tmp_path, "libs/store/src/lib.rs") == "-p server -p store"
     assert scope(tmp_path, "libs/codec/src/lib.rs") == "-p codec -p server -p store"
+
+
+# Crates b and c depend on a.
+DEPENDENT_WORKSPACE = {
+    "Cargo.toml": '[workspace]\nmembers = ["crates/*"]\n',
+    "crates/a/Cargo.toml": '[package]\nname = "a"\n',
+    "crates/a/src/lib.rs": "",
+    "crates/b/Cargo.toml": '[package]\nname = "b"\n[dependencies]\na = { path = "../a" }\n',
+    "crates/b/src/lib.rs": "",
+    "crates/c/Cargo.toml": '[package]\nname = "c"\n[dependencies]\na = { path = "../a" }\n',
+    "crates/c/src/lib.rs": "",
+}
+
+
+def test_changed_mode_stops_before_the_reverse_dependency_closure(tmp_path):
+    write(tmp_path, DEPENDENT_WORKSPACE)
+    assert scope(tmp_path, "crates/a/src/lib.rs", mode="changed") == "-p a"
+    assert scope(tmp_path, "crates/a/src/lib.rs") == "-p a -p b -p c"
+
+
+def test_changed_mode_gives_one_package_flag_per_changed_crate(tmp_path):
+    write(tmp_path, DEPENDENT_WORKSPACE)
+    assert (
+        scope(tmp_path, "crates/a/src/lib.rs", "crates/c/src/lib.rs", mode="changed")
+        == "-p a -p c"
+    )
+
+
+def test_changed_mode_keeps_null_for_global_files_and_skips_docs_only(tmp_path):
+    write(tmp_path, DEPENDENT_WORKSPACE)
+    assert scope(tmp_path, "Cargo.lock", mode="changed") is None
+    assert scope(tmp_path, "Cargo.lock") is None
+    assert scope(tmp_path, "README.md", "docs/guide.rst", mode="changed") == "skip"
+    assert scope(tmp_path, "README.md") is None
