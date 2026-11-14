@@ -112,3 +112,49 @@ def test_claude_effort_maps_pi_style_thinking_levels_to_the_nearest_option():
     assert "--effort" not in argv(None)
     assert argv("minimal")[argv("minimal").index("--effort") + 1] == "low"
     assert argv("xhigh")[argv("xhigh").index("--effort") + 1] == "xhigh"
+
+
+@pytest.mark.parametrize(
+    "fallbacks", ["openai/b", ["openai/b", 3], ["openai/b", ""], [None], {"a": "b"}]
+)
+def test_fallback_models_must_be_a_list_of_non_empty_model_names(fallbacks):
+    from core.reviewers import fallback_models
+
+    config = {"reviewers": {"fallbackModels": fallbacks}}
+    with pytest.raises(
+        ReviewerConfigError, match="fallbackModels must be a list of non-empty model names"
+    ):
+        fallback_models(config, "openai/a")
+
+
+@pytest.mark.parametrize(
+    "message, expected",
+    [
+        ("429 You exceeded your current quota", True),
+        ("Your credit balance is too low", True),
+        ("Disk quota exceeded", False),
+        ("OSError: [Errno 122] Disk quota exceeded", False),
+        ("[Errno 28] No space left on device", False),
+        ("EACCES: permission denied, open '/x' (403)", False),
+        ("Read-only file system: quota.json", False),
+    ],
+)
+def test_local_system_errors_are_never_read_as_provider_quota_errors(message, expected):
+    from core.reviewers import is_quota_or_access_error
+
+    assert is_quota_or_access_error(message) is expected
+
+
+@pytest.mark.parametrize(
+    "message, expected",
+    [
+        ("403 Permission denied: model not available for this account", True),
+        ("Error: permission denied for model openai/b (403)", True),
+        ("EACCES: permission denied, open '/x'", False),
+        ("PermissionError: [Errno 13] Permission denied: '/repo/.git' (403)", False),
+    ],
+)
+def test_a_provider_permission_denied_still_counts_as_an_access_error(message, expected):
+    from core.reviewers import is_quota_or_access_error
+
+    assert is_quota_or_access_error(message) is expected

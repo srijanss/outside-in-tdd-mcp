@@ -2,6 +2,7 @@
 """adapters/vitest-adapter/run.sh
 
 Contract: ./run.sh <test_target> <project_root>
+A target of "related <file>..." runs `vitest related --run <file>...`.
 Prints exactly one JSON object to stdout: {passed, failed, duration_ms, failures, raw_output}
 """
 import json
@@ -18,6 +19,12 @@ def main() -> int:
     project_root = sys.argv[2] if len(sys.argv) > 2 else "."
 
     target_args = shlex.split(test_target)
+    if target_args[:1] == ["related"]:
+        # "related <file>..." (from scope.sh): only the tests whose import
+        # graph reaches a named file; --run keeps vitest out of watch mode.
+        command = ["related", "--run", *target_args[1:]]
+    else:
+        command = ["run", *target_args]
 
     with tempfile.TemporaryDirectory(prefix="tdd-vitest-adapter-") as tmpdir:
         report_file = Path(tmpdir) / "report.json"
@@ -27,8 +34,7 @@ def main() -> int:
             [
                 "npx",
                 "vitest",
-                "run",
-                *target_args,
+                *command,
                 "--reporter=json",
                 f"--outputFile={report_file}",
             ],

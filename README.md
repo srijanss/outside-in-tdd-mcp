@@ -216,8 +216,15 @@ verified before clearing and what the response tells Claude happened.
 
 ```
 core/               server.py, state_machine.py, adapter_contract.py — the "core" package
+  skills/            <name>/SKILL.md — workflow skills served as MCP prompts
+  docs/              the .agents/docs workflow docs those skills refer to
 adapters/
   pytest-adapter/    run.sh — the only language-specific piece for pytest
+                     scope.sh — maps changed files to a regression scope
+                     recreate-db.sh — default recreateDbArgs (--create-db
+                     when the project has pytest-django)
+  cargo-adapter/     run.sh, scope.sh — the same pair for cargo
+  vitest-adapter/    run.sh, scope.sh — the same pair for vitest
 tests/               unit tests for state_machine.py (pytest)
 pyproject.toml       packages core/, declares deps, installs the `outside-in-tdd-mcp` console script
 Dockerfile           bakes core + pytest adapter + pytest itself into one image
@@ -353,9 +360,12 @@ adapter — `core/` has none. Only `adapterPath` is required.
 | `adapterPath` | yes | The adapter executable: an absolute path, a path relative to the project root, or a bare command name found next to the server's interpreter / on `PATH`. |
 | `defaultTestDir` | no | Whole-suite target used for the regression sweep when a base-level REFACTOR closes. Same shell-word syntax as a test target. |
 | `testNamePattern` | no | Regex whose **first capture group is a test's name** (matched line-by-line across the test file), used for the one-test-per-cycle warning on `write_test`. Defaults per `adapter` label (`pytest-adapter`, `vitest-adapter`, `cargo-adapter` — see below); set it to override, or for a custom adapter. No pattern and no built-in default = the warning is off. Must be a valid regex (checked at config load). |
-| `recreateDbArgs` | no | Extra runner arguments that `run_tests(recreateDb=true)` prepends to the test target, to rebuild a cached test database after a schema change (e.g. `--create-db` for pytest-django with `--reuse-db`). Unset = `recreateDb` returns a clear error. |
+| `recreateDbArgs` | no | Extra runner arguments that `run_tests(recreateDb=true)` prepends to the test target, to rebuild a cached test database after a schema change (e.g. `--create-db` for pytest-django with `--reuse-db`). Unset = the adapter's default from its optional `recreate-db.sh` (the bundled pytest adapter gives `--create-db` when pytest-django is installed); with no default, `recreateDb` returns a clear error. |
+| `adapterTimeoutSeconds` | no | Seconds a `run_tests` adapter call may take before it is killed (positive integer). Precedence: the `TDD_ADAPTER_TIMEOUT_S` env var, then this, then 120. A timed-out run returns an error and leaves the phase unchanged; the error carries `retryTimeoutSeconds` (double the timeout used, capped) to pass back as `run_tests(timeoutSeconds=...)`, or a `hint` when already at the cap. |
+| `maxAdapterTimeoutSeconds` | no | Upper bound (positive integer, default 600) applied to the resolved adapter timeout, whichever source it came from. A per-call `timeoutSeconds` above it is refused. |
 | `reviewers.default` | no | Defaults for `start_review`: `{"reviewer": "pi" \| "claude", "model": "...", "thinking": "off\|minimal\|low\|medium\|high\|xhigh\|max"}`. Resolution order is the per-call argument, then this, then the reviewer tool's own default. |
 | `reviewers.allowedModels` | no | If set, `start_review` rejects any model not in this list. |
+| `reviewers.fallbackModels` | no | Models to try, in order, when the reviewer reports a quota, rate-limit, billing or model-access error (same reviewer and thinking). Local failures (a missing binary, file permissions, disk space or disk quota, timeouts) are not retried on another model, even when the reviewer process reports them. Models outside `allowedModels`, and the one that just failed, are skipped. Other failures are not retried. The round and findings record the model that actually reviewed; if every model fails, the error lists each attempt. Without it, such a review fails as before. Must be a list of non-empty model names; anything else is refused when the review starts. |
 
 Built-in `testNamePattern` defaults, chosen by the `adapter` label (shown
 JSON-escaped, so you can paste one into `.tdd-config.json` as a starting
@@ -383,13 +393,24 @@ An external model reviews committed work and Claude fixes the findings, with
 the server running the reviewer and tracking the rounds. Used by the
 `/implement-and-review` and `/review-and-fix` skills.
 
-- `start_review(range, reviewer?, model?, thinking?)` — `range` is
-  `<sha>..HEAD`. Runs the reviewer in the background (read-only, no MCP,
+- `start_review(range?, reviewer?, model?, thinking?, categories?)` — `range` is
+  `<sha>..HEAD`; when omitted it runs from the merge-base with the main
+  branch (`origin/HEAD`, else `main`, `master`, `origin/main`,
+  `origin/master`) to HEAD, and errors if there is no such branch or no
+  commits past it. Runs the reviewer in the background (read-only, no MCP,
   no repo instructions) and returns a `reviewId`. Refused while a TDD
   feature is in progress. Reviewers: `pi` (`pi -p --mode json`) and
   `claude` (headless `claude -p`; `thinking` maps to `--effort`). The
-  reviewer binary must be on `PATH`.
-- `await_review(reviewId, timeoutSeconds?)` — `pending`, `failed` (with the
+  reviewer binary must be on `PATH`. `categories` limits the review to a
+  non-empty subset of `bugs`, `missing-tests`, `security` and
+  `performance` (all four when omitted): the reviewer is asked only for
+  those, and findings in any other category are dropped. A subset gets
+  its own scope and round history, `review:<startSha>[bugs,security]`
+  (categories in that order), so reviewing other categories later covers
+  the whole range again.
+- `await_review(reviewId?, timeoutSeconds?)` — waits on `reviewId`, or on
+  the most recently started review when it's omitted (an error if none
+  was started). Returns `pending`, `failed` (with the
   error — never treat it as "no findings"), or `done` with the findings and
   a `decision`: `done` (no open medium-or-higher findings), `continue`, or
   `escalate` (3 rounds hit with blocking findings still open, or a finding
@@ -439,8 +460,55 @@ the server running the reviewer and tracking the rounds. Used by the
   - `regressionScope` — when a base-level REFACTOR closes and
     `defaultTestDir` is configured, `run_tests` first returns
     `needsRegressionScopeConfirmation`; re-call with a target expression to
-    sweep instead of `defaultTestDir`, or `"skip"` to skip the sweep.
+    sweep instead of `defaultTestDir`, or `"skip"` to skip the sweep. The
+    response carries `suggestedScope` and `fullSuiteScope` (the whole
+    `defaultTestDir`). `suggestedScope` comes from the adapter's optional
+    `scope.sh` (next to the adapter executable), called as
+    `scope.sh <project_root> <changed file>...` with the files `git status`
+    reports as modified or untracked; it prints `{"scope": "<target
+    expression>"}`, or `{"scope": null}` when it can't map them. Without the
+    script — or when it fails, hangs (30s) or prints anything else —
+    `suggestedScope` is `defaultTestDir`.
+    The bundled pytest adapter's `scope.sh` maps each changed test file to
+    itself and any other source file to the nearest `tests/` directory of
+    its package (walking up from the file); `conftest.py` maps to its
+    directory, docs are ignored, and pytest config or dependency manifest
+    (`requirements*.txt`, `setup.py`, `*.lock`, …) changes or a file with no
+    `tests/` directory above it give `null`.
+    The cargo adapter's `scope.sh` gives `-p <crate>` for each crate owning
+    a changed file — workspace members from the root `Cargo.toml` (globs and
+    `exclude` honored), the root package and in-workspace path dependencies
+    — and every workspace crate depending on one of them; the root
+    `Cargo.toml`, `Cargo.lock`,
+    `.cargo/`, toolchain files or a file outside every crate give `null`.
+    The vitest adapter's `scope.sh` gives `related <file>...`, which its
+    `run.sh` runs as `vitest related --run <file>...` — only the tests whose
+    import graph reaches a changed file; docs (README/CHANGELOG/LICENSE-style
+    text files, or text files under `doc(s)/`, at the root or a package
+    root — a directory with a `package.json`) and deleted
+    test files are ignored, and other `.md`/`.rst`/`.txt` files (possible
+    fixtures), package manifests, lockfiles, `tsconfig*.json`, vite/vitest
+    config, workspace or setup files, dotenv files, a file a vite/vitest
+    config — or a config module it imports — references (`setupFiles`,
+    `globalSetup`, …; configs under `node_modules`, build output, `vendor/`
+    or `tmp/` aren't searched), one those import by relative path, an imported
+    config module, a deleted source file or a file outside the project
+    give `null` — as does any file once a config module or setup file imports an alias
+    (neither relative, a Node builtin nor an installed package; a workspace
+    package linked into `node_modules` counts as project source) or a
+    relative path that names no file.
   - `recreateDb: true` — prepend `recreateDbArgs` (see the table above).
+    When it is unset, the adapter's optional `recreate-db.sh` (next to the
+    adapter executable), called as `recreate-db.sh <project_root>`, supplies
+    the default by printing `{"args": "<runner arguments>"}`, or
+    `{"args": null}` for none. Without the script — or when it fails, hangs
+    (30s) or prints anything else — `recreateDb` keeps the clear error.
+    The bundled pytest adapter's script gives `--create-db` when the pytest
+    `run.sh` would run — the project's `.venv/bin/pytest`, else the one on
+    `PATH` (one that can't be executed is skipped, as `run.sh` does) —
+    lists pytest-django among its registered plugins (`pytest -VV`). An installed console runner
+    (`pytest-adapter-runner`, …) uses its bundled adapter's `scope.sh` and
+    `recreate-db.sh`.
   - `advance: true` — also perform the `verify()` step in the same call when
     the result is exactly the expected checkpoint: an assertion failure in
     RED, or green coming out of IMPLEMENT. It never advances a missing-name
@@ -517,6 +585,22 @@ sends):
 - `/tdd-start-skeleton <feature-name> <test-file>` — same, but RED uses
   `write_test_skeleton` and pauses for you to fill in TODOs before
   continuing.
+
+**The workflow skills are also served by the server itself, as MCP
+prompts** (`prompts/list`, `prompts/get`): `implement-and-review`,
+`tdd-start`, `tdd-start-verify`, `catch-up` and the rest of the TDD/review
+skills, so a project needs no copies of them under `.claude/`, `.codex/`,
+`.pi/` or `.agents/` — in Claude Code they show up as
+`/mcp__outside-in-tdd__<skill>`. Each takes one optional free-text
+`arguments` value, appended to the skill as `Arguments given: …`. A skill
+that says to read one of the shared workflow docs (`.agents/docs/review-loop.md`,
+`tdd-verify-protocol.md`, `tdd-regression-check.md`,
+`tdd-review-checklist.md`) is served with that doc's text appended, plus any
+doc it refers to in turn, so it works in a project that has no `.agents/`.
+The served copies live in `core/skills/<name>/SKILL.md` and `core/docs/`
+(shipped as package data) and are kept identical to this repo's
+`.agents/skills/` and `.agents/docs/` by a test. Hooks still have to be
+project files.
 
 Both are just prompt templates (`$1`/`$2` filled in from what you type after
 the command) — nothing MCP-specific about the mechanism, they just save you

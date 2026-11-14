@@ -1,0 +1,35 @@
+---
+name: tdd-review
+description: Check a completed feature or bugfix for missing tests, security issues, bugs, or performance issues (standalone version of the end-of-feature check)
+---
+
+This is the standalone version of the check that normally runs at the end
+of `tdd-start` — use it when that step got skipped, or when re-running it
+later on something already done.
+
+## Determine scope
+
+Ask, via a structured choice tool if one is available, otherwise as plain
+text (and wait for the reply), what to review:
+- Uncommitted changes (`git diff` / `git status`)
+- The most recent commit (`git show` / `git log -1`)
+- Everything since branching from the base branch (e.g. `git diff
+  main...HEAD`)
+- A specific file or directory to be named
+
+If "a specific file or directory" is picked, ask for the path before
+continuing.
+
+Derive a `scope` key from the choice, for the shared findings store:
+- Uncommitted changes -> `diff:uncommitted`
+- The most recent commit -> `diff:last-commit`
+- Everything since branching -> `diff:since-main`
+- A specific file/directory -> `file:<path>` (the path as given)
+
+## Run the check
+
+Once the scope is settled, read `.agents/docs/tdd-review-checklist.md` and
+follow it, scoped to what was determined above (the whole repo only if
+that's genuinely what was picked), passing the `scope` key derived above.
+A chosen finding becomes the next `tdd-start` feature — hand it off as the
+feature name; don't start writing code in this skill.

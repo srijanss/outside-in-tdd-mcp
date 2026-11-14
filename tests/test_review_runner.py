@@ -295,3 +295,238 @@ def test_a_completed_review_is_recorded_as_a_round_but_a_failed_one_is_not(repo)
     assert (round_one["round"], round_one["start"], round_one["head"]) == (1, first, head)
     assert (round_one["reviewer"], round_one["model"]) == ("pi", "openai/m")
     assert round_one["findings"] == ok["findings"]
+
+
+def test_a_review_for_some_categories_asks_for_and_keeps_only_those(repo):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    leak = {**FINDING, "id": "token-in-log", "category": "security"}
+    stdins = []
+
+    def runner(argv, cwd, stdin):
+        stdins.append(stdin)
+        return findings_reply(FINDING, leak)
+
+    manager = make_manager(repo, runner)
+    review_id = manager.start(f"{first}..HEAD", categories=["security"])
+    result = manager.await_result(review_id, timeout=10)
+
+    assert [f["id"] for f in result["findings"]] == ["token-in-log"]
+    assert "missing-tests" not in stdins[0]
+    rounds = json.loads((repo / ".tdd-review-rounds.json").read_text())
+    [round_entry] = rounds[f"review:{first}[security]"]
+    assert [f["id"] for f in round_entry["findings"]] == ["token-in-log"]
+
+
+@pytest.mark.parametrize(
+    "categories, suffix",
+    [
+        (None, ""),
+        (["security", "bugs"], "[bugs,security]"),
+        (["performance", "security", "missing-tests", "bugs"], ""),
+    ],
+)
+def test_each_category_subset_keeps_its_own_round_history(repo, categories, suffix):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    manager = make_manager(repo, lambda argv, cwd, stdin: findings_reply())
+
+    review_id = manager.start(f"{first}..HEAD", categories=categories)
+    result = manager.await_result(review_id, timeout=10)
+
+    # Subsets are named in canonical order; all four is the plain scope.
+    assert result["scope"] == f"review:{first}{suffix}"
+    assert manager.latest_review_scope == result["scope"]
+    rounds = json.loads((repo / ".tdd-review-rounds.json").read_text())
+    assert list(rounds) == [result["scope"]]
+
+
+def test_switching_categories_between_rounds_reviews_each_subset_from_the_start(repo):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    stdins = []
+
+    def runner(argv, cwd, stdin):
+        stdins.append(stdin)
+        return findings_reply()
+
+    manager = make_manager(repo, runner)
+
+    def review(categories):
+        review_id = manager.start(f"{first}..HEAD", categories=categories)
+        return manager.await_result(review_id, timeout=10)
+
+    review(["security"])
+    # Unchanged HEAD: another subset and the full review still run, on the
+    # whole range; a repeat of the same subset is refused.
+    review(["bugs"])
+    review(None)
+    with pytest.raises(ValueError, match="No new commits"):
+        manager.start(f"{first}..HEAD", categories=["security"])
+    commit(repo, "c.py")
+    # A new commit: the repeated subsets review only it, a new subset
+    # reviews everything.
+    review(["security"])
+    review(None)
+    review(["performance"])
+
+    whole = ["+b.py" in s and "+c.py" not in s for s in stdins[:3]]
+    assert whole == [True, True, True]
+    assert ["+b.py" in s for s in stdins[3:]] == [False, False, True]
+    assert all("+c.py" in s for s in stdins[3:])
+    rounds = json.loads((repo / ".tdd-review-rounds.json").read_text())
+    assert {scope: len(r) for scope, r in rounds.items()} == {
+        f"review:{first}[security]": 2,
+        f"review:{first}[bugs]": 1,
+        f"review:{first}": 2,
+        f"review:{first}[performance]": 1,
+    }
+
+
+def pi_error(message):
+    events = [
+        {"type": "message_end", "message": {
+            "role": "assistant", "content": [], "stopReason": "error",
+            "errorMessage": message}},
+        {"type": "agent_settled", "aborted": False},
+    ]
+    return "\n".join(json.dumps(e) for e in events) + "\n"
+
+
+def claude_error(message):
+    return json.dumps({"type": "result", "subtype": "success", "is_error": True,
+                       "result": message})
+
+
+FALLBACK_CONFIG = {"reviewers": {"default": {"model": "m/a"},
+                                 "fallbackModels": ["m/a", "m/b"]}}
+
+
+@pytest.mark.parametrize(
+    "reviewer, replies, expected",
+    [
+        # Only quota/access errors move on to the next model.
+        ("pi", [pi_error("connection reset by peer")],
+         {"status": "failed", "calls": ["m/a"], "error": ["connection reset"]}),
+        # Every model out of quota: the error names each attempt.
+        ("pi", [pi_error("429 rate limit exceeded"), pi_error("insufficient_quota")],
+         {"status": "failed", "calls": ["m/a", "m/b"],
+          "error": ["m/a", "rate limit", "m/b", "insufficient_quota"]}),
+        ("claude", [claude_error("Credit balance is too low"),
+                    json.dumps({"type": "result", "subtype": "success",
+                                "is_error": False, "terminal_reason": "completed",
+                                "result": '```json\n{"findings": []}\n```'})],
+         {"status": "done", "calls": ["m/a", "m/b"]}),
+        ("pi", [pi_error("403 Forbidden: no access to model m/a"),
+                pi_stream("not json"), findings_reply()],
+         {"status": "done", "calls": ["m/a", "m/b", "m/b"]}),
+    ],
+)
+def test_only_quota_or_access_errors_fall_back_to_the_next_model(
+    repo, reviewer, replies, expected
+):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    calls = []
+
+    def runner(argv, cwd, stdin):
+        calls.append(argv[argv.index("--model") + 1])
+        return replies.pop(0)
+
+    manager = make_manager(repo, runner, config=FALLBACK_CONFIG)
+    result = manager.await_result(
+        manager.start(f"{first}..HEAD", reviewer=reviewer), timeout=10)
+
+    assert result["status"] == expected["status"]
+    assert calls == expected["calls"]
+    for fragment in expected.get("error", []):
+        assert fragment in result["error"]
+
+
+@pytest.mark.parametrize(
+    "first_reply, calls",
+    [
+        # Local failures switching models cannot fix.
+        (PermissionError("[Errno 13] Permission denied: '/repo/.git'"), 1),
+        (OSError("insufficient disk space"), 1),
+        (RuntimeError("could not access the repository: 403"), 1),
+        # A reviewer error that isn't about quota or access.
+        (pi_error("insufficient disk space to write the session"), 1),
+        (pi_error("permission to run tool bash denied"), 1),
+        # The reviewer process itself reporting a provider quota error.
+        ("process:pi exited 1 with no output: Error: 429 quota exceeded", 2),
+    ],
+)
+def test_only_provider_reported_quota_or_access_errors_fall_back(
+    repo, first_reply, calls
+):
+    from core.reviewers import ReviewerProcessError
+
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    replies = [first_reply, findings_reply()]
+    seen = []
+
+    def runner(argv, cwd, stdin):
+        seen.append(argv)
+        reply = replies.pop(0)
+        if isinstance(reply, BaseException):
+            raise reply
+        if reply.startswith("process:"):
+            raise ReviewerProcessError(reply.removeprefix("process:"))
+        return reply
+
+    manager = make_manager(repo, runner, config=FALLBACK_CONFIG)
+    result = manager.await_result(manager.start(f"{first}..HEAD"), timeout=10)
+
+    assert len(seen) == calls
+    assert result["status"] == ("done" if calls == 2 else "failed")
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "pi exited 1 with no output: Disk quota exceeded",
+        "pi exited 1 with no output: OSError: [Errno 122] Disk quota exceeded",
+        "pi exited 1 with no output: [Errno 28] No space left on device",
+        "pi exited 1 with no output: EACCES: permission denied, open '/x' (403)",
+    ],
+)
+def test_a_local_failure_reported_by_the_reviewer_process_does_not_fall_back(
+    repo, stderr
+):
+    from core.reviewers import ReviewerProcessError
+
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    seen = []
+
+    def runner(argv, cwd, stdin):
+        seen.append(argv)
+        raise ReviewerProcessError(stderr)
+
+    manager = make_manager(repo, runner, config=FALLBACK_CONFIG)
+    result = manager.await_result(manager.start(f"{first}..HEAD"), timeout=10)
+
+    assert len(seen) == 1
+    assert result["status"] == "failed"
+
+
+def test_a_provider_permission_denied_error_falls_back_to_the_next_model(repo):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    replies = [
+        pi_error("403 Permission denied: model not available for this account"),
+        findings_reply(),
+    ]
+    seen = []
+
+    def runner(argv, cwd, stdin):
+        seen.append(argv)
+        return replies.pop(0)
+
+    manager = make_manager(repo, runner, config=FALLBACK_CONFIG)
+    result = manager.await_result(manager.start(f"{first}..HEAD"), timeout=10)
+
+    assert len(seen) == 2
+    assert result["status"] == "done"

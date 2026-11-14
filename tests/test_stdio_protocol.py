@@ -117,3 +117,38 @@ def test_a_nested_feature_runs_end_to_end_over_stdio(tmp_path):
 
     # State went to the throwaway project, not this repo.
     assert (tmp_path / ".tdd-state.json").exists()
+
+
+async def initialize_and_read_instructions(root: Path) -> str | None:
+    params = StdioServerParameters(
+        command=str(SERVER),
+        cwd=str(root),
+        env={
+            "PATH": os.environ["PATH"],
+            "HOME": str(root),
+            "TDD_PROJECT_ROOT": str(root),
+        },
+    )
+    with anyio.fail_after(60):
+        async with stdio_client(params) as (read, write):
+            async with ClientSession(read, write) as session:
+                result = await session.initialize()
+                return result.instructions
+
+
+def test_initialize_instructions_name_implement_and_review_as_default(tmp_path):
+    make_project(tmp_path)
+
+    instructions = anyio.run(initialize_and_read_instructions, tmp_path)
+
+    assert instructions, "server sent no instructions at initialize"
+    text = instructions.lower()
+    # The default for any feature, fix or review finding.
+    assert "implement-and-review" in text
+    assert "by default" in text
+    for word in ("feature", "fix", "review finding", "commit", "review"):
+        assert word in text, word
+    # The other workflows only when the user names them.
+    for other in ("tdd-start", "tdd-start-verify"):
+        assert other in text, other
+    assert "only when the user names" in text

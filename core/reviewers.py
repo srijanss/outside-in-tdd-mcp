@@ -1,5 +1,13 @@
+import json
+import re
+
+
 class ReviewerConfigError(ValueError):
     pass
+
+
+class ReviewerProcessError(RuntimeError):
+    """The reviewer process failed without producing any output."""
 
 
 # Isolation: no session, no MCP (the reviewer must not reach this server),
@@ -71,3 +79,59 @@ def build_reviewer_command(
         "argv": argv,
         "stdin": prompt,
     }
+
+
+# Provider phrasings meaning the model can't serve this caller right now
+# (quota, rate limit, billing, auth/model access), not a problem with the
+# review itself. Only matched against errors the reviewer reported.
+QUOTA_OR_ACCESS_ERROR = re.compile(
+    r"quota|rate.?limit|too many requests|\b429\b|\b40[13]\b|"
+    r"unauthori[sz]ed|forbidden|billing|credit balance|out of credits|"
+    r"usage.?limit|invalid.?api.?key|"
+    r"(?:no|denied|lacks?|does not have|doesn't have|don't have) access to (?:the )?model|"
+    r"model\b[^.]*\bnot (?:available|enabled|allowed)",
+    re.IGNORECASE,
+)
+
+
+# Operating-system failures on this machine (disk quota, full disk, file
+# permissions via EACCES/EPERM or an errno). Another model would fail the
+# same way, so these never count as a provider quota/access error even if
+# they also contain one of the words above. A bare "permission denied" is
+# left out: providers use it for model-access errors too.
+LOCAL_SYSTEM_ERROR = re.compile(
+    r"disk quota|no space left|\[errno \d+\]|\be(?:acces|perm|dquot|nospc|rofs)\b|"
+    r"read-only file system",
+    re.IGNORECASE,
+)
+
+
+def is_quota_or_access_error(message: str) -> bool:
+    if LOCAL_SYSTEM_ERROR.search(message):
+        return False
+    return bool(QUOTA_OR_ACCESS_ERROR.search(message))
+
+
+def fallback_models(config: dict | None, model: str | None) -> list[str]:
+    """reviewers.fallbackModels to try, in order, after ``model`` fails on a
+    quota/access error: itself and models outside allowedModels skipped."""
+    reviewers = (config or {}).get("reviewers") or {}
+    allowed = reviewers.get("allowedModels")
+    configured = reviewers.get("fallbackModels")
+    if configured is None:
+        configured = []
+    if not isinstance(configured, list) or not all(
+        isinstance(name, str) and name.strip() for name in configured
+    ):
+        raise ReviewerConfigError(
+            "reviewers.fallbackModels must be a list of non-empty model names, "
+            f"got {json.dumps(configured)}"
+        )
+    fallbacks = []
+    for candidate in configured:
+        if candidate == model or candidate in fallbacks:
+            continue
+        if allowed and candidate not in allowed:
+            continue
+        fallbacks.append(candidate)
+    return fallbacks

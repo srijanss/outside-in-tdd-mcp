@@ -13,15 +13,28 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 from dataclasses import dataclass, field
 from typing import Any
 
+from core.adapter_entrypoints import bundled_adapter_dir
+
 DEFAULT_TIMEOUT_S = 120
+# How long to wait for a SIGKILLed adapter to be reaped.
+_CLEANUP_WAIT_S = 5
 
 
 class AdapterError(Exception):
     """Raised when an adapter can't be run or returns malformed output."""
+
+
+class AdapterTimeoutError(AdapterError):
+    """The adapter ran past its timeout; ``timeout_s`` is the limit it hit."""
+
+    def __init__(self, message: str, timeout_s: int) -> None:
+        super().__init__(message)
+        self.timeout_s = timeout_s
 
 
 @dataclass
@@ -121,24 +134,35 @@ def run_adapter(
                     f"TDD_ADAPTER_TIMEOUT_S must be an integer, got {raw_timeout!r}"
                 ) from exc
     try:
-        proc = subprocess.run(
+        # Own session/process group, so a timeout can kill the whole tree —
+        # an adapter that forks (no exec) would otherwise leave its children
+        # running and holding the stdout pipe open.
+        proc = subprocess.Popen(
             [adapter_path, test_target, project_root],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=timeout_s,
+            start_new_session=True,
         )
     except FileNotFoundError as exc:
         raise AdapterError(f"Adapter not found at '{adapter_path}'") from exc
+    try:
+        raw_stdout, raw_stderr = proc.communicate(timeout=max(timeout_s, 0))
     except subprocess.TimeoutExpired as exc:
-        raise AdapterError(
-            f"Adapter timed out after {timeout_s}s: {adapter_path}"
+        _kill_process_group(proc)
+        raise AdapterTimeoutError(
+            f"Adapter timed out after {timeout_s}s: {adapter_path}", timeout_s
         ) from exc
+    except BaseException:
+        # Interrupted (e.g. KeyboardInterrupt): don't orphan the adapter.
+        _kill_process_group(proc)
+        raise
 
-    stdout = proc.stdout.strip()
+    stdout = raw_stdout.strip()
     if not stdout:
         raise AdapterError(
             f"Adapter produced no stdout output (exit code {proc.returncode}). "
-            f"stderr: {proc.stderr[-1000:]}"
+            f"stderr: {raw_stderr[-1000:]}"
         )
 
     try:
@@ -149,3 +173,110 @@ def run_adapter(
         ) from exc
 
     return AdapterResult.from_json(data)
+
+
+def _kill_process_group(proc: subprocess.Popen) -> None:
+    """SIGKILL the adapter's whole process group, then reap the adapter.
+
+    Bounded on purpose: a descendant that left the group (setsid) may still
+    hold the pipes, so close them instead of waiting for EOF.
+    """
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    for pipe in (proc.stdout, proc.stderr):
+        if pipe is not None:
+            pipe.close()
+    try:
+        proc.wait(timeout=_CLEANUP_WAIT_S)
+    except subprocess.TimeoutExpired:
+        # Not reaped in time (e.g. stuck in uninterruptible I/O). Don't let
+        # cleanup replace the caller's error; subprocess reaps the zombie
+        # later via its own _active list once proc is collected.
+        pass
+
+
+def _run_sibling_script(
+    adapter_path: str, name: str, args: list[str], timeout_s: int
+) -> dict | None:
+    """JSON object printed by the executable ``name`` next to the adapter,
+    or None when it is missing, fails, hangs or prints anything else."""
+    script = os.path.join(os.path.dirname(adapter_path), name)
+    bundled = bundled_adapter_dir(adapter_path)
+    if not os.access(script, os.X_OK) and bundled is not None:
+        script = str(bundled / name)
+    if not os.access(script, os.X_OK):
+        return None
+    try:
+        proc = subprocess.Popen(
+            [script, *args],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError:
+        return None
+    try:
+        stdout, _ = proc.communicate(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        _kill_process_group(proc)
+        return None
+    except BaseException:
+        _kill_process_group(proc)
+        raise
+    if proc.returncode != 0:
+        return None
+    try:
+        # Bytes in: invalid UTF-8 surfaces here as a ValueError too.
+        data = json.loads(stdout)
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _non_blank(value) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value.strip()
+
+
+def scope_for_changed_files(
+    adapter_path: str,
+    project_root: str,
+    changed_files: list[str],
+    timeout_s: int = 30,
+) -> str | None:
+    """The adapter's own regression scope for ``changed_files``, or None.
+
+    Optional extension of the adapter contract: an executable ``scope.sh``
+    next to the adapter, called as ``scope.sh <project_root> <file>...``,
+    prints ``{"scope": "<test target expression>"}`` — or ``{"scope":
+    null}`` when it can't map the files. A missing, failing, hanging or
+    malformed script means no mapping, so the caller falls back to the
+    whole suite.
+    """
+    if not changed_files:
+        return None
+    data = _run_sibling_script(
+        adapter_path, "scope.sh", [project_root, *changed_files], timeout_s
+    )
+    return _non_blank((data or {}).get("scope"))
+
+
+def default_recreate_db_args(
+    adapter_path: str, project_root: str, timeout_s: int = 30
+) -> str | None:
+    """The adapter's own runner arguments for rebuilding a cached test
+    database, used when ``recreateDbArgs`` is unset, or None.
+
+    Optional extension of the adapter contract: an executable
+    ``recreate-db.sh`` next to the adapter, called as ``recreate-db.sh
+    <project_root>``, prints ``{"args": "<runner arguments>"}`` — or
+    ``{"args": null}`` when the project has no such flag. A missing,
+    failing, hanging or malformed script means no default.
+    """
+    data = _run_sibling_script(
+        adapter_path, "recreate-db.sh", [project_root], timeout_s
+    )
+    return _non_blank((data or {}).get("args"))

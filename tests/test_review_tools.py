@@ -3,6 +3,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 
 import pytest
 
@@ -407,3 +408,304 @@ def test_the_claude_reviewer_runs_headless_and_yields_the_same_findings(repo):
     assert argv[:2] == ["claude", "-p"]
     assert argv[argv.index("--model") + 1] == "opus"
     assert argv[argv.index("--effort") + 1] == "high"
+
+
+def test_await_review_without_a_review_id_waits_on_the_latest_review(repo):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    server = make_server(repo, FakeRunner(findings_reply(FINDING), findings_reply()))
+
+    assert "error" in call(server, "await_review", timeoutSeconds=1)
+    assert "start_review" in call(server, "await_review", timeoutSeconds=1)["error"]
+
+    call(server, "start_review", range=f"{first}..HEAD")
+    assert call(server, "await_review", timeoutSeconds=10)["findings"][0]["id"] == (
+        "missing-lock"
+    )
+
+    commit(repo, "c.py")
+    call(server, "start_review", range=f"{first}..HEAD")
+    result = call(server, "await_review", timeoutSeconds=10)
+    assert (result["status"], result["findings"]) == ("done", [])
+
+
+def test_list_review_findings_without_a_scope_lists_the_latest_reviews_findings(repo):
+    first = commit(repo, "a.py")
+    second = commit(repo, "b.py")
+    commit(repo, "c.py")
+    other = {**FINDING, "id": "unchecked-input", "file": "c.py"}
+    server = make_server(
+        repo, FakeRunner(findings_reply(FINDING), findings_reply(other))
+    )
+
+    assert "start_review" in call(server, "list_review_findings")["error"]
+
+    call(server, "start_review", range=f"{first}..HEAD")
+    call(server, "await_review", timeoutSeconds=10)
+    call(server, "start_review", range=f"{second}..HEAD")
+    call(server, "await_review", timeoutSeconds=10)
+
+    listed = call(server, "list_review_findings")
+    assert listed["scope"] == f"review:{second}"
+    assert [f["id"] for f in listed["findings"]] == ["unchecked-input"]
+
+    # A restarted server finds the latest review from the recorded rounds.
+    restarted = make_server(repo, FakeRunner())
+    assert call(restarted, "list_review_findings")["scope"] == f"review:{second}"
+
+
+class GatedRunner:
+    """Each call blocks until its gate opens, then returns its reply (or
+    raises it, if it's an exception)."""
+
+    def __init__(self, *gated_replies):
+        self.gated_replies = list(gated_replies)
+        self.entered = [threading.Event() for _ in gated_replies]
+        self.calls = 0
+        self.lock = threading.Lock()
+
+    def __call__(self, argv, cwd, stdin):
+        with self.lock:
+            index = self.calls
+            self.calls += 1
+        gate, reply = self.gated_replies[index]
+        self.entered[index].set()
+        if not gate.wait(10):
+            raise AssertionError(f"gate {index} was never opened")
+        if isinstance(reply, BaseException):
+            raise reply
+        return reply
+
+    def started(self, index):
+        """Wait until call ``index`` has claimed its gate."""
+        assert self.entered[index].wait(10), f"call {index} never reached the runner"
+
+    def release_all(self):
+        for gate, _ in self.gated_replies:
+            gate.set()
+
+
+def test_the_default_findings_scope_is_the_latest_started_review_then_the_latest_round(
+    repo,
+):
+    first = commit(repo, "a.py")
+    second = commit(repo, "b.py")
+    third = commit(repo, "c.py")
+    commit(repo, "d.py")
+    other = {**FINDING, "id": "unchecked-input", "file": "c.py"}
+    gate_a, gate_b, gate_c = threading.Event(), threading.Event(), threading.Event()
+    runner = GatedRunner(
+        (gate_a, findings_reply(FINDING)),
+        (gate_b, findings_reply(other)),
+        (gate_c, OSError("reviewer crashed")),
+    )
+    server = make_server(repo, runner)
+    try:
+        check_default_scope_order(server, runner, repo, first, second, third)
+    finally:
+        runner.release_all()
+
+
+def check_default_scope_order(server, runner, repo, first, second, third):
+    gate_a, gate_b, gate_c = (gate for gate, _ in runner.gated_replies)
+    # Started A then B, but B finishes (and records its round) first.
+    review_a = call(server, "start_review", range=f"{first}..HEAD")["reviewId"]
+    runner.started(0)
+    review_b = call(server, "start_review", range=f"{second}..HEAD")["reviewId"]
+    runner.started(1)
+    gate_b.set()
+    assert call(server, "await_review", reviewId=review_b, timeoutSeconds=10)[
+        "status"
+    ] == "done"
+    gate_a.set()
+    assert call(server, "await_review", reviewId=review_a, timeoutSeconds=10)[
+        "status"
+    ] == "done"
+
+    assert call(server, "list_review_findings")["scope"] == f"review:{second}"
+    restarted = make_server(repo, FakeRunner())
+    assert call(restarted, "list_review_findings")["scope"] == f"review:{first}"
+
+    # A started review that fails records no round: the live server still
+    # defaults to it, a restarted one to the latest recorded round.
+    call(server, "start_review", range=f"{third}..HEAD")
+    gate_c.set()
+    assert call(server, "await_review", timeoutSeconds=10)["status"] == "failed"
+    assert call(server, "list_review_findings") == {
+        "scope": f"review:{third}",
+        "findings": [],
+    }
+    restarted = make_server(repo, FakeRunner())
+    assert call(restarted, "list_review_findings")["scope"] == f"review:{first}"
+
+
+def test_start_review_without_a_range_reviews_from_the_main_branch_merge_base(repo):
+    base = commit(repo, "a.py")
+    git(repo, "branch", "-M", "main")
+    server = make_server(repo, FakeRunner(findings_reply(FINDING)))
+
+    # On main itself there is nothing past the merge-base to review.
+    assert "no new commits" in call(server, "start_review")["error"].lower()
+
+    git(repo, "checkout", "-q", "-b", "feature")
+    commit(repo, "b.py")
+    git(repo, "checkout", "-q", "main")
+    commit(repo, "main-only.py")  # moves main past the merge-base
+    git(repo, "checkout", "-q", "feature")
+    commit(repo, "c.py")
+
+    call(server, "start_review")
+    result = call(server, "await_review", timeoutSeconds=10)
+    assert result["scope"] == f"review:{base}"
+
+    # No commits since that round: refused, as with an explicit range.
+    assert "No new commits" in call(server, "start_review")["error"]
+
+
+def test_start_review_without_a_range_needs_a_main_branch(repo):
+    commit(repo, "a.py")
+    git(repo, "branch", "-M", "trunk-ish")
+    server = make_server(repo, FakeRunner())
+    assert "main branch" in call(server, "start_review")["error"]
+
+
+def test_the_default_range_only_counts_branches_not_tags_named_like_one(repo):
+    base = commit(repo, "a.py")
+    git(repo, "branch", "-M", "master")
+    git(repo, "checkout", "-q", "-b", "feature")
+    tagged = commit(repo, "b.py")
+    git(repo, "tag", "main", tagged)  # a tag, not the main branch
+    commit(repo, "c.py")
+    server = make_server(repo, FakeRunner(findings_reply(), findings_reply()))
+
+    call(server, "start_review")
+    assert call(server, "await_review", timeoutSeconds=10)["scope"] == f"review:{base}"
+
+    # A main branch wins over master even with a tag of the same name.
+    git(repo, "branch", "main", tagged)
+    call(server, "start_review")
+    assert call(server, "await_review", timeoutSeconds=10)["scope"] == (
+        f"review:{tagged}"
+    )
+
+
+def test_start_review_with_categories_asks_for_and_keeps_only_those(repo):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    leak = {**FINDING, "id": "token-in-log", "category": "security"}
+    runner = FakeRunner(findings_reply(FINDING, leak))
+    server = make_server(repo, runner)
+
+    call(server, "start_review", range=f"{first}..HEAD", categories=["security"])
+    result = call(server, "await_review", timeoutSeconds=10)
+
+    assert [f["id"] for f in result["findings"]] == ["token-in-log"]
+    assert result["scope"] == f"review:{first}[security]"
+    stored = call(server, "list_review_findings", scope=result["scope"])
+    assert [f["id"] for f in stored["findings"]] == ["token-in-log"]
+    prompt = runner.stdins[0]
+    assert "security" in prompt
+    assert "missing-tests" not in prompt
+
+
+@pytest.mark.parametrize("categories", [[], ["style"], "security"])
+def test_start_review_rejects_categories_outside_the_four(repo, categories):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    server = make_server(repo, FakeRunner())
+
+    result = call(server, "start_review", range=f"{first}..HEAD", categories=categories)
+
+    assert "bugs, missing-tests, security, performance" in result["error"]
+
+
+def test_reviews_for_other_categories_of_a_range_cover_the_whole_range(repo):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    runner = FakeRunner(findings_reply(), findings_reply(), findings_reply())
+    server = make_server(repo, runner)
+
+    # A security-only review does not stop a later bugs-only or full review
+    # of the same, unchanged range from checking all of it.
+    call(server, "start_review", range=f"{first}..HEAD", categories=["security"])
+    security = call(server, "await_review", timeoutSeconds=10)
+    call(server, "start_review", range=f"{first}..HEAD", categories=["bugs"])
+    bugs = call(server, "await_review", timeoutSeconds=10)
+    call(server, "start_review", range=f"{first}..HEAD")
+    full = call(server, "await_review", timeoutSeconds=10)
+
+    assert [r["status"] for r in (security, bugs, full)] == ["done"] * 3
+    assert all("+b.py" in prompt for prompt in runner.stdins)
+    assert [security["scope"], bugs["scope"], full["scope"]] == [
+        f"review:{first}[security]", f"review:{first}[bugs]", f"review:{first}"]
+
+
+def pi_error(message):
+    events = [
+        {"type": "agent_start"},
+        {"type": "message_end", "message": {
+            "role": "assistant", "content": [], "stopReason": "error",
+            "errorMessage": message}},
+        {"type": "agent_settled", "aborted": False},
+    ]
+    return "\n".join(json.dumps(e) for e in events) + "\n"
+
+
+def test_a_review_that_hits_a_quota_error_falls_back_to_the_next_allowed_model(repo):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    runner = FakeRunner(
+        pi_error("429 You exceeded your current quota"), findings_reply(FINDING))
+    server = make_server(repo, runner)
+    (repo / ".tdd-config.json").write_text(json.dumps({
+        "adapterPath": "pytest-adapter-runner",
+        "reviewers": {
+            "default": {"model": "openai/a"},
+            "allowedModels": ["openai/a", "openai/c"],
+            # openai/b is not allowed, so it is skipped.
+            "fallbackModels": ["openai/b", "openai/c"],
+        },
+    }))
+
+    result = run_review(server, first)
+
+    assert result["status"] == "done"
+    assert [f["model"] for f in result["findings"]] == ["openai/c"]
+    assert ["openai/a" in runner.calls[0], "openai/c" in runner.calls[1]] == [True, True]
+    [round_entry] = call(server, "list_review_rounds", scope=f"review:{first}")["rounds"]
+    assert round_entry["model"] == "openai/c"
+
+
+def test_without_fallback_models_a_quota_error_still_fails_the_review(repo):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    runner = FakeRunner(pi_error("429 You exceeded your current quota"))
+    server = make_server(repo, runner)
+
+    result = run_review(server, first)
+
+    assert result["status"] == "failed"
+    assert "quota" in result["error"]
+    assert len(runner.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "fallbacks",
+    ["openai/b", ["openai/b", 3], ["openai/b", ""], [None], {"model": "openai/b"}],
+)
+def test_a_malformed_fallback_models_setting_is_refused_when_the_review_starts(
+    repo, fallbacks
+):
+    first = commit(repo, "a.py")
+    commit(repo, "b.py")
+    runner = FakeRunner(findings_reply())
+    server = make_server(repo, runner)
+    (repo / ".tdd-config.json").write_text(json.dumps({
+        "adapterPath": "pytest-adapter-runner",
+        "reviewers": {"fallbackModels": fallbacks},
+    }))
+
+    refused = call(server, "start_review", range=f"{first}..HEAD", model="openai/a")
+
+    assert "fallbackModels must be a list of non-empty model names" in refused["error"]
+    assert runner.calls == []

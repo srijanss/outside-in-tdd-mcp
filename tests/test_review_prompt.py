@@ -71,3 +71,13 @@ def test_prompt_asks_for_all_four_review_categories():
     prompt = build_review_prompt(DIFF)
     for category in ("bugs", "missing-tests", "security", "performance"):
         assert category in prompt
+
+
+def test_a_prompt_for_some_categories_asks_only_for_those():
+    prompt = build_review_prompt(DIFF, categories=["security", "bugs"])
+
+    assert "1. bugs:" in prompt
+    assert "2. security:" in prompt
+    assert '"category": "bugs|security"' in prompt
+    assert "missing-tests" not in prompt
+    assert "performance" not in prompt

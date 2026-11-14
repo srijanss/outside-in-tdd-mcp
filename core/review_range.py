@@ -29,3 +29,56 @@ def resolve_review_range(range_spec: str, repo: str) -> dict[str, str]:
     if is_ancestor.returncode != 0:
         raise ValueError(f"Start commit {start} is not an ancestor of HEAD")
     return {"start": start, "head": head}
+
+
+# Fully qualified, so a tag named like a branch never stands in for it.
+MAIN_BRANCH_CANDIDATES = (
+    "refs/heads/main",
+    "refs/heads/master",
+    "refs/remotes/origin/main",
+    "refs/remotes/origin/master",
+)
+
+
+def _git(args: list[str], repo: str) -> str | None:
+    result = subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True)
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def _short(ref: str) -> str:
+    return ref.removeprefix("refs/heads/").removeprefix("refs/remotes/")
+
+
+def main_branch(repo: str) -> str | None:
+    """The full ref of the remote's default branch (origin/HEAD) if it
+    exists, else of the first of main, master, origin/main and
+    origin/master that does."""
+    remote_head = _git(["symbolic-ref", "-q", "refs/remotes/origin/HEAD"], repo)
+    for ref in (remote_head, *MAIN_BRANCH_CANDIDATES):
+        if ref and _git(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], repo):
+            return ref
+    return None
+
+
+def default_review_range(repo: str) -> str:
+    """'<merge-base with the main branch>..HEAD': the commits this branch
+    added."""
+    branch = main_branch(repo)
+    if branch is None:
+        raise ValueError(
+            "No range given and no main branch found (tried origin/HEAD, "
+            + ", ".join(_short(ref) for ref in MAIN_BRANCH_CANDIDATES)
+            + ") — pass range='<sha>..HEAD'."
+        )
+    base = _git(["merge-base", branch, "HEAD"], repo)
+    if base is None:
+        raise ValueError(
+            f"HEAD shares no history with {_short(branch)} — pass "
+            "range='<sha>..HEAD'."
+        )
+    if base == _rev_parse("HEAD", repo):
+        raise ValueError(
+            f"No new commits since the merge-base with {_short(branch)} — commit "
+            "work on a branch first, or pass range='<sha>..HEAD'."
+        )
+    return f"{base}..HEAD"

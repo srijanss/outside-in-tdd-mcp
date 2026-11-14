@@ -32,13 +32,25 @@ from mcp import types
 from mcp.server import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
 
-from core.adapter_contract import AdapterError, run_adapter
+from core.adapter_contract import (
+    DEFAULT_TIMEOUT_S,
+    AdapterError,
+    AdapterTimeoutError,
+    default_recreate_db_args,
+    run_adapter,
+    scope_for_changed_files,
+)
+from core.review_findings_parser import CATEGORIES as REVIEW_CATEGORIES
+from core.review_range import default_review_range
+from core.review_rounds import latest_scope as latest_review_scope
 from core.review_rounds import list_rounds as _list_review_rounds
 from core.review_runner import ReviewManager
+from core.reviewers import ReviewerProcessError
 from core.review_findings import list_review_findings as _list_review_findings
 from core.review_findings import record_review_finding as _record_review_finding
 from core.research_log import list_research as _list_research_entries
 from core.research_log import record_research as _record_research_entry
+from core.skill_prompts import skill_prompt, skill_prompts
 from core.state_machine import (
     InvalidTargetFilesError,
     NoActiveFeatureError,
@@ -58,6 +70,16 @@ PROJECT_ROOT = os.environ.get("TDD_PROJECT_ROOT") or str(Path.cwd())
 CONFIG_PATH = os.environ.get(
     "TDD_CONFIG_PATH", str(Path(PROJECT_ROOT) / ".tdd-config.json")
 )
+
+def with_required_params(tool: types.Tool) -> types.Tool:
+    """A copy of ``tool`` whose description ends by naming its required
+    parameters, so a client that hasn't loaded the schema yet still passes
+    them."""
+    required = tool.inputSchema.get("required") or []
+    names = ", ".join(required) if required else "none"
+    description = f"{tool.description or ''} Required parameters: {names}.".lstrip()
+    return tool.model_copy(update={"description": description})
+
 
 TOOLS = [
     types.Tool(
@@ -193,8 +215,10 @@ TOOLS = [
             "Auto-advances phase based on results. Closing a base-level "
             "REFACTOR with defaultTestDir configured returns "
             "needsRegressionScopeConfirmation instead of running the full "
-            "sweep — re-call with regressionScope set to a path/expression "
-            "(or \"skip\") to proceed. After a schema/model change, pass "
+            "sweep, with suggestedScope (narrowed to the changed files when "
+            "the adapter ships a scope.sh) and fullSuiteScope — re-call with "
+            "regressionScope set to suggestedScope (default), another "
+            "path/expression, or \"skip\" to proceed. After a schema/model change, pass "
             "recreateDb=true to rebuild a cached test DB (needs "
             "recreateDbArgs in .tdd-config.json). Pass advance=true to "
             "also do the verify() step in the same call when the result is "
@@ -202,7 +226,10 @@ TOOLS = [
             "green) — it does not advance a missing-name failure or a test "
             "that passed straight from RED, a RED cycle with no write_test, "
             "or a call already at VERIFY_RED/VERIFY_GREEN (all return "
-            "advanceSkipped with the reason). Adds driftWarning (also on run_tests and "
+            "advanceSkipped with the reason). Pass timeoutSeconds to give one "
+            "run a longer adapter timeout (up to maxAdapterTimeoutSeconds); "
+            "a timeout error carries retryTimeoutSeconds to retry with, or a "
+            "hint when already at the cap. Adds driftWarning (also on run_tests and "
             "return_to_parent) when files "
             "outside the declared test/target files changed (git repos only)."
         ),
@@ -214,6 +241,14 @@ TOOLS = [
                     "description": (
                         "Also call verify() in the same call when the "
                         "result is the expected checkpoint."
+                    ),
+                },
+                "timeoutSeconds": {
+                    "type": "integer",
+                    "description": (
+                        "Adapter timeout for this run, in seconds, up to "
+                        "maxAdapterTimeoutSeconds. On a timeout the error "
+                        "carries retryTimeoutSeconds to retry with."
                     ),
                 },
                 "recreateDb": {
@@ -399,11 +434,14 @@ TOOLS = [
     ),
     types.Tool(
         name="list_review_findings",
-        description="List persisted review findings for a feature or diff scope.",
+        description=(
+            "List persisted review findings for a feature or diff scope — "
+            "scope, or the latest review's scope when omitted."
+        ),
         inputSchema={
             "type": "object",
             "properties": {"scope": {"type": "string"}},
-            "required": ["scope"],
+            "required": [],
         },
     ),
     types.Tool(
@@ -428,8 +466,12 @@ TOOLS = [
             "(pi by default) sees only the diff, never the implementer's "
             "reasoning, and its validated findings are saved under scope "
             "'review:<startSha>'. Poll with await_review. range is "
-            "'<sha>..HEAD'; reviewer/model/thinking override the "
-            ".tdd-config.json 'reviewers.default' values."
+            "'<sha>..HEAD', or from the merge-base with the main branch "
+            "when omitted; reviewer/model/thinking override the "
+            ".tdd-config.json 'reviewers.default' values. categories "
+            "limits the review to a non-empty subset of bugs, "
+            "missing-tests, security and performance (all four when "
+            "omitted); findings outside it are dropped."
         ),
         inputSchema={
             "type": "object",
@@ -438,15 +480,20 @@ TOOLS = [
                 "reviewer": {"type": "string"},
                 "model": {"type": "string"},
                 "thinking": {"type": "string"},
+                "categories": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": list(REVIEW_CATEGORIES)},
+                },
             },
-            "required": ["range"],
+            "required": [],
         },
     ),
     types.Tool(
         name="await_review",
         description=(
             "Wait up to timeoutSeconds (default 60) for a review started "
-            "with start_review. Returns status 'pending' (call again), "
+            "with start_review — reviewId, or the most recently started "
+            "review when omitted. Returns status 'pending' (call again), "
             "'done' with findings, or 'failed' with an error — a failed "
             "review is never reported as zero findings."
         ),
@@ -456,7 +503,7 @@ TOOLS = [
                 "reviewId": {"type": "string"},
                 "timeoutSeconds": {"type": "number"},
             },
-            "required": ["reviewId"],
+            "required": [],
         },
     ),
     types.Tool(
@@ -522,6 +569,7 @@ TOOLS = [
         },
     ),
 ]
+TOOLS = [with_required_params(tool) for tool in TOOLS]
 
 
 # Caps on what a run_tests() response (and the last_result it gets stored
@@ -591,6 +639,8 @@ def load_config(config_path: str) -> dict[str, Any]:
     _require_string(config, "defaultTestDir", config_path, required=False)
     _require_string(config, "recreateDbArgs", config_path, required=False)
     _require_string(config, "testNamePattern", config_path, required=False)
+    for field in ("adapterTimeoutSeconds", "maxAdapterTimeoutSeconds"):
+        _require_positive_int(config, field, config_path)
     if "testNamePattern" in config:
         try:
             re.compile(config["testNamePattern"])
@@ -620,6 +670,100 @@ def _require_string(
         )
 
 
+def _require_positive_int(
+    config: dict[str, Any], field: str, config_path: str
+) -> None:
+    if field not in config:
+        return
+    value = config[field]
+    # bool is an int subclass — reject it explicitly.
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ConfigError(
+            f"'{config_path}' field '{field}' must be a positive integer "
+            f"(seconds), got {value!r}."
+        )
+
+
+DEFAULT_MAX_ADAPTER_TIMEOUT_S = 600
+
+
+def max_adapter_timeout(config: dict[str, Any]) -> int:
+    return config.get("maxAdapterTimeoutSeconds", DEFAULT_MAX_ADAPTER_TIMEOUT_S)
+
+
+def retry_timeout(used: int, cap: int) -> int | None:
+    """The timeout to suggest after a run timed out at ``used`` seconds.
+
+    Double it, capped at ``cap``; None once already at the cap, since a
+    retry could not get any longer.
+    """
+    if used >= cap:
+        return None
+    return min(used * 2, cap)
+
+
+def _adapter_failure(exc: AdapterError, config: dict[str, Any]) -> dict[str, Any]:
+    """The run_tests error payload for a failed adapter call.
+
+    A timeout also offers retryTimeoutSeconds, so the agent can retry with
+    a longer timeout without asking.
+    """
+    payload: dict[str, Any] = {"error": f"Adapter failed: {exc}"}
+    if isinstance(exc, AdapterTimeoutError):
+        cap = max_adapter_timeout(config)
+        retry = retry_timeout(exc.timeout_s, cap)
+        if retry is not None:
+            payload["retryTimeoutSeconds"] = retry
+        else:
+            payload["hint"] = (
+                f"Already at maxAdapterTimeoutSeconds ({cap}); raise it in "
+                ".tdd-config.json or narrow the test target to run longer."
+            )
+    return payload
+
+
+def resolve_adapter_timeout(
+    config: dict[str, Any], requested: Any = None
+) -> int:
+    """The adapter timeout for one run.
+
+    A per-call ``requested`` value wins over the env var and the config but
+    is never silently capped: asking above maxAdapterTimeoutSeconds is an
+    error naming that key, so the caller knows what to change.
+    """
+    cap = max_adapter_timeout(config)
+    if requested is not None:
+        # bool is an int subclass — reject it explicitly.
+        if isinstance(requested, bool) or not isinstance(requested, int) or (
+            requested <= 0
+        ):
+            raise AdapterError(
+                f"timeoutSeconds must be a positive integer, got {requested!r}"
+            )
+        if requested > cap:
+            raise AdapterError(
+                f"timeoutSeconds {requested} is above maxAdapterTimeoutSeconds "
+                f"({cap}); raise maxAdapterTimeoutSeconds in .tdd-config.json "
+                "to allow it."
+            )
+        return requested
+    raw_env = os.environ.get("TDD_ADAPTER_TIMEOUT_S")
+    if raw_env is not None:
+        try:
+            timeout = int(raw_env)
+        except ValueError as exc:
+            raise AdapterError(
+                f"TDD_ADAPTER_TIMEOUT_S must be an integer, got {raw_env!r}"
+            ) from exc
+        if timeout <= 0:
+            raise AdapterError(
+                f"TDD_ADAPTER_TIMEOUT_S must be a positive integer, got {raw_env!r}"
+            )
+    else:
+        timeout = config.get("adapterTimeoutSeconds", DEFAULT_TIMEOUT_S)
+    return min(timeout, cap)
+
+
 REVIEW_TIMEOUT_SECONDS = 1800
 
 
@@ -641,7 +785,9 @@ def _run_reviewer_subprocess(argv: list[str], cwd: str, stdin: str) -> str:
     )
     if not result.stdout.strip():
         tail = result.stderr.strip()[-500:]
-        raise RuntimeError(f"{argv[0]} exited {result.returncode} with no output: {tail}")
+        raise ReviewerProcessError(
+            f"{argv[0]} exited {result.returncode} with no output: {tail}"
+        )
     return result.stdout
 
 
@@ -820,10 +966,11 @@ class TDDServer:
             return []  # no snapshot (e.g. server restarted mid-level): unknown
         return sorted(self._read_test_names(path) - baseline)
 
-    def _worktree_state(self) -> dict[str, str | None] | None:
-        """Size+mtime signature of every file git reports as modified or untracked,
-        or None when git isn't available / this isn't a repository. The
-        server's own .tdd-* state files are left out."""
+    def _changed_paths(self, rename_sources: bool = False) -> list[str] | None:
+        """Project-relative paths git reports as modified or untracked, or
+        None when git isn't available / this isn't a repository. The
+        server's own .tdd-* state files are left out. ``rename_sources``
+        also lists the original path of each rename/copy."""
         try:
             out = subprocess.run(
                 ["git", "status", "--porcelain", "-z", "--untracked-files=all"],
@@ -845,22 +992,37 @@ class TDDServer:
             return None
         prefix = prefix_out.stdout.decode("utf-8", "replace").strip()
         entries = out.stdout.decode("utf-8", "replace").split("\0")
-        state: dict[str, str | None] = {}
-        skip_next = False
+        raw_paths: list[str] = []
+        source_next = False
         for entry in entries:
-            if skip_next:  # original path of a rename/copy
-                skip_next = False
+            if source_next:  # original path of a rename/copy
+                source_next = False
+                if rename_sources and entry:
+                    raw_paths.append(entry)
                 continue
             if len(entry) < 4:
                 continue
             if entry[0] in "RC" or entry[1] in "RC":
-                skip_next = True
-            path = entry[3:]
+                source_next = True
+            raw_paths.append(entry[3:])
+        paths: list[str] = []
+        for path in raw_paths:
             if not path.startswith(prefix):
                 continue  # outside project_root
             path = path[len(prefix):]
             if Path(path).name.startswith(".tdd-"):
                 continue
+            paths.append(path)
+        return paths
+
+    def _worktree_state(self) -> dict[str, str | None] | None:
+        """Size+mtime signature of every path _changed_paths() reports, or
+        None when git isn't available / this isn't a repository."""
+        paths = self._changed_paths()
+        if paths is None:
+            return None
+        state: dict[str, str | None] = {}
+        for path in paths:
             try:
                 stat = (Path(self.project_root) / path).stat()
                 # Size + mtime instead of a content hash: no file reads.
@@ -1374,13 +1536,29 @@ class TDDServer:
             )
         return self._review_manager_instance
 
+    def _latest_review_scope(self) -> str | None:
+        """The scope of the review this server started last, else the one
+        whose round was recorded most recently."""
+        manager = self._review_manager_instance
+        if manager is not None and manager.latest_review_scope is not None:
+            return manager.latest_review_scope
+        return latest_review_scope(self.review_rounds_path)
+
     def _await_review(self, arguments: dict[str, Any]) -> list[types.TextContent]:
         manager = self._review_manager_instance
+        review_id = arguments.get("reviewId") or (
+            manager.latest_review_id if manager is not None else None
+        )
+        if review_id is None:
+            return self._error(
+                "No review has been started in this server — call "
+                "start_review first, or pass the reviewId it returned."
+            )
         if manager is None:
-            return self._error(f"Unknown review id '{arguments['reviewId']}'")
+            return self._error(f"Unknown review id '{review_id}'")
         try:
             result = manager.await_result(
-                arguments["reviewId"], timeout=arguments.get("timeoutSeconds", 60)
+                review_id, timeout=arguments.get("timeoutSeconds", 60)
             )
         except ValueError as exc:
             return self._error(str(exc))
@@ -1391,6 +1569,17 @@ class TDDServer:
     ) -> list[types.TextContent]:
         try:
             if name == "start_review":
+                categories = arguments.get("categories")
+                if categories is not None and (
+                    not isinstance(categories, list)
+                    or not categories
+                    or not set(categories) <= set(REVIEW_CATEGORIES)
+                ):
+                    return self._error(
+                        "categories must be a non-empty list drawn from "
+                        + ", ".join(REVIEW_CATEGORIES)
+                        + " (omit it to review all four)."
+                    )
                 in_progress = self.sm.status()["featureName"]
                 if in_progress:
                     return self._error(
@@ -1404,10 +1593,12 @@ class TDDServer:
                     return self._error(manager)
                 try:
                     review_id = manager.start(
-                        arguments["range"],
+                        arguments.get("range")
+                        or default_review_range(self.project_root),
                         reviewer=arguments.get("reviewer"),
                         model=arguments.get("model"),
                         thinking=arguments.get("thinking"),
+                        categories=categories,
                     )
                 except ValueError as exc:
                     return self._error(str(exc))
@@ -1544,6 +1735,7 @@ class TDDServer:
                 payload = self._run_tests(
                     arguments.get("regressionScope"),
                     recreate_db=bool(arguments.get("recreateDb")),
+                    timeout_seconds=arguments.get("timeoutSeconds"),
                 )
                 if arguments.get("advance") and (phase_before, self.sm.phase) in (
                     ("red", "verify_red"),
@@ -1798,13 +1990,17 @@ class TDDServer:
                 return self._text({"scope": arguments["scope"], "rounds": rounds})
 
             if name == "list_review_findings":
+                scope = arguments.get("scope") or self._latest_review_scope()
+                if scope is None:
+                    return self._error(
+                        "No review has been run for this project — call "
+                        "start_review first, or pass a scope."
+                    )
                 with self._review_findings_lock():
                     findings = _list_review_findings(
-                        arguments["scope"], path=self.review_findings_path
+                        scope, path=self.review_findings_path
                     )
-                return self._text(
-                    {"scope": arguments["scope"], "findings": findings}
-                )
+                return self._text({"scope": scope, "findings": findings})
 
             if name == "list_research":
                 with self._research_lock():
@@ -1837,7 +2033,10 @@ class TDDServer:
             return self._error(f"Missing required argument: {exc}")
 
     def _run_tests(
-        self, regression_scope: str | None = None, recreate_db: bool = False
+        self,
+        regression_scope: str | None = None,
+        recreate_db: bool = False,
+        timeout_seconds: Any = None,
     ) -> dict[str, Any]:
         if self.sm.phase is None:
             return {"error": "No active feature. Call init_feature() first."}
@@ -1869,9 +2068,16 @@ class TDDServer:
         # before any adapter call happens. Once regression_scope is given,
         # proceed using it in place of defaultTestDir for this call only.
         if would_close_base_refactor and regression_scope is None:
+            # The adapter may narrow the sweep to what the uncommitted
+            # changes can affect; the whole defaultTestDir stays on offer.
+            changed = sorted(set(self._changed_paths(rename_sources=True) or []))
+            scoped = scope_for_changed_files(
+                adapter_path, self.project_root, changed
+            )
             return {
                 "needsRegressionScopeConfirmation": True,
-                "suggestedScope": default_test_dir,
+                "suggestedScope": scoped or default_test_dir,
+                "fullSuiteScope": default_test_dir,
                 **self.sm.status(),
             }
         if regression_scope == "skip":
@@ -1913,18 +2119,26 @@ class TDDServer:
         if recreate_db:
             recreate_db_args = (config.get("recreateDbArgs") or "").strip()
             if not recreate_db_args:
+                recreate_db_args = default_recreate_db_args(
+                    adapter_path, self.project_root
+                )
+            if not recreate_db_args:
                 return {
                     "error": (
                         "recreateDb requires 'recreateDbArgs' to be set in "
-                        ".tdd-config.json (e.g. \"--create-db\")."
+                        ".tdd-config.json (e.g. \"--create-db\"); this "
+                        "adapter has no default for this project."
                     )
                 }
             run_target = f"{recreate_db_args} {run_target}"
 
         try:
-            result = run_adapter(adapter_path, run_target, self.project_root)
+            timeout_s = resolve_adapter_timeout(config, requested=timeout_seconds)
+            result = run_adapter(
+                adapter_path, run_target, self.project_root, timeout_s=timeout_s
+            )
         except AdapterError as exc:
-            return {"error": f"Adapter failed: {exc}"}
+            return _adapter_failure(exc, config)
 
         own_target_broke = None
         has_extra_regressions = False
@@ -1933,9 +2147,11 @@ class TDDServer:
             # this cycle's own test or a pre-existing regression elsewhere,
             # only now that we actually need to know (rare path).
             try:
-                own_result = run_adapter(adapter_path, test_target, self.project_root)
+                own_result = run_adapter(
+                    adapter_path, test_target, self.project_root, timeout_s=timeout_s
+                )
             except AdapterError as exc:
-                return {"error": f"Adapter failed: {exc}"}
+                return _adapter_failure(exc, config)
             own_target_broke = own_result.failed > 0
             has_extra_regressions = result.failed > own_result.failed
             if not own_target_broke or has_extra_regressions:
@@ -2029,6 +2245,16 @@ def build_server() -> Server:
     ) -> list[types.TextContent]:
         return await _dispatch_tool(tdd, name, arguments or {})
 
+    @server.list_prompts()
+    async def list_prompts() -> list[types.Prompt]:
+        return skill_prompts()
+
+    @server.get_prompt()
+    async def get_prompt(
+        name: str, arguments: dict[str, str] | None
+    ) -> types.GetPromptResult:
+        return skill_prompt(name, arguments)
+
     return server
 
 
@@ -2040,21 +2266,35 @@ def _server_version() -> str:
         return "unknown"
 
 
+SERVER_INSTRUCTIONS = (
+    "Workflow: by default, implementing any feature, fix or review finding "
+    "goes through the implement-and-review workflow: the TDD cycle "
+    "(init_feature, RED -> VERIFY_RED -> IMPLEMENT -> VERIFY_GREEN -> "
+    "REFACTOR, complete_feature), then commit, then an external review "
+    "(start_review / await_review), then fix its findings the same way and "
+    "re-review. Use another workflow (tdd-start, tdd-start-verify, or any "
+    "flow without the review) only when the user names it."
+)
+
+
+def initialization_options(server: Server) -> InitializationOptions:
+    """What the server announces at initialize, including the instructions
+    the client shows the model."""
+    return InitializationOptions(
+        server_name="outside-in-tdd",
+        server_version=_server_version(),
+        capabilities=server.get_capabilities(
+            notification_options=NotificationOptions(),
+            experimental_capabilities={},
+        ),
+        instructions=SERVER_INSTRUCTIONS,
+    )
+
+
 async def main() -> None:
     server = build_server()
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
-        await server.run(
-            read_stream,
-            write_stream,
-            InitializationOptions(
-                server_name="outside-in-tdd",
-                server_version=_server_version(),
-                capabilities=server.get_capabilities(
-                    notification_options=NotificationOptions(),
-                    experimental_capabilities={},
-                ),
-            ),
-        )
+        await server.run(read_stream, write_stream, initialization_options(server))
 
 
 def run() -> None:
