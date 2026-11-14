@@ -47,3 +47,41 @@ def test_an_unknown_skill_is_an_error(tmp_path):
         skill_prompt("no-such-skill", None, tmp_path)
     with pytest.raises(ValueError):
         skill_prompt("../tdd-start", None, tmp_path)
+
+
+def test_the_workflow_docs_a_skill_refers_to_are_served_with_it(tmp_path):
+    skills, docs = tmp_path / "skills", tmp_path / "docs"
+    skill(skills, "implement-and-review", "Implement",
+          "Read `.agents/docs/loop.md` and follow it.\n")
+    docs.mkdir()
+    (docs / "loop.md").write_text(
+        "# Loop\n\nRead `.agents/docs/loop.md` again, then `.agents/docs/check.md`.\n"
+        "Ignore `.agents/docs/missing.md`.\n"
+    )
+    (docs / "check.md").write_text("# Check\n\nRun the checks.\n")
+    (docs / "unrelated.md").write_text("# Unrelated\n")
+
+    text = skill_prompt(
+        "implement-and-review", {"arguments": "feat-a"}, skills, docs
+    ).messages[0].content.text
+
+    assert text.startswith("Read `.agents/docs/loop.md` and follow it.\n")
+    # each referenced doc once, transitively, in reference order
+    assert text.count("# Loop\n") == 1 and text.count("# Check\n") == 1
+    assert text.index("# Loop\n") < text.index("# Check\n")
+    assert "## `.agents/docs/loop.md`" in text
+    assert "## `.agents/docs/check.md`" in text
+    assert "Unrelated" not in text and "## `.agents/docs/missing.md`" not in text
+    assert text.endswith("\n\nArguments given: feat-a\n")
+
+
+def test_a_skill_without_doc_references_is_served_unchanged(tmp_path):
+    skill(tmp_path / "skills", "why-failed", "Explain", "Explain the failure.\n")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "loop.md").write_text("# Loop\n")
+
+    text = skill_prompt(
+        "why-failed", None, tmp_path / "skills", tmp_path / "docs"
+    ).messages[0].content.text
+
+    assert text == "Explain the failure.\n"

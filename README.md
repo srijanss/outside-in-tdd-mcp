@@ -217,6 +217,7 @@ verified before clearing and what the response tells Claude happened.
 ```
 core/               server.py, state_machine.py, adapter_contract.py — the "core" package
   skills/            <name>/SKILL.md — workflow skills served as MCP prompts
+  docs/              the .agents/docs workflow docs those skills refer to
 adapters/
   pytest-adapter/    run.sh — the only language-specific piece for pytest
                      scope.sh — maps changed files to a regression scope
@@ -591,10 +592,15 @@ prompts** (`prompts/list`, `prompts/get`): `implement-and-review`,
 skills, so a project needs no copies of them under `.claude/`, `.codex/`,
 `.pi/` or `.agents/` — in Claude Code they show up as
 `/mcp__outside-in-tdd__<skill>`. Each takes one optional free-text
-`arguments` value, appended to the skill as `Arguments given: …`. The
-served copies live in `core/skills/<name>/SKILL.md` (shipped as package
-data) and are kept identical to this repo's `.agents/skills/` by a test.
-Hooks still have to be project files.
+`arguments` value, appended to the skill as `Arguments given: …`. A skill
+that says to read one of the shared workflow docs (`.agents/docs/review-loop.md`,
+`tdd-verify-protocol.md`, `tdd-regression-check.md`,
+`tdd-review-checklist.md`) is served with that doc's text appended, plus any
+doc it refers to in turn, so it works in a project that has no `.agents/`.
+The served copies live in `core/skills/<name>/SKILL.md` and `core/docs/`
+(shipped as package data) and are kept identical to this repo's
+`.agents/skills/` and `.agents/docs/` by a test. Hooks still have to be
+project files.
 
 Both are just prompt templates (`$1`/`$2` filled in from what you type after
 the command) — nothing MCP-specific about the mechanism, they just save you
