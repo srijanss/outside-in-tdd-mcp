@@ -662,9 +662,12 @@ def _covers_full_suite(scope: str, default_test_dir: str, project_root: str) -> 
         suite_paths, suite_others = _split_scope(default_test_dir, project_root)
     except ValueError:
         return False
+    if not suite_paths:
+        # An option-only suite ("--workspace"): only the same options cover it.
+        return not scope_paths and scope_others == suite_others
     if not scope_others <= suite_others:
         return False
-    return bool(suite_paths) and all(
+    return all(
         any(
             s == "." or s == d or d.startswith(s + os.sep)
             for s in scope_paths

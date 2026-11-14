@@ -174,6 +174,27 @@ def test_an_existing_path_after_a_leading_bare_option_stays_a_suite_path(
     )
 
 
+def test_changed_mode_refuses_an_option_only_suite_but_runs_a_narrower_one(
+    tmp_path,
+):
+    for name, scope, refused in [
+        ("same", "--workspace", True),
+        ("padded", "  --workspace ", True),
+        ("narrower", "-p some-crate", False),
+    ]:
+        server = changed_project(tmp_path / name, defaultTestDir="--workspace")
+        before = adapter_calls(tmp_path / name)
+
+        payload = sweep(server, scope)
+
+        if refused:
+            assert "gate" in payload.get("error", ""), name
+            assert adapter_calls(tmp_path / name) == before, name
+        else:
+            assert "error" not in payload, name
+            assert adapter_calls(tmp_path / name) != before, name
+
+
 def test_a_bare_option_value_that_is_no_path_is_skipped(tmp_path):
     from core.server import _covers_full_suite
 
