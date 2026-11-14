@@ -476,6 +476,13 @@ dev = [
     { name = "pytest-json-report" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "hypothesis" },
+    { name = "pytest" },
+    { name = "pytest-json-report" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.168.5" },
@@ -484,6 +491,13 @@ requires-dist = [
     { name = "pytest-json-report", marker = "extra == 'dev'" },
 ]
 provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "hypothesis", specifier = ">=6.168.5" },
+    { name = "pytest" },
+    { name = "pytest-json-report" },
+]
 
 [[package]]
 name = "packaging"
