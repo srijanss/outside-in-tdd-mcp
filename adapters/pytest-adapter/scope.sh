@@ -271,6 +271,8 @@ def covered(path, dirs):
 OUTPUT_FLAGS = {
     "-v", "-vv", "-vvv", "--verbose", "-q", "-qq", "--quiet", "-s", "-l",
     "--showlocals", "--no-header", "--no-summary", "--full-trace",
+    # Reorder the run without changing which tests are in it.
+    "--ff", "--failed-first", "--nf", "--new-first",
 }
 OUTPUT_VALUE_OPTIONS = {
     "--tb", "--capture", "--durations", "--durations-min", "--color",
@@ -282,10 +284,17 @@ SELECTION_VALUE_OPTIONS = {
     "-c", "--rootdir", "--confcutdir", "-o", "--override-ini",
 }
 SELECTION_FLAGS = {
-    "-x", "--exitfirst", "--lf", "--last-failed", "--ff", "--failed-first",
-    "--nf", "--new-first", "--sw", "--stepwise", "--sw-skip",
-    "--stepwise-skip", "--runxfail", "--strict-markers",
+    "-x", "--exitfirst", "--lf", "--last-failed", "--sw", "--stepwise",
+    "--sw-skip", "--stepwise-skip", "--runxfail", "--strict-markers",
 }
+# Of those, the ones that change configuration (plugins, ini files and
+# values, rootdir) rather than filter: they can add tests as well as hide
+# them, so a scope must use exactly the suite's for the answer to be known.
+CONFIGURATION_OPTIONS = {
+    "-p", "-c", "--rootdir", "--confcutdir", "-o", "--runxfail",
+    "--strict-markers",
+}
+ALIASES = {"--override-ini": "-o"}
 
 
 def parse_run(root, expression):
@@ -316,7 +325,7 @@ def parse_run(root, expression):
                 value = tokens[i]
                 i += 1
             if name in SELECTION_VALUE_OPTIONS:
-                options.add((name, value))
+                options.add((ALIASES.get(name, name), value))
             continue
         if name not in SELECTION_FLAGS or has_value:
             # Unknown: it may take a value, so the rest can't be read.
@@ -339,11 +348,22 @@ def path_covers(scope_path, suite_path):
     )
 
 
+def configuration(options):
+    return {
+        option
+        for option in options
+        if (option[0] if isinstance(option, tuple) else option)
+        in CONFIGURATION_OPTIONS
+    }
+
+
 def covers_suite(root, scope, suite):
     try:
         scope_paths, scope_options = parse_run(root, scope)
         suite_paths, suite_options = parse_run(root, suite)
     except ValueError:
+        return None
+    if configuration(scope_options) != configuration(suite_options):
         return None
     if not scope_paths or not suite_paths:
         # pytest falls back to testpaths/rootdir, which only config knows.

@@ -20,6 +20,23 @@ def test_output_only_flags_added_to_the_suite_still_cover_it(tmp_path):
 
 def test_a_filter_narrows_and_an_unknown_option_is_unknown(tmp_path):
     assert covers(tmp_path, "tests -k smoke", "tests") is False
-    assert covers(tmp_path, "tests -p no:cacheprovider", "tests") is False
     assert covers(tmp_path, "tests", "tests -k smoke") is True
     assert covers(tmp_path, "tests --some-plugin-flag", "tests") is None
+
+
+def test_configuration_must_match_and_reordering_is_ignored(tmp_path):
+    for scope, suite in (
+        ("tests -p no:cacheprovider", "tests"),
+        ("tests", "tests -p no:randomly"),
+        ("tests -c other.ini", "tests"),
+        ("tests -o python_files=*.py", "tests"),
+        ("tests --rootdir sub", "tests"),
+        ("tests --confcutdir sub", "tests"),
+        ("tests --runxfail", "tests"),
+        ("tests --strict-markers", "tests"),
+    ):
+        assert covers(tmp_path, scope, suite) is None, (scope, suite)
+    assert covers(tmp_path, "tests -p no:x -o a=b", "tests -o a=b -p no:x") is True
+    assert covers(tmp_path, "tests -p no:x -k smoke", "tests -p no:x") is False
+    for scope in ("tests --ff", "tests --nf", "tests --new-first"):
+        assert covers(tmp_path, scope, "tests") is True, scope
