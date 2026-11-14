@@ -277,9 +277,11 @@ def scope_for_changed_files(
     """
     if not changed_files:
         return None
-    env = None
+    # Built explicitly so a TDD_SCOPE_MODE in the server's own environment
+    # can't turn a broad (no-mode) call into a narrow one.
+    env = {k: v for k, v in os.environ.items() if k != "TDD_SCOPE_MODE"}
     if mode is not None:
-        env = {**os.environ, "TDD_SCOPE_MODE": mode}
+        env["TDD_SCOPE_MODE"] = mode
     data = _run_sibling_script(
         adapter_path, "scope.sh", [project_root, *changed_files], timeout_s, env
     )

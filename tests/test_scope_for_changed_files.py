@@ -38,6 +38,18 @@ def test_the_mode_reaches_the_scope_script_through_its_environment(tmp_path):
     assert scope_for_changed_files(adapter, "/r", ["a"]) == "unset"
 
 
+def test_no_mode_drops_a_scope_mode_inherited_from_the_server(tmp_path, monkeypatch):
+    monkeypatch.setenv("TDD_SCOPE_MODE", "changed")
+    adapter = adapter_with_scope(
+        tmp_path,
+        "#!/usr/bin/env python3\n"
+        "import json, os\n"
+        "print(json.dumps({'scope': os.environ.get('TDD_SCOPE_MODE', 'unset')}))\n",
+    )
+
+    assert scope_for_changed_files(adapter, "/r", ["a"]) == "unset"
+
+
 def test_an_empty_scope_is_told_apart_from_no_mapping(tmp_path):
     empty = adapter_with_scope(
         tmp_path, "#!/bin/sh\necho '{\"scope\": null, \"empty\": true}'\n"
