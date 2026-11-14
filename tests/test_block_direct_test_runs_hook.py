@@ -112,6 +112,19 @@ def test_runner_followed_directly_by_a_separator_is_denied(command):
 
 
 @pytest.mark.parametrize(
+    "command",
+    [
+        "cargo test>results.log",
+        "cargo test</dev/null",
+        "cargo nextest>>out.log",
+        "pytest>out.log",
+    ],
+)
+def test_runner_followed_directly_by_a_redirection_is_denied(command):
+    assert _decision(command) == "deny"
+
+
+@pytest.mark.parametrize(
     "template",
     [
         'git commit -m "make {} pass"',
