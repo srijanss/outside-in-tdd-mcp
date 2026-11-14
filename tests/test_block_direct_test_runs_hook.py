@@ -69,6 +69,20 @@ def test_existing_runners_are_still_denied(command):
 
 
 @pytest.mark.parametrize(
+    "command",
+    [
+        "cargo test; echo done",
+        "cargo test&&echo done",
+        "cargo t||echo failed",
+        "cargo nextest|tee out.log",
+        "pytest;echo done",
+    ],
+)
+def test_runner_followed_directly_by_a_separator_is_denied(command):
+    assert _decision(command) == "deny"
+
+
+@pytest.mark.parametrize(
     "template",
     [
         'git commit -m "make {} pass"',
