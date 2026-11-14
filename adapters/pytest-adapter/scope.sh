@@ -156,9 +156,18 @@ def test_files(root):
     return tuple(sorted(set(walk_test_files(root))))
 
 
+def inside(real_root, path):
+    """Whether path, symlinks resolved, is inside the (resolved) project root."""
+    real = os.path.realpath(path)
+    return os.path.commonpath([real_root, real]) == real_root
+
+
 def walk_test_files(root):
     configured = default_test_dirs(root)
+    real_root = os.path.realpath(root)
     for start in configured or [""]:
+        if not inside(real_root, os.path.join(root, start)):
+            continue  # a symlink out of the project
         for dirpath, dirnames, filenames in os.walk(os.path.join(root, start)):
             dirnames[:] = [
                 d for d in dirnames if not skipped_dir(os.path.join(dirpath, d))
@@ -167,7 +176,9 @@ def walk_test_files(root):
             if not configured and "tests" not in rel_dir.split(os.sep):
                 continue
             for name in filenames:
-                if is_test_file(name):
+                if is_test_file(name) and inside(
+                    real_root, os.path.join(dirpath, name)
+                ):
                     yield os.path.normpath(os.path.join(rel_dir, name))
 
 

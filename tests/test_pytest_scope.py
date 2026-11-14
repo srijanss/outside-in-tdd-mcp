@@ -252,6 +252,26 @@ def test_changed_mode_scans_only_the_default_test_dirs_when_configured(
     assert scope(tmp_path, "shop/cart.py", mode="changed") == "tests/test_cart.py"
 
 
+def test_changed_mode_does_not_follow_symlinks_out_of_the_project(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("TDD_CONFIG_PATH", raising=False)
+    project, outside = tmp_path / "project", tmp_path / "outside"
+    write(outside, {"test_far.py": "import shop.cart\n"})
+    write(
+        project,
+        {
+            ".tdd-config.json": '{"defaultTestDir": "linked suite"}',
+            "shop/__init__.py": "",
+            "shop/cart.py": "",
+            "suite/test_cart.py": "import shop.cart\n",
+        },
+    )
+    (project / "linked").symlink_to(outside, target_is_directory=True)
+    (project / "suite/test_far.py").symlink_to(outside / "test_far.py")
+    assert scope(project, "shop/cart.py", mode="changed") == "suite/test_cart.py"
+
+
 def test_changed_mode_ignores_tests_inside_virtualenvs_and_node_modules(tmp_path):
     write(
         tmp_path,
