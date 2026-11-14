@@ -16,6 +16,15 @@ dev = [
     "pytest-json-report",
 ]
 
+# Same tools as the `dev` extra, as a dependency group so a plain `uv sync`
+# (and `uv sync --locked`, as orq's setup runs) installs them. Keep both lists in step.
+[dependency-groups]
+dev = [
+    "hypothesis>=6.168.5",
+    "pytest",
+    "pytest-json-report",
+]
+
 [project.scripts]
 outside-in-tdd-mcp = "core.server:run"
 cargo-adapter-runner = "core.adapter_entrypoints:cargo_adapter_main"

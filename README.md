@@ -233,7 +233,7 @@ Dockerfile           bakes core + pytest adapter + pytest itself into one image
 ## Running the unit tests
 
 ```bash
-uv sync --extra dev
+uv sync   # installs the dev dependency group (pytest, hypothesis, pytest-json-report)
 uv run pytest tests/
 ```
 
@@ -242,12 +242,12 @@ uv run pytest tests/
 This repo's own `.mcp.json` and `.codex/config.toml` run
 `uv run --quiet outside-in-tdd-mcp` from the checkout, so a `git worktree
 add` checkout runs its own code unmodified (each worktree needs `uv` on
-`PATH`; run `uv sync --extra dev` in the worktree to create its `.venv`).
+`PATH`; run `uv sync` in the worktree to create its `.venv`).
 
 ## Running it locally from this repo
 
 ```bash
-uv sync --extra dev
+uv sync   # installs the dev dependency group (pytest, hypothesis, pytest-json-report)
 uv run outside-in-tdd-mcp   # starts the MCP server on stdio
 uv run pytest tests/
 ```
