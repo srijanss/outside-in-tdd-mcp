@@ -421,6 +421,14 @@ def parse_run(expression):
     return filters, options
 
 
+def split_related(expression):
+    """(whether ``expression`` is a ``vitest related`` run, the rest of it)."""
+    args = shlex.split(expression)
+    if args[:1] == ["related"]:
+        return True, shlex.join(args[1:])
+    return False, expression
+
+
 def covers_suite(scope, suite):
     """True when ``vitest run <scope>`` runs every test ``<suite>`` runs,
     False when it may run fewer, None when either can't be parsed.
@@ -429,16 +437,18 @@ def covers_suite(scope, suite):
     scope filter covers a suite filter it is a substring of, and no
     filters at all means every file."""
     try:
-        scope_args, suite_args = shlex.split(scope), shlex.split(suite)
-        if "related" in (scope_args[:1] + suite_args[:1]):
-            # `vitest related`: import-graph selection, only comparable as is.
-            return scope_args == suite_args
+        scope_related, scope = split_related(scope)
+        suite_related, suite = split_related(suite)
         scope_filters, scope_options = parse_run(scope)
         suite_filters, suite_options = parse_run(suite)
     except ValueError:
         return None
     if not scope_options <= suite_options:
         return False
+    if scope_related or suite_related:
+        # `vitest related <files>`: the tests importing those files, so a
+        # scope covers the suite when it names at least the same files.
+        return scope_related and suite_related and scope_filters >= suite_filters
     if not scope_filters:
         return True
     if not suite_filters:
