@@ -18,6 +18,13 @@ whole suite):
 With TDD_SCOPE_MODE=changed it prints -p only for each crate holding a
 changed file, without the crates depending on it; docs-only changes print
 {"scope": null, "empty": true}. Everything above that prints null still does.
+
+Usage: scope.sh --covers-suite <project_root> <scope> <suite>
+
+Prints {"coversSuite": true} when `cargo test <scope>` runs every test
+`cargo test <suite>` runs — output-only options such as --verbose or
+`-- --nocapture` are ignored — {"coversSuite": false} when it may run fewer,
+and {"coversSuite": null} when either uses an option this script doesn't know.
 """
 
 import glob
@@ -176,7 +183,103 @@ def scope(root, changed):
     return " ".join(f"-p {shlex.quote(name)}" for name in sorted(selected))
 
 
+# `cargo test` options that only change output, never which tests run —
+# before `--` (cargo's own) and after it (the libtest harness's).
+CARGO_OUTPUT_FLAGS = {"-v", "-vv", "--verbose", "-q", "--quiet"}
+CARGO_OUTPUT_VALUE_OPTIONS = {"--color", "--message-format", "-j", "--jobs"}
+HARNESS_OUTPUT_FLAGS = {"--nocapture", "--show-output", "-q", "--quiet"}
+HARNESS_OUTPUT_VALUE_OPTIONS = {"--color", "--test-threads", "--format"}
+# Options that may change which tests run. Anything in neither table is
+# unknown, so the whole answer is unknown.
+CARGO_SELECTION_FLAGS = {
+    "--workspace", "--all", "--lib", "--bins", "--tests", "--examples",
+    "--benches", "--doc", "--all-targets", "--all-features",
+    "--no-default-features", "--release", "--no-fail-fast",
+}
+CARGO_SELECTION_VALUE_OPTIONS = {
+    "-p", "--package", "--exclude", "--bin", "--test", "--example", "--bench",
+    "-F", "--features", "--target", "--profile", "--manifest-path",
+}
+HARNESS_SELECTION_FLAGS = {"--exact", "--ignored", "--include-ignored"}
+HARNESS_SELECTION_VALUE_OPTIONS = {"--skip"}
+ALIASES = {"--package": "-p", "--all": "--workspace", "--features": "-F"}
+PACKAGE_SELECTION = {"-p", "--workspace", "--exclude"}
+
+
+def parse_run(expression):
+    """The test-selecting part of ``cargo test <expression>`` as a set of
+    (side, option, value) tuples — side "cargo" or "harness" (after
+    ``--``), option None for a name filter — with output-only options
+    dropped. Raises ValueError on an option it doesn't know."""
+    selection = set()
+    side = "cargo"
+    tokens = iter(shlex.split(expression))
+    for token in tokens:
+        if token == "--" and side == "cargo":
+            side = "harness"
+            continue
+        if not token.startswith("-"):
+            selection.add((side, None, token))
+            continue
+        harness = side == "harness"
+        name, eq, value = token.partition("=")
+        if not eq and not token.startswith("--") and len(token) > 2:
+            name, value, eq = token[:2], token[2:], "attached"
+        if name in (HARNESS_OUTPUT_FLAGS if harness else CARGO_OUTPUT_FLAGS):
+            continue
+        output = HARNESS_OUTPUT_VALUE_OPTIONS if harness else CARGO_OUTPUT_VALUE_OPTIONS
+        selecting = (
+            HARNESS_SELECTION_VALUE_OPTIONS if harness else CARGO_SELECTION_VALUE_OPTIONS
+        )
+        if name in output or name in selecting:
+            if not eq:
+                value = next(tokens, None)
+                if value is None:
+                    raise ValueError(f"{name} needs a value")
+            if name in selecting:
+                selection.add((side, ALIASES.get(name, name), value))
+            continue
+        if name in (HARNESS_SELECTION_FLAGS if harness else CARGO_SELECTION_FLAGS):
+            selection.add((side, ALIASES.get(name, name), None))
+            continue
+        raise ValueError(f"unknown option {token}")
+    return selection
+
+
+def packages_cover(scope, suite):
+    """Whether the packages ``scope`` selects include all of ``suite``'s."""
+    if scope == suite:
+        return True
+    if ("cargo", "--workspace", None) in scope:
+        return not any(option == "--exclude" for _, option, _ in scope)
+    only_packages = all(option == "-p" for _, option, _ in scope | suite)
+    return bool(scope) and bool(suite) and only_packages and suite <= scope
+
+
+def covers_suite(scope, suite):
+    """True when ``cargo test <scope>`` runs every test ``<suite>`` runs,
+    False when it may run fewer, None when either can't be parsed."""
+    try:
+        scope_run, suite_run = parse_run(scope), parse_run(suite)
+    except ValueError:
+        return None
+
+    def split(run):
+        packages = {entry for entry in run if entry[1] in PACKAGE_SELECTION}
+        return packages, run - packages
+
+    scope_packages, scope_rest = split(scope_run)
+    suite_packages, suite_rest = split(suite_run)
+    # Every other selecting option narrows the run, so the scope may only
+    # use ones the suite uses too.
+    return scope_rest <= suite_rest and packages_cover(scope_packages, suite_packages)
+
+
 def main(argv):
+    if argv[:1] == ["--covers-suite"]:
+        if len(argv) != 4:
+            return {"coversSuite": None}
+        return {"coversSuite": covers_suite(argv[2], argv[3])}
     if len(argv) < 2:
         return {"scope": None}
     try:

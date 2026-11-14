@@ -34,7 +34,9 @@ review/CI. `"skip"` skips the sweep.
 When `regressionScopeDefault` is `"changed"`, the full suite runs at the
 orchestrator's gate, not here: `run_tests` refuses a `regressionScope`
 that covers `defaultTestDir` — names its paths or a directory above
-them, adding no filter option such as `-k` (REFACTOR stays open; re-call with
+them, adding no filter option such as `-k`; when the adapter's `scope.sh`
+answers `--covers-suite`, output-only options such as `-v` don't count as
+filters either (REFACTOR stays open; re-call with
 `suggestedScope`, `changedScope` or `"skip"`), and don't hand-run a
 full-suite sweep after review fixes. A `regressionScopeNote` in the response (the changes
 map to no narrower scope) means the same: take `suggestedScope` as given.

@@ -308,3 +308,29 @@ def default_recreate_db_args(
         adapter_path, "recreate-db.sh", [project_root], timeout_s
     )
     return _non_blank((data or {}).get("args"))
+
+
+def covers_full_suite(
+    adapter_path: str,
+    project_root: str,
+    scope: str,
+    suite: str,
+    timeout_s: int = 30,
+) -> bool | None:
+    """The adapter's own answer to whether running ``scope`` runs everything
+    ``suite`` (defaultTestDir) runs, or None when it has none.
+
+    Optional extension of the adapter contract: ``scope.sh --covers-suite
+    <project_root> <scope> <suite>`` prints ``{"coversSuite": true}``,
+    ``{"coversSuite": false}`` or ``{"coversSuite": null}`` (unknown). A
+    missing, failing, hanging or malformed script, or one that ignores the
+    mode (no boolean ``coversSuite``), means unknown.
+    """
+    data = _run_sibling_script(
+        adapter_path,
+        "scope.sh",
+        ["--covers-suite", project_root, scope, suite],
+        timeout_s,
+    )
+    answer = (data or {}).get("coversSuite")
+    return answer if isinstance(answer, bool) else None
