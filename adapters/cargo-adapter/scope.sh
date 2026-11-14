@@ -24,7 +24,9 @@ Usage: scope.sh --covers-suite <project_root> <scope> <suite>
 Prints {"coversSuite": true} when `cargo test <scope>` runs every test
 `cargo test <suite>` runs — output-only options such as --verbose or
 `-- --nocapture` are ignored — {"coversSuite": false} when it may run fewer,
-and {"coversSuite": null} when either uses an option this script doesn't know.
+and {"coversSuite": null} when either uses an option this script doesn't know
+or they differ in build configuration (features, --release, --target, ...).
+-- --include-ignored widens a run, -- --ignored swaps it for the ignored tests.
 """
 
 import glob
@@ -204,6 +206,13 @@ HARNESS_SELECTION_FLAGS = {"--exact", "--ignored", "--include-ignored"}
 HARNESS_SELECTION_VALUE_OPTIONS = {"--skip"}
 ALIASES = {"--package": "-p", "--all": "--workspace", "--features": "-F"}
 PACKAGE_SELECTION = {"-p", "--workspace", "--exclude"}
+# Options that build different code rather than filter tests: features can
+# enable tests as well as hide them, so a scope must use the same ones as the
+# suite for the answer to be known.
+BUILD_CONFIGURATION = {
+    "-F", "--all-features", "--no-default-features", "--release", "--target",
+    "--profile", "--manifest-path",
+}
 
 
 def parse_run(expression):
@@ -246,6 +255,30 @@ def parse_run(expression):
     return selection
 
 
+# Which ignored-test modes a run in each mode covers: --include-ignored runs
+# ignored and other tests, --ignored only the ignored ones.
+IGNORED_MODES_COVERED = {
+    None: {None},
+    "--ignored": {"--ignored"},
+    "--include-ignored": {None, "--ignored", "--include-ignored"},
+}
+
+
+def ignored_mode(run):
+    """(--ignored, --include-ignored or None, the rest of ``run``);
+    --include-ignored wins when both are given, as in libtest."""
+    flags = {option for side, option, _ in run if side == "harness"}
+    mode = next(
+        (m for m in ("--include-ignored", "--ignored") if m in flags), None
+    )
+    rest = {
+        entry
+        for entry in run
+        if not (entry[0] == "harness" and entry[1] in IGNORED_MODES_COVERED)
+    }
+    return mode, rest
+
+
 def packages_cover(scope, suite):
     """Whether the packages ``scope`` selects include all of ``suite``'s."""
     if scope == suite:
@@ -258,7 +291,8 @@ def packages_cover(scope, suite):
 
 def covers_suite(scope, suite):
     """True when ``cargo test <scope>`` runs every test ``<suite>`` runs,
-    False when it may run fewer, None when either can't be parsed."""
+    False when it may run fewer, None when either can't be parsed or they
+    build with different configurations."""
     try:
         scope_run, suite_run = parse_run(scope), parse_run(suite)
     except ValueError:
@@ -268,11 +302,22 @@ def covers_suite(scope, suite):
         packages = {entry for entry in run if entry[1] in PACKAGE_SELECTION}
         return packages, run - packages
 
+    def configuration(run):
+        return {entry for entry in run if entry[1] in BUILD_CONFIGURATION}
+
+    if configuration(scope_run) != configuration(suite_run):
+        return None
+    scope_mode, scope_run = ignored_mode(scope_run)
+    suite_mode, suite_run = ignored_mode(suite_run)
     scope_packages, scope_rest = split(scope_run)
     suite_packages, suite_rest = split(suite_run)
     # Every other selecting option narrows the run, so the scope may only
     # use ones the suite uses too.
-    return scope_rest <= suite_rest and packages_cover(scope_packages, suite_packages)
+    return (
+        suite_mode in IGNORED_MODES_COVERED[scope_mode]
+        and scope_rest <= suite_rest
+        and packages_cover(scope_packages, suite_packages)
+    )
 
 
 def main(argv):

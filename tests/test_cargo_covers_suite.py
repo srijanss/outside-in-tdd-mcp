@@ -29,3 +29,24 @@ def test_a_filter_narrows_and_an_unknown_option_is_unknown(tmp_path):
     assert covers(tmp_path, "--workspace", "--workspace -p crate") is True
     assert covers(tmp_path, "-p b -p a", "--package a -p b") is True
     assert covers(tmp_path, "--workspace --some-new-flag", "--workspace") is None
+
+
+def test_ignored_tests_widen_or_swap_the_run_rather_than_filter_it(tmp_path):
+    base = "--workspace"
+    assert covers(tmp_path, f"{base} -- --include-ignored", base) is True
+    assert covers(tmp_path, base, f"{base} -- --include-ignored") is False
+    assert covers(tmp_path, f"{base} -- --include-ignored", f"{base} -- --ignored") is True
+    assert covers(tmp_path, f"{base} -- --ignored", base) is False
+    assert covers(tmp_path, base, f"{base} -- --ignored") is False
+
+
+def test_build_configuration_that_differs_is_unknown(tmp_path):
+    for scope, suite in (
+        ("--workspace", "--workspace --release"),
+        ("--workspace --all-features", "--workspace"),
+        ("--workspace -F extra", "--workspace -F other"),
+        ("--workspace --target x86_64-unknown-linux-gnu", "--workspace"),
+        ("--workspace", "--workspace --profile ci"),
+    ):
+        assert covers(tmp_path, scope, suite) is None, (scope, suite)
+    assert covers(tmp_path, "--release -p a", "--release -p a") is True
