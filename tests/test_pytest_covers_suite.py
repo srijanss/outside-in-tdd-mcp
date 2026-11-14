@@ -40,3 +40,10 @@ def test_configuration_must_match_and_reordering_is_ignored(tmp_path):
     assert covers(tmp_path, "tests -p no:x -k smoke", "tests -p no:x") is False
     for scope in ("tests --ff", "tests --nf", "tests --new-first"):
         assert covers(tmp_path, scope, "tests") is True, scope
+
+
+def test_configuration_order_matters(tmp_path):
+    a, b = "-o python_files=a_*.py", "-o python_files=b_*.py"
+    assert covers(tmp_path, f"tests {a} {b}", f"tests {b} {a}") is None
+    assert covers(tmp_path, f"tests {a} -v {b}", f"tests {a} {b}") is True
+    assert covers(tmp_path, f"tests -p x -p y", f"tests -p y -p x") is None

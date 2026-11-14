@@ -298,8 +298,9 @@ ALIASES = {"--override-ini": "-o"}
 
 
 def parse_run(root, expression):
-    """A pytest expression's normalised paths and its non-output options."""
-    paths, options = [], set()
+    """A pytest expression's normalised paths and its non-output options,
+    in the order given."""
+    paths, options = [], []
     tokens = shlex.split(expression)
     i = 0
     while i < len(tokens):
@@ -325,12 +326,12 @@ def parse_run(root, expression):
                 value = tokens[i]
                 i += 1
             if name in SELECTION_VALUE_OPTIONS:
-                options.add((ALIASES.get(name, name), value))
+                options.append((ALIASES.get(name, name), value))
             continue
         if name not in SELECTION_FLAGS or has_value:
             # Unknown: it may take a value, so the rest can't be read.
             raise ValueError(f"unknown option {token}")
-        options.add(name)
+        options.append(name)
     return [normalise(root, path) for path in paths], options
 
 
@@ -349,12 +350,14 @@ def path_covers(scope_path, suite_path):
 
 
 def configuration(options):
-    return {
-        option
-        for option in options
-        if (option[0] if isinstance(option, tuple) else option)
-        in CONFIGURATION_OPTIONS
-    }
+    """Each configuration option's values, in order: pytest applies
+    repeated ones in turn, the last one winning."""
+    values = {}
+    for option in options:
+        name, value = option if isinstance(option, tuple) else (option, None)
+        if name in CONFIGURATION_OPTIONS:
+            values.setdefault(name, []).append(value)
+    return values
 
 
 def covers_suite(root, scope, suite):
@@ -365,6 +368,7 @@ def covers_suite(root, scope, suite):
         return None
     if configuration(scope_options) != configuration(suite_options):
         return None
+    scope_options, suite_options = set(scope_options), set(suite_options)
     if not scope_paths or not suite_paths:
         # pytest falls back to testpaths/rootdir, which only config knows.
         return None if scope_paths or suite_paths else scope_options <= suite_options
