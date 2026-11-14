@@ -360,10 +360,13 @@ def scope(root, changed, narrow=False):
                 setup = setup_files(root)
             if setup is None or target in setup:
                 return None
-            if not narrow or is_test_file(target):
+            if not narrow:
                 targets.add(target)
-            else:
-                targets |= importer_index(root).get(target, set())
+                continue
+            if is_test_file(target):
+                targets.add(target)
+            # A changed test may be a helper other tests import.
+            targets |= importer_index(root).get(target, set())
     if not targets:
         return "" if narrow else None
     quoted = " ".join(shlex.quote(as_argument(target)) for target in sorted(targets))

@@ -376,6 +376,34 @@ def test_changed_mode_ignores_test_files_under_skipped_directories(tmp_path):
     assert scope(tmp_path, "src/util.ts", mode="changed") == "src/util.test.ts"
 
 
+def test_changed_mode_runs_the_importers_of_a_changed_test_helper(tmp_path):
+    # Files under __tests__/ count as tests, but are often shared helpers.
+    write(
+        tmp_path,
+        {
+            "src/__tests__/helpers.ts": "",
+            "src/__tests__/cart.ts": "import { make } from './helpers'\n",
+            "src/price.test.ts": "import { make } from './__tests__/helpers'\n",
+        },
+    )
+    assert scope(tmp_path, "src/__tests__/helpers.ts", mode="changed") == (
+        "src/__tests__/cart.ts src/__tests__/helpers.ts src/price.test.ts"
+    )
+
+
+def test_changed_mode_runs_a_test_that_re_exports_a_changed_test(tmp_path):
+    write(
+        tmp_path,
+        {
+            "src/cart.spec.ts": "",
+            "src/all.test.ts": "export * from './cart.spec'\n",
+        },
+    )
+    assert scope(tmp_path, "src/cart.spec.ts", mode="changed") == (
+        "src/all.test.ts src/cart.spec.ts"
+    )
+
+
 def test_without_the_mode_the_scope_is_still_related(tmp_path):
     write(tmp_path, {"src/util.ts": "", "src/util.test.ts": "import './util'\n"})
     assert scope(tmp_path, "src/util.ts") == "related src/util.ts"
