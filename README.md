@@ -501,10 +501,10 @@ the server running the reviewer and tracking the rounds. Used by the
     the default by printing `{"args": "<runner arguments>"}`, or
     `{"args": null}` for none. Without the script — or when it fails, hangs
     (30s) or prints anything else — `recreateDb` keeps the clear error.
-    The bundled pytest adapter's script gives `--create-db` when
-    pytest-django imports with the interpreter of the pytest `run.sh` would
-    run: the project's `.venv/bin/pytest`, else the one on `PATH` (one that
-    can't run is skipped, as `run.sh` does). An installed console runner
+    The bundled pytest adapter's script gives `--create-db` when the pytest
+    `run.sh` would run — the project's `.venv/bin/pytest`, else the one on
+    `PATH` (one that can't be executed is skipped, as `run.sh` does) —
+    lists pytest-django among its registered plugins (`pytest -VV`). An installed console runner
     (`pytest-adapter-runner`, …) uses its bundled adapter's `scope.sh` and
     `recreate-db.sh`.
   - `advance: true` — also perform the `verify()` step in the same call when

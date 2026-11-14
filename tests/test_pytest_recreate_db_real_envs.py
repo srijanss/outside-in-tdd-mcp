@@ -1,69 +1,50 @@
-"""recreate-db.sh against real interpreters and a real venv: no project
-venv (PATH pytest), and a venv whose pytest-django is reachable only
-through a .pth, as with an editable install — a directory scan of
-site-packages would miss it."""
+"""recreate-db.sh against a real pytest: whatever starts it (a shell
+wrapper, pip's /bin/sh trampoline in a spaced venv path), the plugins
+that pytest registers decide the default."""
 
-import os
-import subprocess
+import importlib.util
+import sys
 from pathlib import Path
 
+import pytest
+
 from core.adapter_contract import default_recreate_db_args
-from tests.isolated_python import isolated_python
+from tests.django_dist import django_dist
 
 PYTEST_ADAPTER = str(
     Path(__file__).resolve().parents[1] / "adapters" / "pytest-adapter" / "run.sh"
 )
 
 
-def plugin_dir(root):
-    (root / "pytest_django").mkdir(parents=True)
-    (root / "pytest_django" / "__init__.py").write_text("")
-    return root
+def shell_wrapper(project):
+    wrapper = project / ".venv" / "bin" / "pytest"
+    wrapper.parent.mkdir(parents=True)
+    wrapper.write_text(f'#!/bin/sh\nexec "{sys.executable}" -m pytest "$@"\n')
+    wrapper.chmod(0o755)
 
 
-def pytest_script(path, interpreter):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f"#!{interpreter}\nraise SystemExit(0)\n")
-    path.chmod(0o755)
-
-
-def real_venv(root):
-    python = isolated_python(root)
-    pytest_script(root / "bin" / "pytest", python)
-    purelib = subprocess.run(
-        [str(python), "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"],
-        check=True, capture_output=True, text=True,
-    ).stdout.strip()
-    return Path(purelib)
-
-
-def test_without_a_project_venv_the_path_pytests_interpreter_decides(
+def test_a_shell_wrapper_venv_pytest_is_asked_through_pytest_itself(
     tmp_path, monkeypatch
 ):
-    # An isolated interpreter, not this run's: a pytest-django installed on
-    # the host must not leak into the "without" case.
-    bin_dir = tmp_path / "bin"
-    pytest_script(bin_dir / "pytest", isolated_python(tmp_path / "host"))
-    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    """A /bin/sh wrapper that execs python -m pytest: only running the
+    pytest run.sh would run tells which plugins it loads."""
     project = tmp_path / "project"
-    project.mkdir()
+    shell_wrapper(project)
+    monkeypatch.setenv("PYTHONPATH", str(django_dist(tmp_path / "site")))
 
-    monkeypatch.setenv("PYTHONPATH", str(plugin_dir(tmp_path / "site")))
     assert default_recreate_db_args(PYTEST_ADAPTER, str(project)) == "--create-db"
 
-    monkeypatch.delenv("PYTHONPATH")
-    assert default_recreate_db_args(PYTEST_ADAPTER, str(project)) is None
 
-
-def test_an_editable_install_in_a_real_project_venv_counts(tmp_path, monkeypatch):
+@pytest.mark.skipif(
+    importlib.util.find_spec("pytest_django") is not None,
+    reason="pytest-django is installed on the host",
+)
+def test_a_real_pytest_without_pytest_django_has_no_default(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    shell_wrapper(project)
     monkeypatch.delenv("PYTHONPATH", raising=False)
-    project = tmp_path / "project"
-    site = real_venv(project / ".venv")
+
     assert default_recreate_db_args(PYTEST_ADAPTER, str(project)) is None
-
-    (site / "editable.pth").write_text(f"{plugin_dir(tmp_path / 'src')}\n")
-
-    assert default_recreate_db_args(PYTEST_ADAPTER, str(project)) == "--create-db"
 
 
 def test_a_pip_sh_trampoline_entry_point_in_a_spaced_venv_path_counts(
@@ -71,17 +52,18 @@ def test_a_pip_sh_trampoline_entry_point_in_a_spaced_venv_path_counts(
 ):
     """pip writes a /bin/sh trampoline instead of a plain #! line when the
     interpreter path has spaces or is too long for the kernel."""
-    monkeypatch.delenv("PYTHONPATH", raising=False)
     project = tmp_path / "my project"
-    site = real_venv(project / ".venv")
-    python = project / ".venv" / "bin" / "python"
-    (project / ".venv" / "bin" / "pytest").write_text(
+    trampoline = project / ".venv" / "bin" / "pytest"
+    trampoline.parent.mkdir(parents=True)
+    trampoline.write_text(
         "#!/bin/sh\n"
-        f"'''exec' \"{python}\" \"$0\" \"$@\"\n"
+        f"'''exec' \"{sys.executable}\" \"$0\" \"$@\"\n"
         "' '''\n"
-        "raise SystemExit(0)\n"
+        "import sys\n"
+        "from pytest import console_main\n"
+        "sys.exit(console_main())\n"
     )
-    (site / "editable.pth").write_text(f"{plugin_dir(tmp_path / 'src')}\n")
+    trampoline.chmod(0o755)
+    monkeypatch.setenv("PYTHONPATH", str(django_dist(tmp_path / "site")))
 
     assert default_recreate_db_args(PYTEST_ADAPTER, str(project)) == "--create-db"
-
