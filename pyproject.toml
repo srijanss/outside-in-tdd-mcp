@@ -27,3 +27,4 @@ packages = ["core", "adapters"]
 
 [tool.setuptools.package-data]
 adapters = ["*/*.sh"]
+core = ["skills/*/SKILL.md"]

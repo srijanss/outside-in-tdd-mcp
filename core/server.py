@@ -50,6 +50,7 @@ from core.review_findings import list_review_findings as _list_review_findings
 from core.review_findings import record_review_finding as _record_review_finding
 from core.research_log import list_research as _list_research_entries
 from core.research_log import record_research as _record_research_entry
+from core.skill_prompts import skill_prompt, skill_prompts
 from core.state_machine import (
     InvalidTargetFilesError,
     NoActiveFeatureError,
@@ -2243,6 +2244,16 @@ def build_server() -> Server:
         name: str, arguments: dict[str, Any] | None
     ) -> list[types.TextContent]:
         return await _dispatch_tool(tdd, name, arguments or {})
+
+    @server.list_prompts()
+    async def list_prompts() -> list[types.Prompt]:
+        return skill_prompts()
+
+    @server.get_prompt()
+    async def get_prompt(
+        name: str, arguments: dict[str, str] | None
+    ) -> types.GetPromptResult:
+        return skill_prompt(name, arguments)
 
     return server
 

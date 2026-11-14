@@ -216,6 +216,7 @@ verified before clearing and what the response tells Claude happened.
 
 ```
 core/               server.py, state_machine.py, adapter_contract.py — the "core" package
+  skills/            <name>/SKILL.md — workflow skills served as MCP prompts
 adapters/
   pytest-adapter/    run.sh — the only language-specific piece for pytest
                      scope.sh — maps changed files to a regression scope
@@ -583,6 +584,17 @@ sends):
 - `/tdd-start-skeleton <feature-name> <test-file>` — same, but RED uses
   `write_test_skeleton` and pauses for you to fill in TODOs before
   continuing.
+
+**The workflow skills are also served by the server itself, as MCP
+prompts** (`prompts/list`, `prompts/get`): `implement-and-review`,
+`tdd-start`, `tdd-start-verify`, `catch-up` and the rest of the TDD/review
+skills, so a project needs no copies of them under `.claude/`, `.codex/`,
+`.pi/` or `.agents/` — in Claude Code they show up as
+`/mcp__outside-in-tdd__<skill>`. Each takes one optional free-text
+`arguments` value, appended to the skill as `Arguments given: …`. The
+served copies live in `core/skills/<name>/SKILL.md` (shipped as package
+data) and are kept identical to this repo's `.agents/skills/` by a test.
+Hooks still have to be project files.
 
 Both are just prompt templates (`$1`/`$2` filled in from what you type after
 the command) — nothing MCP-specific about the mechanism, they just save you
