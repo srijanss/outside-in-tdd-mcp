@@ -1,6 +1,6 @@
-"""The workflow skills the server serves ship inside the core package (so
-pip/Docker installs have them), and stay identical to this repo's own
-.agents/skills and .agents/docs copies."""
+"""The workflow skills and docs the server serves stay identical to this
+repo's own .agents/skills and .agents/docs copies. That they ship in an
+installed wheel is checked by test_skill_prompts_installed.py."""
 
 from pathlib import Path
 
@@ -35,9 +35,3 @@ def test_the_packaged_workflow_docs_match_the_repo_copies():
     }
     for path in repo_docs.glob("*.md"):
         assert (DOCS_DIR / path.name).read_text() == path.read_text(), path.name
-
-
-def test_the_skills_ship_as_package_data():
-    pyproject = (REPO / "pyproject.toml").read_text()
-    assert '"skills/*/SKILL.md"' in pyproject
-    assert '"docs/*.md"' in pyproject
