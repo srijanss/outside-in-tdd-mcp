@@ -301,6 +301,24 @@ def test_changed_mode_maps_a_package_init_to_everything_importing_the_package(
     )
 
 
+def test_changed_mode_maps_a_deleted_package_init_to_the_package_importers(
+    tmp_path,
+):
+    write(
+        tmp_path,
+        {
+            "shop/cart.py": "",
+            "tests/test_pkg.py": "import shop\n",
+            "tests/test_sub.py": "from shop.cart import Cart\n",
+            "tests/test_misc.py": "import os\n",
+        },
+    )
+    # shop/__init__.py was deleted: it is not on disk.
+    assert scope(tmp_path, "shop/__init__.py", mode="changed") == " ".join(
+        ["tests/test_pkg.py", "tests/test_sub.py"]
+    )
+
+
 def test_changed_mode_finds_importers_of_namespace_package_modules(tmp_path):
     write(
         tmp_path,
