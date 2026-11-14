@@ -95,7 +95,9 @@ def changed_mode():
 
 def module_name(root, rel):
     """The dotted module name of a source file, walking up its packages."""
-    parts = [os.path.splitext(os.path.basename(rel))[0]]
+    stem = os.path.splitext(os.path.basename(rel))[0]
+    # A package's __init__.py is the package itself.
+    parts = [] if stem == "__init__" else [stem]
     current = os.path.dirname(rel)
     while current and os.path.isfile(os.path.join(root, current, "__init__.py")):
         parts.insert(0, os.path.basename(current))
@@ -184,9 +186,18 @@ def imported_modules(root, rel):
     return frozenset(names)
 
 
+def imports(names, module):
+    """Importing a.b.c also runs a.b's (and a's) __init__.py."""
+    return any(name == module or name.startswith(module + ".") for name in names)
+
+
 def importers(root, module):
+    if not module:
+        return set()
     return {
-        rel for rel in test_files(root) if module in imported_modules(root, rel)
+        rel
+        for rel in test_files(root)
+        if imports(imported_modules(root, rel), module)
     }
 
 

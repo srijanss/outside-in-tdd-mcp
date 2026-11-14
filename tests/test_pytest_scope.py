@@ -281,6 +281,26 @@ def test_changed_mode_ignores_relative_imports_beyond_the_top_package(tmp_path):
     assert scope(tmp_path, "cart.py", mode="changed") == "tests/test_cart.py"
 
 
+def test_changed_mode_maps_a_package_init_to_everything_importing_the_package(
+    tmp_path,
+):
+    write(
+        tmp_path,
+        {
+            "shop/__init__.py": "",
+            "shop/cart.py": "",
+            "shopping/__init__.py": "",
+            "tests/test_pkg.py": "import shop\n",
+            "tests/test_sub.py": "import shop.cart\n",
+            "tests/test_from.py": "from shop.cart import Cart\n",
+            "tests/test_other.py": "import shopping\n",
+        },
+    )
+    assert scope(tmp_path, "shop/__init__.py", mode="changed") == " ".join(
+        ["tests/test_from.py", "tests/test_pkg.py", "tests/test_sub.py"]
+    )
+
+
 def test_without_the_mode_the_scope_is_still_the_nearest_tests_dir(tmp_path):
     write(
         tmp_path,
