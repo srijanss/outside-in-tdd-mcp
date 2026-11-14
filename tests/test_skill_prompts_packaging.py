@@ -35,3 +35,14 @@ def test_the_packaged_workflow_docs_match_the_repo_copies():
     }
     for path in repo_docs.glob("*.md"):
         assert (DOCS_DIR / path.name).read_text() == path.read_text(), path.name
+
+
+def test_no_workflow_doc_embeds_a_skill():
+    # A doc is appended to every skill that refers to it, so a skill pasted
+    # into one (frontmatter and all) would be served to the wrong skills.
+    for path in DOCS_DIR.glob("*.md"):
+        text = path.read_text()
+        assert not any(
+            line.startswith(("name: ", "description: ")) for line in text.splitlines()
+        ), path.name
+        assert "You have been given" not in text, path.name

@@ -31,11 +31,12 @@ async def prompts_from_a_bare_project(root: Path):
                     "tdd-start", {"arguments": "my-feature tests/test_my_feature.py"}
                 )
                 loop = await session.get_prompt("implement-and-review", {})
-                return listed, got, loop
+                fix = await session.get_prompt("review-and-fix", {})
+                return listed, got, loop, fix
 
 
 def test_workflow_skills_are_listed_and_served_as_prompts(tmp_path):
-    listed, got, _ = anyio.run(prompts_from_a_bare_project, tmp_path)
+    listed, got, *_ = anyio.run(prompts_from_a_bare_project, tmp_path)
 
     by_name = {prompt.name: prompt for prompt in listed}
     assert {"implement-and-review", "tdd-start", "tdd-start-verify"} <= set(by_name)
@@ -51,8 +52,21 @@ def test_a_served_skill_carries_the_workflow_docs_it_tells_the_agent_to_read(tmp
     # bare project doesn't have, so the prompt has to carry that doc itself.
     assert not (tmp_path / ".agents").exists()
 
-    *_, loop = anyio.run(prompts_from_a_bare_project, tmp_path)
+    _, _, loop, _ = anyio.run(prompts_from_a_bare_project, tmp_path)
 
     text = loop.messages[0].content.text
     assert "Read `.agents/docs/review-loop.md`" in text
     assert "Shared by `implement-and-review` and `review-and-fix`." in text
+
+
+def test_the_shared_review_loop_does_not_carry_the_implementation_workflow(tmp_path):
+    # review-and-fix gets review-loop.md appended; that doc must hold only the
+    # shared loop, not implement-and-review's own "implement each feature" steps.
+    *_, fix = anyio.run(prompts_from_a_bare_project, tmp_path)
+
+    text = fix.messages[0].content.text
+    assert "Shared by `implement-and-review` and `review-and-fix`." in text
+    assert "## Review categories" in text
+    assert "name: implement-and-review" not in text
+    assert "You have been given one or more feature descriptions" not in text
+    assert "Implement it with the `tdd-start` flow" not in text
