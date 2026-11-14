@@ -614,9 +614,9 @@ def _split_scope(scope: str, project_root: str) -> tuple[list[str], set[str]]:
     adapter knowledge an option's arity is unknown, so the token right
     after a bare option (e.g. "smoke" in "-k smoke") counts as the option's
     value, unless the scope names no other path ("-x tests") or the token
-    is an existing path with a directory part ("tests/unit" in
-    "-x tests/unit tests/integration") — a bare word that happens to exist
-    on disk ("smoke") stays an option value."""
+    is spelled as a path ("tests/unit" in "-x tests/unit tests/integration",
+    "./tests", "tests/", an absolute path) and exists — a bare word that
+    happens to exist on disk ("smoke") stays an option value."""
     paths = []
     after_option = []
     others = set()
@@ -634,16 +634,16 @@ def _split_scope(scope: str, project_root: str) -> tuple[list[str], set[str]]:
         paths = after_option
     else:
         for token in after_option:
-            if _is_nested_existing_path(token, project_root):
+            if _is_existing_path_spelling(token, project_root):
                 paths.append(token)
             else:
                 others.add(token)
     return [_normalise_scope_path(p, project_root) for p in paths], others
 
 
-def _is_nested_existing_path(token: str, project_root: str) -> bool:
-    return os.sep in os.path.normpath(token.rstrip("/" + os.sep)) and (
-        os.path.exists(os.path.join(project_root, token))
+def _is_existing_path_spelling(token: str, project_root: str) -> bool:
+    return ("/" in token or os.sep in token) and os.path.exists(
+        os.path.join(project_root, token)
     )
 
 

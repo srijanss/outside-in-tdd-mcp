@@ -174,6 +174,20 @@ def test_an_existing_path_after_a_leading_bare_option_stays_a_suite_path(
     )
 
 
+def test_a_root_level_path_spelled_as_a_path_after_a_bare_option_stays_a_suite_path(
+    tmp_path,
+):
+    from core.server import _covers_full_suite
+
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "integration").mkdir()
+
+    for first in ("./tests", "tests/", str(tmp_path / "tests")):
+        suite = f"-x {first} integration"
+        assert not _covers_full_suite("integration", suite, str(tmp_path)), first
+        assert _covers_full_suite(suite, suite, str(tmp_path)), first
+
+
 def test_changed_mode_refuses_an_option_only_suite_but_runs_a_narrower_one(
     tmp_path,
 ):
