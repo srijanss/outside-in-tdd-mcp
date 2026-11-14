@@ -2138,9 +2138,12 @@ class TDDServer:
         # The full suite runs at the orchestrator's gate, so it is not on
         # offer here (and run_tests refuses it as a regressionScope).
         scopes = {"fullSuite": "gate"}
-        if changed_scope is None:
-            # The follow-up run_tests(regressionScope="skip") still runs the
-            # cycle's own target; the full suite is left to the
+        if changed_scope is None or _covers_full_suite(
+            changed_scope, default_test_dir, self.project_root
+        ):
+            # No mapping, or one as broad as the suite (which run_tests would
+            # refuse): the follow-up run_tests(regressionScope="skip") still
+            # runs the cycle's own target; the full suite is left to the
             # orchestrator's gate.
             changed_scope = "skip"
             scopes["regressionScopeNote"] = (

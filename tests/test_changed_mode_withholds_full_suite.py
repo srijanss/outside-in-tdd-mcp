@@ -56,6 +56,39 @@ def adapter_calls(tmp_path):
     return (tmp_path / "adapter" / "calls.log").read_text().splitlines()
 
 
+def test_a_changed_scope_covering_the_suite_is_left_to_the_gate(tmp_path):
+    for name, answer in {"suite": "tests/", "root": "."}.items():
+        server = project(
+            tmp_path / name,
+            with_scope_script=True,
+            scope_body=f"#!/bin/sh\necho '{{\"scope\": \"{answer}\"}}'\n",
+            extra_config={"regressionScopeDefault": "changed"},
+        )
+
+        payload = closing_run(server)
+
+        assert payload["changedScope"] == "skip", name
+        assert payload["suggestedScope"] == "skip", name
+        assert "gate" in payload["regressionScopeNote"], name
+        assert "error" not in sweep(server, payload["suggestedScope"]), name
+
+
+def test_regression_scopes_drops_a_changed_scope_spelling_the_suite_differently(
+    tmp_path,
+):
+    server = project(
+        tmp_path,
+        with_scope_script=True,
+        scope_body="#!/bin/sh\necho '{\"scope\": \"./tests\"}'\n",
+        extra_config={"regressionScopeDefault": "changed"},
+    )
+    config = json.loads((tmp_path / ".tdd-config.json").read_text())
+
+    scopes = server._regression_scopes(config, "tests/")
+
+    assert scopes["changedScope"] == "skip"
+
+
 def test_changed_mode_refuses_a_full_suite_regression_scope(tmp_path):
     server = changed_project(tmp_path)
     before = adapter_calls(tmp_path)

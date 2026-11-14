@@ -483,7 +483,8 @@ the server running the reviewer and tracking the rounds. Used by the
     target needs to run; `changedScope` is then `"skip"`. A plain `null`
     (or no usable script) makes `changedScope` `defaultTestDir`, except
     under `regressionScopeDefault: "changed"`, where it is `"skip"` and a
-    `regressionScopeNote` says the full suite runs at the gate.
+    `regressionScopeNote` says the full suite runs at the gate; the same
+    happens there when the script's scope covers all of `defaultTestDir`.
     `regressionScopeDefault` (see the table above) picks which scope
     `suggestedScope` is.
     The bundled pytest adapter's `scope.sh` maps each changed test file to
