@@ -610,27 +610,34 @@ MAX_FAILURE_MESSAGE_CHARS = 500
 
 def _split_scope(scope: str, project_root: str) -> tuple[list[str], set[str]]:
     """A scope expression's path tokens, normalised relative to
-    project_root, and its other tokens (options and their values). The
-    token right after a bare option (e.g. "smoke" in "-k smoke") counts as
-    the option's value unless it exists on disk — with no adapter
-    knowledge, an option's arity is unknown."""
+    project_root, and its other tokens (options and their values). With no
+    adapter knowledge an option's arity is unknown, so the token right
+    after a bare option (e.g. "smoke" in "-k smoke") counts as the option's
+    value, unless the scope names no other path ("-x tests")."""
     paths = []
+    after_option = []
     others = set()
     after_bare_option = False
     for token in shlex.split(scope):
         if token.startswith("-"):
             after_bare_option = "=" not in token
             others.add(token)
-            continue
-        if after_bare_option:
+        elif after_bare_option:
             after_bare_option = False
-            if not os.path.exists(os.path.join(project_root, token)):
-                others.add(token)
-                continue
-        if os.path.isabs(token):
-            token = os.path.relpath(token, project_root)
-        paths.append(os.path.normpath(token))
-    return paths, others
+            after_option.append(token)
+        else:
+            paths.append(token)
+    if paths:
+        others.update(after_option)
+    else:
+        paths = after_option
+    return [_normalise_scope_path(p, project_root) for p in paths], others
+
+
+def _normalise_scope_path(token: str, project_root: str) -> str:
+    if os.path.isabs(token):
+        token = os.path.relpath(token, project_root)
+    return os.path.normpath(token)
 
 
 def _covers_full_suite(scope: str, default_test_dir: str, project_root: str) -> bool:

@@ -134,6 +134,30 @@ def test_an_option_value_in_default_test_dir_is_not_a_suite_path(tmp_path):
         assert adapter_calls(tmp_path / name) == before, name
 
 
+def test_an_option_value_that_exists_on_disk_is_still_not_a_suite_path(tmp_path):
+    server = changed_project(tmp_path, defaultTestDir="tests -k smoke")
+    (tmp_path / "proj" / "tests").mkdir()
+    (tmp_path / "proj" / "smoke").mkdir()
+    before = adapter_calls(tmp_path)
+
+    payload = sweep(server, "tests")
+
+    assert "gate" in payload.get("error", "")
+    assert adapter_calls(tmp_path) == before
+
+
+def test_a_token_after_a_bare_option_is_a_path_only_when_no_other_path_is(
+    tmp_path,
+):
+    from core.server import _covers_full_suite
+
+    (tmp_path / "smoke").mkdir()
+
+    assert _covers_full_suite("tests", "tests -k smoke", str(tmp_path))
+    assert _covers_full_suite("-x tests", "-x tests", str(tmp_path))
+    assert _covers_full_suite("-x tests", "-x ./tests/", str(tmp_path))
+
+
 def test_a_bare_option_value_that_is_no_path_is_skipped(tmp_path):
     from core.server import _covers_full_suite
 
