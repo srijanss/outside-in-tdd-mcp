@@ -37,6 +37,13 @@ require). Transitive importers are not followed. A changed file no test
 imports adds nothing; if nothing is added at all it prints
 {"scope": null, "empty": true}. Everything above that prints null still
 does.
+
+Usage: scope.sh --covers-suite <project_root> <scope> <suite>
+
+Prints {"coversSuite": true} when `vitest run <scope>` runs every test
+`vitest run <suite>` runs — output-only options such as --reporter or
+--silent are ignored — {"coversSuite": false} when it may run fewer, and
+{"coversSuite": null} when either uses an option this script doesn't know.
 """
 
 import fnmatch
@@ -373,7 +380,90 @@ def scope(root, changed, narrow=False):
     return quoted if narrow else "related " + quoted
 
 
+# `vitest run` options that only change output, never which tests run.
+OUTPUT_FLAGS = {
+    "--silent", "--color", "--no-color", "--hideSkippedTests",
+    "--logHeapUsage", "--clearScreen", "--no-clearScreen",
+}
+OUTPUT_VALUE_OPTIONS = {"--reporter", "--outputFile"}
+# Options that may change which tests run; any other option is unknown.
+SELECTION_FLAGS = {"--changed", "--typecheck", "--passWithNoTests"}
+SELECTION_VALUE_OPTIONS = {
+    "-t", "--testNamePattern", "--project", "--dir", "--root", "-r", "-c",
+    "--config", "--environment", "--shard", "--bail", "--exclude", "--mode",
+}
+
+
+def parse_run(expression):
+    """(name filters, selecting options) of ``vitest run <expression>``,
+    output-only options dropped. Raises ValueError on an unknown option."""
+    filters, options = set(), set()
+    tokens = iter(shlex.split(expression))
+    for token in tokens:
+        if not token.startswith("-"):
+            filters.add(token.removeprefix("./").rstrip("/") or ".")
+            continue
+        name, eq, value = token.partition("=")
+        if name in OUTPUT_FLAGS:
+            continue
+        if name in OUTPUT_VALUE_OPTIONS or name in SELECTION_VALUE_OPTIONS:
+            if not eq:
+                value = next(tokens, None)
+                if value is None:
+                    raise ValueError(f"{name} needs a value")
+            if name in SELECTION_VALUE_OPTIONS:
+                options.add((name, value))
+            continue
+        if name in SELECTION_FLAGS:
+            options.add((name, None))
+            continue
+        raise ValueError(f"unknown option {token}")
+    return filters, options
+
+
+def split_related(expression):
+    """(whether ``expression`` is a ``vitest related`` run, the rest of it)."""
+    args = shlex.split(expression)
+    if args[:1] == ["related"]:
+        return True, shlex.join(args[1:])
+    return False, expression
+
+
+def covers_suite(scope, suite):
+    """True when ``vitest run <scope>`` runs every test ``<suite>`` runs,
+    False when it may run fewer, None when either can't be parsed.
+
+    Positional arguments are substring filters on test file paths, so a
+    scope filter covers a suite filter it is a substring of, and no
+    filters at all means every file."""
+    try:
+        scope_related, scope = split_related(scope)
+        suite_related, suite = split_related(suite)
+        scope_filters, scope_options = parse_run(scope)
+        suite_filters, suite_options = parse_run(suite)
+    except ValueError:
+        return None
+    if not scope_options <= suite_options:
+        return False
+    if scope_related or suite_related:
+        # `vitest related <files>`: the tests importing those files, so a
+        # scope covers the suite when it names at least the same files.
+        return scope_related and suite_related and scope_filters >= suite_filters
+    if not scope_filters:
+        return True
+    if not suite_filters:
+        return False
+    return all(
+        any(narrow == "." or narrow in wide for narrow in scope_filters)
+        for wide in suite_filters
+    )
+
+
 def main(argv):
+    if argv[:1] == ["--covers-suite"]:
+        if len(argv) != 4:
+            return {"coversSuite": None}
+        return {"coversSuite": covers_suite(argv[2], argv[3])}
     if len(argv) < 2:
         return {"scope": None}
     result = scope(argv[0], argv[1:], narrow=changed_mode())

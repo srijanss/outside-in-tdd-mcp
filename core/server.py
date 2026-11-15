@@ -36,6 +36,7 @@ from core.adapter_contract import (
     DEFAULT_TIMEOUT_S,
     AdapterError,
     AdapterTimeoutError,
+    covers_full_suite,
     default_recreate_db_args,
     run_adapter,
     scope_for_changed_files,
@@ -2165,8 +2166,8 @@ class TDDServer:
         # The full suite runs at the orchestrator's gate, so it is not on
         # offer here (and run_tests refuses it as a regressionScope).
         scopes = {"fullSuite": "gate"}
-        if changed_scope is None or _covers_full_suite(
-            changed_scope, default_test_dir, self.project_root
+        if changed_scope is None or self._scope_covers_suite(
+            adapter_path, changed_scope, default_test_dir
         ):
             # No mapping, or one as broad as the suite (which run_tests would
             # refuse): the follow-up run_tests(regressionScope="skip") still
@@ -2182,6 +2183,20 @@ class TDDServer:
             "changedScope": changed_scope,
             **scopes,
         }
+
+    def _scope_covers_suite(
+        self, adapter_path: str, scope: str, default_test_dir: str
+    ) -> bool:
+        """Whether scope runs everything default_test_dir runs: the
+        adapter's own answer when it has one (it knows which of its
+        runner's options only change output), else the runner-agnostic
+        check."""
+        answer = covers_full_suite(
+            adapter_path, self.project_root, scope, default_test_dir
+        )
+        if answer is None:
+            return _covers_full_suite(scope, default_test_dir, self.project_root)
+        return answer
 
     def _run_tests(
         self,
@@ -2228,8 +2243,8 @@ class TDDServer:
             would_close_base_refactor
             and config.get("regressionScopeDefault") == "changed"
             and regression_scope is not None
-            and _covers_full_suite(
-                regression_scope, default_test_dir, self.project_root
+            and self._scope_covers_suite(
+                adapter_path, regression_scope, default_test_dir
             )
         ):
             return {

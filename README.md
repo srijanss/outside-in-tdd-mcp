@@ -467,7 +467,14 @@ the server running the reviewer and tracking the rounds. Used by the
     response carries `suggestedScope` and `fullSuiteScope` (the whole
     `defaultTestDir`; under `regressionScopeDefault: "changed"`,
     `fullSuite: "gate"` instead, and a `regressionScope` covering
-    `defaultTestDir` is refused). `suggestedScope` comes from the adapter's optional
+    `defaultTestDir` is refused — the adapter's `scope.sh --covers-suite
+    <project_root> <scope> <defaultTestDir>` decides that when it can,
+    printing `{"coversSuite": true|false|null}`: the bundled pytest, cargo
+    and vitest scripts ignore output-only options such as `-v`,
+    `--tb=short`, `--verbose`, `-- --nocapture` or `--reporter`, and compare
+    the remaining paths and filters; `null`, an unknown option, or a script
+    without the mode falls back to the server's own path check).
+    `suggestedScope` comes from the adapter's optional
     `scope.sh` (next to the adapter executable), called as
     `scope.sh <project_root> <changed file>...` with the files `git status`
     reports as modified or untracked; it prints `{"scope": "<target

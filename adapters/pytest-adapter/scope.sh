@@ -24,6 +24,16 @@ doesn't parse is skipped. Transitive importers and re-exports are not
 followed. Other non-.py files add nothing; if nothing is added at all it
 prints {"scope": null, "empty": true}. Everything above that prints null
 still does.
+
+Usage: scope.sh --covers-suite <project_root> <scope> <suite>
+
+Prints {"coversSuite": true} when running the pytest expression <scope>
+runs every test <suite> (defaultTestDir) runs, false when it runs fewer,
+null when it can't tell (e.g. an option it doesn't know). Output-only options (-v, -q, -s, --tb, -r,
+--capture, --durations, --color, ...) are ignored; any other option of the
+scope (a filter such as -k, -m, --deselect, --ignore, -p) must also be in
+the suite; each suite path must be named by the scope or sit under a
+directory (or file, for a node id) it names.
 """
 
 import ast
@@ -257,7 +267,121 @@ def covered(path, dirs):
     return any(path != d and path.startswith(d + "/") for d in dirs)
 
 
+# Options that only change what pytest prints, never which tests run.
+OUTPUT_FLAGS = {
+    "-v", "-vv", "-vvv", "--verbose", "-q", "-qq", "--quiet", "-s", "-l",
+    "--showlocals", "--no-header", "--no-summary", "--full-trace",
+    # Reorder the run without changing which tests are in it.
+    "--ff", "--failed-first", "--nf", "--new-first",
+}
+OUTPUT_VALUE_OPTIONS = {
+    "--tb", "--capture", "--durations", "--durations-min", "--color",
+    "--code-highlight", "-r", "--junitxml", "--junit-xml", "--verbosity",
+}
+# Options taking a value that select or shape the run.
+SELECTION_VALUE_OPTIONS = {
+    "-k", "-m", "--deselect", "--ignore", "--ignore-glob", "-p", "--maxfail",
+    "-c", "--rootdir", "--confcutdir", "-o", "--override-ini",
+}
+SELECTION_FLAGS = {
+    "-x", "--exitfirst", "--lf", "--last-failed", "--sw", "--stepwise",
+    "--sw-skip", "--stepwise-skip", "--runxfail", "--strict-markers",
+}
+# Of those, the ones that change configuration (plugins, ini files and
+# values, rootdir) rather than filter: they can add tests as well as hide
+# them, so a scope must use exactly the suite's for the answer to be known.
+CONFIGURATION_OPTIONS = {
+    "-p", "-c", "--rootdir", "--confcutdir", "-o", "--runxfail",
+    "--strict-markers",
+}
+ALIASES = {"--override-ini": "-o"}
+
+
+def parse_run(root, expression):
+    """A pytest expression's normalised paths and its non-output options,
+    in the order given."""
+    paths, options = [], []
+    tokens = shlex.split(expression)
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        i += 1
+        if token == "--":
+            paths += tokens[i:]
+            break
+        if not token.startswith("-"):
+            paths.append(token)
+            continue
+        name, has_value, value = token.partition("=")
+        if not has_value and len(name) > 2 and name[:2] in (
+            OUTPUT_VALUE_OPTIONS | SELECTION_VALUE_OPTIONS
+        ):
+            name, has_value, value = name[:2], True, name[2:]
+        if name in OUTPUT_FLAGS:
+            continue
+        if name in OUTPUT_VALUE_OPTIONS | SELECTION_VALUE_OPTIONS:
+            if not has_value:
+                if i >= len(tokens):
+                    raise ValueError(f"{name} needs a value")
+                value = tokens[i]
+                i += 1
+            if name in SELECTION_VALUE_OPTIONS:
+                options.append((ALIASES.get(name, name), value))
+            continue
+        if name not in SELECTION_FLAGS or has_value:
+            # Unknown: it may take a value, so the rest can't be read.
+            raise ValueError(f"unknown option {token}")
+        options.append(name)
+    return [normalise(root, path) for path in paths], options
+
+
+def normalise(root, path):
+    if os.path.isabs(path):
+        path = os.path.relpath(path, root)
+    return os.path.normpath(path)
+
+
+def path_covers(scope_path, suite_path):
+    return (
+        scope_path in (".", suite_path)
+        or suite_path.startswith(scope_path + "/")
+        or suite_path.startswith(scope_path + "::")
+    )
+
+
+def configuration(options):
+    """Each configuration option's values, in order: pytest applies
+    repeated ones in turn, the last one winning."""
+    values = {}
+    for option in options:
+        name, value = option if isinstance(option, tuple) else (option, None)
+        if name in CONFIGURATION_OPTIONS:
+            values.setdefault(name, []).append(value)
+    return values
+
+
+def covers_suite(root, scope, suite):
+    try:
+        scope_paths, scope_options = parse_run(root, scope)
+        suite_paths, suite_options = parse_run(root, suite)
+    except ValueError:
+        return None
+    if configuration(scope_options) != configuration(suite_options):
+        return None
+    scope_options, suite_options = set(scope_options), set(suite_options)
+    if not scope_paths or not suite_paths:
+        # pytest falls back to testpaths/rootdir, which only config knows.
+        return None if scope_paths or suite_paths else scope_options <= suite_options
+    if not scope_options <= suite_options:
+        return False
+    return all(any(path_covers(s, d) for s in scope_paths) for d in suite_paths)
+
+
 def main(argv):
+    if argv[:1] == ["--covers-suite"]:
+        if len(argv) != 4:
+            return {"coversSuite": None}
+        return {"coversSuite": covers_suite(*argv[1:])}
     if len(argv) < 2:
         return {"scope": None}
     root, changed = argv[0], argv[1:]
