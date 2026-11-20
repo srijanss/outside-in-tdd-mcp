@@ -127,6 +127,31 @@ def test_nonexistent_paths_pass_through(workspace, tmp_path):
     ]
 
 
+def test_path_inspection_oserror_is_reported_as_json_failure(
+    workspace, monkeypatch, capsys
+):
+    import importlib.machinery
+    import importlib.util
+
+    loader = importlib.machinery.SourceFileLoader("cargo_run_under_test", str(ADAPTER))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    adapter = importlib.util.module_from_spec(spec)
+    loader.exec_module(adapter)
+
+    def denied(self):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(Path, "is_file", denied)
+    monkeypatch.setattr(sys, "argv", ["run.sh", "tests/top.rs", str(workspace)])
+
+    assert adapter.main() == 0
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["failed"] == 1
+    assert [f["name"] for f in result["failures"]] == ["cargo"]
+    assert "denied" in result["failures"][0]["message"]
+
+
 def test_existing_unmappable_rs_path_is_rejected_with_guidance(workspace, tmp_path):
     bin_dir = tmp_path / "bin"
     cargo = bin_dir / "cargo"

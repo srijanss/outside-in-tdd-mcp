@@ -146,14 +146,19 @@ def main() -> int:
     start = time.monotonic()
     try:
         cargo_args = _translate_target(shlex.split(test_target), project_root)
-    except UnmappablePath as error:
+    except (UnmappablePath, OSError) as error:
+        message = (
+            _unmappable_message(str(error))
+            if isinstance(error, UnmappablePath)
+            else str(error)
+        )
         print(
             json.dumps(
                 {
                     "passed": 0,
                     "failed": 1,
                     "duration_ms": int((time.monotonic() - start) * 1000),
-                    "failures": [{"name": "cargo", "message": _unmappable_message(str(error))}],
+                    "failures": [{"name": "cargo", "message": message}],
                     "raw_output": "",
                 }
             )
