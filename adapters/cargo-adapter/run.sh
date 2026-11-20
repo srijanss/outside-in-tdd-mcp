@@ -91,13 +91,33 @@ def _path_to_test_flags(token: str, project_root: str) -> list[str] | None:
     return ["-p", package, "--test", test_name]
 
 
+# Cargo options whose next token is their value, never a positional target.
+VALUE_OPTIONS = frozenset(
+    {
+        "-p", "--package", "--exclude", "--test", "--bin", "--example", "--bench",
+        "--features", "-F", "--target", "--target-dir", "--manifest-path",
+        "--config", "--profile", "--jobs", "-j", "--color", "--message-format",
+        "--lockfile-path", "-Z",
+    }
+)
+
+
 def _translate_target(tokens: list[str], project_root: str) -> list[str]:
     translated: list[str] = []
+    value_follows = False
     for index, token in enumerate(tokens):
         if token == "--":
             # Everything after the separator belongs to the test harness.
             translated.extend(tokens[index:])
             break
+        if value_follows:
+            translated.append(token)
+            value_follows = False
+            continue
+        if token in VALUE_OPTIONS:
+            translated.append(token)
+            value_follows = True
+            continue
         flags = _path_to_test_flags(token, project_root)
         translated.extend(flags if flags is not None else [token])
     return translated

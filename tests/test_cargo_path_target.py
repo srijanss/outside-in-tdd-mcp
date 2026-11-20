@@ -113,6 +113,14 @@ def test_path_shaped_filter_after_double_dash_is_not_translated(workspace, tmp_p
     assert args == ["test", "--", "tests/top.rs"]
 
 
+def test_value_of_a_cargo_option_is_not_translated(workspace, tmp_path):
+    args = run_cargo_args(workspace, tmp_path, "--config tests/top.rs tests/top.rs")
+
+    assert args == [
+        "test", "--config", "tests/top.rs", "-p", "rootpkg", "--test", "top",
+    ]
+
+
 def test_nonexistent_or_unmappable_paths_pass_through(workspace, tmp_path):
     assert run_cargo_args(workspace, tmp_path, "crates/alpha_dir/tests/missing.rs") == [
         "test", "crates/alpha_dir/tests/missing.rs",
