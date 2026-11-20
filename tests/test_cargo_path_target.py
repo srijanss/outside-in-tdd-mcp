@@ -25,7 +25,11 @@ def _write(path: Path, text: str = "") -> None:
 @pytest.fixture
 def workspace(tmp_path):
     root = tmp_path / "ws"
-    _write(root / "Cargo.toml", '[workspace]\nmembers = ["crates/*"]\n')
+    _write(
+        root / "Cargo.toml",
+        '[package]\nname = "rootpkg"\nversion = "0.1.0"\n\n'
+        '[workspace]\nmembers = ["crates/*"]\n',
+    )
     _write(
         root / "crates" / "alpha_dir" / "Cargo.toml",
         '[package]\nname = "alpha-pkg"  # the crate\nversion = "0.1.0"\n\n'
@@ -34,10 +38,6 @@ def workspace(tmp_path):
     _write(root / "crates" / "alpha_dir" / "tests" / "flat.rs")
     _write(root / "crates" / "alpha_dir" / "tests" / "nested" / "main.rs")
     _write(root / "crates" / "alpha_dir" / "src" / "lib.rs")
-    _write(
-        root / "Cargo.toml",
-        '[package]\nname = "rootpkg"\nversion = "0.1.0"\n',
-    )
     _write(root / "tests" / "top.rs")
     _write(root / "tests" / "topdir" / "main.rs")
     return root
@@ -58,6 +58,14 @@ def run_cargo_args(workspace: Path, tmp_path: Path, target: str) -> list[str]:
     )
     assert json.loads(proc.stdout)["passed"] == 1
     return args_file.read_text().split("\n")[:-1]
+
+
+def test_fixture_root_manifest_is_a_workspace_containing_the_crate(workspace):
+    root_manifest = (workspace / "Cargo.toml").read_text()
+
+    assert "[workspace]" in root_manifest
+    assert 'members = ["crates/*"]' in root_manifest
+    assert "[package]" in root_manifest
 
 
 def test_path_target_becomes_package_and_test_flags(workspace, tmp_path):
