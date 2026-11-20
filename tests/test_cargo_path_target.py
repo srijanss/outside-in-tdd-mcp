@@ -99,6 +99,12 @@ def test_path_token_mixed_with_other_tokens_is_replaced_in_place(workspace, tmp_
     assert args == ["test", "-p", "alpha-pkg", "--test", "flat", "--", "--nocapture"]
 
 
+def test_path_shaped_filter_after_double_dash_is_not_translated(workspace, tmp_path):
+    args = run_cargo_args(workspace, tmp_path, "-- tests/top.rs")
+
+    assert args == ["test", "--", "tests/top.rs"]
+
+
 def test_nonexistent_or_unmappable_paths_pass_through(workspace, tmp_path):
     assert run_cargo_args(workspace, tmp_path, "crates/alpha_dir/tests/missing.rs") == [
         "test", "crates/alpha_dir/tests/missing.rs",

@@ -93,7 +93,11 @@ def _path_to_test_flags(token: str, project_root: str) -> list[str] | None:
 
 def _translate_target(tokens: list[str], project_root: str) -> list[str]:
     translated: list[str] = []
-    for token in tokens:
+    for index, token in enumerate(tokens):
+        if token == "--":
+            # Everything after the separator belongs to the test harness.
+            translated.extend(tokens[index:])
+            break
         flags = _path_to_test_flags(token, project_root)
         translated.extend(flags if flags is not None else [token])
     return translated
