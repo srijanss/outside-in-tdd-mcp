@@ -2385,6 +2385,11 @@ class TDDServer:
                 "refactor) — see the REGRESSION: entries in failures."
             )
 
+        if result.passed == 0 and result.failed == 0:
+            # The phase stays put, but an empty run must not look like a
+            # quiet non-result.
+            self.sm.set_last_error(f"No tests ran for target {test_target}")
+
         return {
             "testResult": {
                 "passed": result.passed,
