@@ -49,6 +49,56 @@ def _failure_messages(raw_output: str) -> list[dict[str, str]]:
     return failures
 
 
+SECTION_RE = re.compile(r"^\s*\[([^\]]*)\]\s*(?:#.*)?$")
+NAME_RE = re.compile(r"""^\s*name\s*=\s*(?:"([^"]*)"|'([^']*)')\s*(?:#.*)?$""")
+
+
+def _package_name(manifest: Path) -> str | None:
+    """Read ``[package] name`` from a Cargo.toml (no TOML parser on 3.10)."""
+    try:
+        lines = manifest.read_text().splitlines()
+    except OSError:
+        return None
+    in_package = False
+    for line in lines:
+        section = SECTION_RE.match(line)
+        if section:
+            in_package = section.group(1).strip() == "package"
+            continue
+        name = NAME_RE.match(line) if in_package else None
+        if name:
+            return name.group(1) or name.group(2) or None
+    return None
+
+
+def _path_to_test_flags(token: str, project_root: str) -> list[str] | None:
+    """Map an integration-test file path to ``-p <package> --test <name>``."""
+    if not token.endswith(".rs"):
+        return None
+    path = Path(project_root) / token
+    if not path.is_file():
+        return None
+    parts = Path(token).parts
+    if len(parts) >= 3 and parts[-1] == "main.rs" and parts[-3] == "tests":
+        test_name, crate_dir = parts[-2], path.parents[2]
+    elif len(parts) >= 2 and parts[-2] == "tests":
+        test_name, crate_dir = path.stem, path.parents[1]
+    else:
+        return None
+    package = _package_name(crate_dir / "Cargo.toml")
+    if package is None:
+        return None
+    return ["-p", package, "--test", test_name]
+
+
+def _translate_target(tokens: list[str], project_root: str) -> list[str]:
+    translated: list[str] = []
+    for token in tokens:
+        flags = _path_to_test_flags(token, project_root)
+        translated.extend(flags if flags is not None else [token])
+    return translated
+
+
 def main() -> int:
     test_target = sys.argv[1] if len(sys.argv) > 1 else ""
     project_root = sys.argv[2] if len(sys.argv) > 2 else "."
@@ -56,7 +106,7 @@ def main() -> int:
     start = time.monotonic()
     try:
         proc = subprocess.run(
-            [_cargo_command(), "test", *shlex.split(test_target)],
+            [_cargo_command(), "test", *_translate_target(shlex.split(test_target), project_root)],
             cwd=project_root,
             capture_output=True,
             text=True,
