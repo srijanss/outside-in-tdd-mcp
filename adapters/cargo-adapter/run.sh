@@ -71,8 +71,16 @@ def _package_name(manifest: Path) -> str | None:
     return None
 
 
+class UnmappablePath(Exception):
+    """An existing ``.rs`` target that cannot be mapped to a test binary."""
+
+
 def _path_to_test_flags(token: str, project_root: str) -> list[str] | None:
-    """Map an integration-test file path to ``-p <package> --test <name>``."""
+    """Map an integration-test file path to ``-p <package> --test <name>``.
+
+    Returns None for tokens that are not an existing ``.rs`` file; raises
+    UnmappablePath for an existing ``.rs`` file with no test binary to map to.
+    """
     if not token.endswith(".rs"):
         return None
     path = Path(project_root) / token
@@ -84,10 +92,10 @@ def _path_to_test_flags(token: str, project_root: str) -> list[str] | None:
     elif len(parts) >= 2 and parts[-2] == "tests":
         test_name, crate_dir = path.stem, path.parents[1]
     else:
-        return None
+        raise UnmappablePath(token)
     package = _package_name(crate_dir / "Cargo.toml")
     if package is None:
-        return None
+        raise UnmappablePath(token)
     return ["-p", package, "--test", test_name]
 
 
@@ -123,14 +131,37 @@ def _translate_target(tokens: list[str], project_root: str) -> list[str]:
     return translated
 
 
+def _unmappable_message(token: str) -> str:
+    return (
+        f"Cannot map {token} to a cargo test binary. Write the target as "
+        "-p <crate> --test <name> for an integration test, or as a "
+        "test-name filter (e.g. module::test_name) for a unit test."
+    )
+
+
 def main() -> int:
     test_target = sys.argv[1] if len(sys.argv) > 1 else ""
     project_root = sys.argv[2] if len(sys.argv) > 2 else "."
 
     start = time.monotonic()
     try:
+        cargo_args = _translate_target(shlex.split(test_target), project_root)
+    except UnmappablePath as error:
+        print(
+            json.dumps(
+                {
+                    "passed": 0,
+                    "failed": 1,
+                    "duration_ms": int((time.monotonic() - start) * 1000),
+                    "failures": [{"name": "cargo", "message": _unmappable_message(str(error))}],
+                    "raw_output": "",
+                }
+            )
+        )
+        return 0
+    try:
         proc = subprocess.run(
-            [_cargo_command(), "test", *_translate_target(shlex.split(test_target), project_root)],
+            [_cargo_command(), "test", *cargo_args],
             cwd=project_root,
             capture_output=True,
             text=True,

@@ -121,10 +121,33 @@ def test_value_of_a_cargo_option_is_not_translated(workspace, tmp_path):
     ]
 
 
-def test_nonexistent_or_unmappable_paths_pass_through(workspace, tmp_path):
+def test_nonexistent_paths_pass_through(workspace, tmp_path):
     assert run_cargo_args(workspace, tmp_path, "crates/alpha_dir/tests/missing.rs") == [
         "test", "crates/alpha_dir/tests/missing.rs",
     ]
-    assert run_cargo_args(workspace, tmp_path, "crates/alpha_dir/src/lib.rs") == [
-        "test", "crates/alpha_dir/src/lib.rs",
-    ]
+
+
+def test_existing_unmappable_rs_path_is_rejected_with_guidance(workspace, tmp_path):
+    bin_dir = tmp_path / "bin"
+    cargo = bin_dir / "cargo"
+    _write(cargo, FAKE_CARGO)
+    cargo.chmod(0o755)
+    args_file = tmp_path / "args.txt"
+    env = {**os.environ, "CARGO": str(cargo), "ARGS_FILE": str(args_file)}
+
+    proc = subprocess.run(
+        [sys.executable, str(ADAPTER), "crates/alpha_dir/src/lib.rs", str(workspace)],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    result = json.loads(proc.stdout)
+    assert result["failed"] == 1
+    assert result["passed"] == 0
+    assert [f["name"] for f in result["failures"]] == ["cargo"]
+    message = result["failures"][0]["message"]
+    assert "crates/alpha_dir/src/lib.rs" in message
+    assert "-p <crate> --test <name>" in message
+    assert "test-name filter" in message
+    assert not args_file.exists()
