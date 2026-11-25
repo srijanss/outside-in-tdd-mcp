@@ -1424,6 +1424,43 @@ class TDDServer:
             if isinstance(dep, str)
         )
 
+    @staticmethod
+    def _awaiting_delivery_reason(entry: dict[str, Any]) -> str:
+        held_on = entry.get("heldOn")
+        if isinstance(held_on, str) and held_on:
+            return f"built on {held_on}, awaiting delivery"
+        return "built, awaiting delivery"
+
+    def _current_git_branch(self) -> str | None:
+        """The branch checked out in the project root, or None when it is
+        not a git checkout, git fails, or HEAD is detached."""
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=self.project_root,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        branch = result.stdout.strip()
+        if result.returncode != 0 or not branch or branch == "HEAD":
+            return None
+        return branch
+
+    def _awaiting_delivery_error(self, feature_name: str | None) -> str | None:
+        """Refusal text when feature_name is awaiting delivery in the ledger."""
+        if not feature_name:
+            return None
+        entry = self._find_feature(self._load_features(), feature_name)
+        if entry is None or entry.get("status") != "awaiting_delivery":
+            return None
+        return (
+            f"Feature '{feature_name}' is already "
+            f"{self._awaiting_delivery_reason(entry)}."
+        )
+
     def _validate_feature_start(
         self, features: list[dict[str, Any]], feature_name: str
     ) -> tuple[str | None, dict[str, Any] | None]:
@@ -1457,6 +1494,11 @@ class TDDServer:
                 f"Feature '{feature_name}' is already marked 'in_progress' "
                 "in .tdd-features.json."
             ), plan_entry
+        if status == "awaiting_delivery":
+            return (
+                f"Feature '{feature_name}' is already "
+                f"{self._awaiting_delivery_reason(plan_entry)}."
+            ), plan_entry
         if self._has_dependency_cycle(features, feature_name):
             return (
                 f"Feature '{feature_name}' has a circular dependency chain "
@@ -1469,19 +1511,41 @@ class TDDServer:
         missing = [
             dep for dep in depends_on if self._find_feature(features, dep) is None
         ]
-        incomplete = [
-            dep
-            for dep in depends_on
-            if dep not in missing
-            and (self._find_feature(features, dep) or {}).get("status")
-            != "completed"
-        ]
-        if missing or incomplete:
+        current_branch: str | None = None
+        branch_read = False
+        incomplete = []
+        held_elsewhere = []
+        for dep in depends_on:
+            if dep in missing:
+                continue
+            dep_entry = self._find_feature(features, dep) or {}
+            dep_status = dep_entry.get("status")
+            if dep_status == "completed":
+                continue
+            if dep_status == "awaiting_delivery":
+                if not branch_read:
+                    current_branch = self._current_git_branch()
+                    branch_read = True
+                held_on = dep_entry.get("heldOn")
+                if (
+                    isinstance(held_on, str)
+                    and held_on
+                    and held_on == current_branch
+                ):
+                    continue
+                held_elsewhere.append(
+                    f"{dep} is {self._awaiting_delivery_reason(dep_entry)}"
+                )
+                continue
+            incomplete.append(dep)
+        if missing or incomplete or held_elsewhere:
             parts = []
             if missing:
                 parts.append(f"not found in the ledger: {', '.join(missing)}")
             if incomplete:
                 parts.append(f"not yet completed: {', '.join(incomplete)}")
+            if held_elsewhere:
+                parts.append("; ".join(held_elsewhere))
             return (
                 f"Feature '{feature_name}' depends on feature(s) "
                 f"{'; '.join(parts)}. Fix the ledger or complete those "
@@ -1869,7 +1933,15 @@ class TDDServer:
                 return self._text(payload)
 
             if name == "get_status":
-                return self._text(self.sm.status(include_stack=True))
+                payload = self.sm.status(include_stack=True)
+                awaiting = [
+                    {"featureName": f.get("featureName"), "heldOn": f.get("heldOn")}
+                    for f in self._load_features()
+                    if isinstance(f, dict) and f.get("status") == "awaiting_delivery"
+                ]
+                if awaiting:
+                    payload = {**payload, "awaitingDelivery": awaiting}
+                return self._text(payload)
 
             if name == "list_features":
                 return self._text(self._feature_ledger_view(arguments))
@@ -1932,6 +2004,9 @@ class TDDServer:
                 return self._text({"ok": True, "approved": approved})
 
             if name == "reset_feature":
+                held_error = self._awaiting_delivery_error(self.sm.feature_name)
+                if held_error:
+                    return self._error(held_error)
                 prior_feature = self.sm.feature_name
                 prior_test_file = self.sm.test_file
                 prior_target_files = list(self.sm.target_files)
@@ -1955,6 +2030,9 @@ class TDDServer:
                 )
 
             if name == "complete_feature":
+                held_error = self._awaiting_delivery_error(self.sm.feature_name)
+                if held_error:
+                    return self._error(held_error)
                 target_files = list(self.sm.target_files)
                 summary = self.sm.complete_feature()
                 self._log_event(
