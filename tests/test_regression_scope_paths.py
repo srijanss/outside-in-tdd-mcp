@@ -181,6 +181,30 @@ def test_a_suggested_scope_comes_in_the_form_the_adapter_takes(
     assert payload["changedScope"] == offered
 
 
+@pytest.mark.parametrize("mode", ["affected", "changed"])
+def test_a_mapped_scope_means_the_root_path_when_the_run_dir_has_it_too(
+    tmp_path, mode
+):
+    scope_script = tmp_path / "scope.sh"
+    scope_script.write_text(
+        "#!/bin/sh\necho '{\"scope\": \"tests/test_b.py::test_x\"}'\n"
+    )
+    scope_script.chmod(0o755)
+    server = project(
+        tmp_path,
+        files=("src/tests/test_a.py", "src/tests/test_b.py", "tests/test_b.py"),
+        config={"regressionScopeDefault": mode, "testWorkingDir": "src"},
+    )
+    server._changed_paths = lambda **_: ["tests/test_b.py"]
+
+    suggested = call(server, "run_tests")["suggestedScope"]
+
+    assert suggested == "../tests/test_b.py::test_x"
+    # Sent back, it still names that file.
+    assert call(server, "run_tests", regressionScope=suggested)["phase"] == "red"
+    assert adapter_targets(tmp_path)[-1] == f"tests/test_a.py {suggested}"
+
+
 @pytest.mark.parametrize("default_test_dir", ["tests/", "src/tests"])
 @pytest.mark.parametrize("scope", ["tests", "src/tests", "src", "."])
 def test_changed_mode_refuses_the_suite_in_either_spelling_of_a_src_project(

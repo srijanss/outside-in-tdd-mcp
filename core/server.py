@@ -690,15 +690,23 @@ def _test_working_dir(
 
 
 def _adapter_path_form(
-    path: str, project_root: str, test_dir: str | None
+    path: str, project_root: str, test_dir: str | None, root_first: bool = False
 ) -> str | None:
     """path as the adapter needs it, relative to its test working directory:
     unchanged when it is found there (or is absolute), rewritten when it is
-    relative to project_root, None when it is found in neither."""
+    relative to project_root, None when it is found in neither. root_first
+    is for a path known to be relative to project_root: found there, that is
+    the one meant, even if the test working directory has one too."""
     base = os.path.join(project_root, test_dir or "")
-    if os.path.exists(os.path.join(base, path)):
-        return path
     from_root = os.path.join(project_root, path)
+    means_root = (
+        root_first
+        and test_dir
+        and not os.path.isabs(path)
+        and os.path.exists(from_root)
+    )
+    if not means_root and os.path.exists(os.path.join(base, path)):
+        return path
     if not os.path.exists(from_root):
         return None
     translated = os.path.relpath(from_root, base)
@@ -712,6 +720,7 @@ def _resolve_scope_paths(
     test_dir: str | None,
     test_target: str,
     root_relative: bool = False,
+    root_first: bool = False,
 ) -> tuple[str, str | None]:
     """scope with each path in the form the adapter needs (or, root_relative,
     each one found spelled relative to project_root), and the first path
@@ -735,7 +744,7 @@ def _resolve_scope_paths(
         is_option = token.startswith("-")
         path, separator, selector = token.partition("::")
         if not is_option and (not after_bare_option or _looks_like_path(path)):
-            found = _adapter_path_form(path, project_root, test_dir)
+            found = _adapter_path_form(path, project_root, test_dir, root_first)
             if found is not None:
                 if root_relative:
                     found = os.path.relpath(
@@ -2442,6 +2451,7 @@ class TDDServer:
             self.project_root,
             self._adapter_test_dir(config),
             self.sm.test_file or "",
+            root_first=True,
         )[0]
 
     def _scope_covers_suite(
