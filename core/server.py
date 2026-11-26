@@ -707,9 +707,14 @@ def _adapter_path_form(
 
 
 def _resolve_scope_paths(
-    scope: str, project_root: str, test_dir: str | None, test_target: str
+    scope: str,
+    project_root: str,
+    test_dir: str | None,
+    test_target: str,
+    root_relative: bool = False,
 ) -> tuple[str, str | None]:
-    """scope with each path in the form the adapter needs, and the first path
+    """scope with each path in the form the adapter needs (or, root_relative,
+    each one found spelled relative to project_root), and the first path
     found nowhere (else None). Options and words that aren't paths stay as
     they are. An option's arity is unknown, so the token after a bare option
     is rewritten only when spelled as a path, and reported missing only when
@@ -732,6 +737,11 @@ def _resolve_scope_paths(
         if not is_option and (not after_bare_option or _looks_like_path(path)):
             found = _adapter_path_form(path, project_root, test_dir)
             if found is not None:
+                if root_relative:
+                    found = os.path.relpath(
+                        os.path.join(project_root, test_dir or "", found),
+                        project_root,
+                    )
                 token = f"{found}{separator}{selector}"
             elif missing is None and (
                 os.path.splitext(path)[1] in test_suffixes
@@ -2442,9 +2452,15 @@ class TDDServer:
         runner's options only change output), else the runner-agnostic
         check."""
         adapter_path = config["adapterPath"]
-        # Compared in one spelling: either may be relative to the root.
-        scope = self._in_adapter_form(config, scope)
-        default_test_dir = self._in_adapter_form(config, default_test_dir)
+        # Compared in one spelling, relative to the root, so that absolute,
+        # "..", root- and test-dir-relative paths to one place match.
+        test_dir = self._adapter_test_dir(config)
+        scope, default_test_dir = (
+            _resolve_scope_paths(
+                text, self.project_root, test_dir, "", root_relative=True
+            )[0]
+            for text in (scope, default_test_dir)
+        )
         answer = covers_full_suite(
             adapter_path, self.project_root, scope, default_test_dir
         )

@@ -204,6 +204,26 @@ def test_changed_mode_refuses_the_suite_in_either_spelling_of_a_src_project(
 
 
 @pytest.mark.parametrize(
+    "spelling", ["{root}/src/tests", "{root}/src", "{root}", "../src/tests", ".."]
+)
+def test_changed_mode_refuses_the_suite_however_its_path_is_spelled(
+    tmp_path, spelling
+):
+    server = project(
+        tmp_path,
+        files=("src/tests/test_a.py",),
+        config={"regressionScopeDefault": "changed", "testWorkingDir": "src"},
+    )
+    before = adapter_targets(tmp_path)
+    scope = spelling.format(root=tmp_path / "proj")
+
+    payload = call(server, "run_tests", regressionScope=scope)
+
+    assert "gate" in payload.get("error", ""), payload
+    assert adapter_targets(tmp_path) == before
+
+
+@pytest.mark.parametrize(
     "files, target, expected",
     [
         (
