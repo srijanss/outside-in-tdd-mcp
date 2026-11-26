@@ -362,10 +362,11 @@ adapter — `core/` has none. Only `adapterPath` is required.
 | `adapterPath` | yes | The adapter executable: an absolute path, a path relative to the project root, or a bare command name found next to the server's interpreter / on `PATH`. |
 | `defaultTestDir` | no | Whole-suite target used for the regression sweep when a base-level REFACTOR closes. Same shell-word syntax as a test target. |
 | `regressionScopeDefault` | no | Which scope the closing-REFACTOR sweep suggests as `suggestedScope`: `"affected"` (unset; what the changes can affect, as before), `"changed"` (`changedScope`: only the tests closest to the change, leaving broader regressions and unmapped changes to a later full-suite gate) or `"full"` (`fullSuiteScope`). Under `"changed"` the response has `fullSuite: "gate"` instead of `fullSuiteScope`, and `run_tests` refuses a `regressionScope` covering `defaultTestDir`. Any other value is rejected at config load. |
+| `testWorkingDir` | no | Directory (relative to the project root) the adapter runs tests from, e.g. `"src"` for `uv run --directory src pytest`. A `regressionScope` path may be relative to it or to the project root, and is given to the adapter relative to it. Unset = the one immediate subdirectory holding a path that the cycle's test target or `defaultTestDir` names and the root doesn't have, else the project root. |
 | `testNamePattern` | no | Regex whose **first capture group is a test's name** (matched line-by-line across the test file), used for the one-test-per-cycle warning on `write_test`. Defaults per `adapter` label (`pytest-adapter`, `vitest-adapter`, `cargo-adapter` — see below); set it to override, or for a custom adapter. No pattern and no built-in default = the warning is off. Must be a valid regex (checked at config load). |
 | `recreateDbArgs` | no | Extra runner arguments that `run_tests(recreateDb=true)` prepends to the test target, to rebuild a cached test database after a schema change (e.g. `--create-db` for pytest-django with `--reuse-db`). Unset = the adapter's default from its optional `recreate-db.sh` (the bundled pytest adapter gives `--create-db` when pytest-django is installed); with no default, `recreateDb` returns a clear error. |
 | `adapterTimeoutSeconds` | no | Seconds a `run_tests` adapter call may take before it is killed (positive integer). Precedence: the `TDD_ADAPTER_TIMEOUT_S` env var, then this, then 120. A timed-out run returns an error and leaves the phase unchanged; the error carries `retryTimeoutSeconds` (double the timeout used, capped) to pass back as `run_tests(timeoutSeconds=...)`, or a `hint` when already at the cap. |
-| `maxAdapterTimeoutSeconds` | no | Upper bound (positive integer, default 600) applied to the resolved adapter timeout, whichever source it came from. A per-call `timeoutSeconds` above it is refused. |
+| `maxAdapterTimeoutSeconds` | no | Upper bound (positive integer, default 600) applied to the resolved adapter timeout, whichever source it came from. A per-call `timeoutSeconds` above it is clamped to it, and the response says so in `timeoutNote`. |
 | `reviewers.default` | no | Defaults for `start_review`: `{"reviewer": "pi" \| "claude", "model": "...", "thinking": "off\|minimal\|low\|medium\|high\|xhigh\|max"}`. Resolution order is the per-call argument, then this, then the reviewer tool's own default. |
 | `reviewers.allowedModels` | no | If set, `start_review` rejects any model not in this list. |
 | `reviewers.fallbackModels` | no | Models to try, in order, when the reviewer reports a quota, rate-limit, billing or model-access error (same reviewer and thinking). Local failures (a missing binary, file permissions, disk space or disk quota, timeouts) are not retried on another model, even when the reviewer process reports them. Models outside `allowedModels`, and the one that just failed, are skipped. Other failures are not retried. The round and findings record the model that actually reviewed; if every model fails, the error lists each attempt. Without it, such a review fails as before. Must be a list of non-empty model names; anything else is refused when the review starts. |
@@ -462,8 +463,16 @@ the server running the reviewer and tracking the rounds. Used by the
 - **`run_tests`** takes three optional arguments:
   - `regressionScope` — when a base-level REFACTOR closes and
     `defaultTestDir` is configured, `run_tests` first returns
-    `needsRegressionScopeConfirmation`; re-call with a target expression to
-    sweep instead of `defaultTestDir`, or `"skip"` to skip the sweep. The
+    `needsRegressionScopeConfirmation`; re-call with what to sweep instead
+    of `defaultTestDir` — a string of space-separated paths (it may carry the
+    runner's options) or a JSON array of paths — or `"skip"` to skip the
+    sweep. Each path may be relative to the project root or to the adapter's
+    test working directory (`testWorkingDir`), and is checked before any
+    run: one found in neither is refused, without counting as a test run,
+    naming a `suggestedScope`. Only words spelled as paths (a separator or a
+    file extension) are checked, so test-name filters pass; after a bare
+    option, only one ending like the cycle's test files is. A scope equal to
+    `defaultTestDir` is passed through as it is. The
     response carries `suggestedScope` and `fullSuiteScope` (the whole
     `defaultTestDir`; under `regressionScopeDefault: "changed"`,
     `fullSuite: "gate"` instead, and a `regressionScope` covering

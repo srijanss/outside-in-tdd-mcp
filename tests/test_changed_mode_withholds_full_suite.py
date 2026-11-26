@@ -246,6 +246,11 @@ def test_changed_mode_still_runs_narrower_scopes_and_skip(tmp_path):
         ("skip", "skip", None),
     ]:
         server = changed_project(tmp_path / name)
+        # A path that isn't there is refused before the adapter is called.
+        for path in ("tests/test_x.py", "tests/unit/test_y.py", "tests_other/t.py"):
+            target = tmp_path / name / "proj" / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("")
 
         payload = sweep(server, scope)
 

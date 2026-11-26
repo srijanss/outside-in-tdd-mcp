@@ -236,7 +236,8 @@ TOOLS = [
             "that passed straight from RED, a RED cycle with no write_test, "
             "or a call already at VERIFY_RED/VERIFY_GREEN (all return "
             "advanceSkipped with the reason). Pass timeoutSeconds to give one "
-            "run a longer adapter timeout (up to maxAdapterTimeoutSeconds); "
+            "run a longer adapter timeout (clamped to "
+            "maxAdapterTimeoutSeconds, with a timeoutNote); "
             "a timeout error carries retryTimeoutSeconds to retry with, or a "
             "hint when already at the cap. Adds driftWarning (also on run_tests and "
             "return_to_parent) when files "
@@ -255,9 +256,11 @@ TOOLS = [
                 "timeoutSeconds": {
                     "type": "integer",
                     "description": (
-                        "Adapter timeout for this run, in seconds, up to "
-                        "maxAdapterTimeoutSeconds. On a timeout the error "
-                        "carries retryTimeoutSeconds to retry with."
+                        "Adapter timeout for this run, in seconds. A value "
+                        "above maxAdapterTimeoutSeconds (.tdd-config.json; "
+                        "default 600) is clamped to it, with a timeoutNote. "
+                        "On a timeout the error carries retryTimeoutSeconds "
+                        "to retry with."
                     ),
                 },
                 "recreateDb": {
@@ -269,14 +272,20 @@ TOOLS = [
                     ),
                 },
                 "regressionScope": {
-                    "type": "string",
+                    "type": ["string", "array"],
+                    "items": {"type": "string"},
                     "description": (
-                        "Scope for the closing-REFACTOR regression sweep: a "
-                        "path/target expression to use instead of "
-                        "defaultTestDir (usually suggestedScope, "
-                        "changedScope or fullSuiteScope from the "
-                        "needsRegressionScopeConfirmation response), or "
-                        "\"skip\" to skip it entirely. Under "
+                        "Scope for the closing-REFACTOR regression sweep, "
+                        "used instead of defaultTestDir (usually "
+                        "suggestedScope, changedScope or fullSuiteScope from "
+                        "the needsRegressionScopeConfirmation response): a "
+                        "string of space-separated paths (it may carry the "
+                        "runner's options), a JSON array of paths, or "
+                        "\"skip\" to skip it entirely. Paths are relative to "
+                        "the project root or to the adapter's test working "
+                        "directory (testWorkingDir in .tdd-config.json, e.g. "
+                        "\"src\"); a path found in neither is refused before "
+                        "any run. Under "
                         "regressionScopeDefault \"changed\" (fullSuite: "
                         "\"gate\" in that response) a scope covering "
                         "defaultTestDir is refused."
@@ -607,6 +616,133 @@ DEFAULT_TEST_NAME_PATTERNS: dict[str, str] = {
     "pytest-adapter": r"^\s*(?:async\s+)?def\s+(test_\w+)",
 }
 MAX_FAILURE_MESSAGE_CHARS = 500
+FILE_EXTENSION = re.compile(r"\.[A-Za-z][A-Za-z0-9]{0,4}$")
+
+
+def _scope_text(scope: Any) -> str:
+    """A regressionScope as the space-separated expression the adapter
+    takes: a string stays as it is, a list (or a JSON array in a string) is
+    quoted path by path. Raises ValueError for any other shape."""
+    if isinstance(scope, str):
+        if not scope.lstrip().startswith("["):
+            return scope
+        try:
+            scope = json.loads(scope)
+        except ValueError:
+            return scope
+    if (
+        not isinstance(scope, list)
+        or not scope
+        or not all(isinstance(path, str) and path.strip() for path in scope)
+    ):
+        raise ValueError(
+            "regressionScope must be a string of space-separated paths, a "
+            'non-empty JSON array of paths, or "skip".'
+        )
+    return " ".join(shlex.quote(path) for path in scope)
+
+
+def _looks_like_path(token: str) -> bool:
+    """Whether token is spelled as a path rather than a bare word such as a
+    test-name filter: it has a separator or a file extension, or is a dot
+    directory."""
+    return (
+        "/" in token
+        or os.sep in token
+        or token in (".", "..")
+        or bool(FILE_EXTENSION.search(token))
+    )
+
+
+def _test_working_dir(
+    config: dict[str, Any], project_root: str, targets: list[str | None]
+) -> str | None:
+    """The directory, relative to project_root, that the adapter runs tests
+    from, when it isn't the root: the testWorkingDir config key, else the one
+    subdirectory holding a path that targets (the cycle's own target, then
+    defaultTestDir) name and the root doesn't have."""
+    configured = config.get("testWorkingDir")
+    if isinstance(configured, str) and configured.strip():
+        return os.path.normpath(configured.strip())
+    for target in targets:
+        try:
+            tokens = shlex.split(target or "")
+        except ValueError:
+            continue
+        for token in tokens:
+            path = token.partition("::")[0]
+            if (
+                token.startswith("-")
+                or not _looks_like_path(path)
+                or os.path.exists(os.path.join(project_root, path))
+            ):
+                continue
+            with os.scandir(project_root) as entries:
+                holders = [
+                    entry.name
+                    for entry in entries
+                    if not entry.name.startswith(".")
+                    and os.path.exists(os.path.join(entry.path, path))
+                ]
+            if len(holders) == 1:
+                return holders[0]
+    return None
+
+
+def _adapter_path_form(
+    path: str, project_root: str, test_dir: str | None
+) -> str | None:
+    """path as the adapter needs it, relative to its test working directory:
+    unchanged when it is found there (or is absolute), rewritten when it is
+    relative to project_root, None when it is found in neither."""
+    base = os.path.join(project_root, test_dir or "")
+    if os.path.exists(os.path.join(base, path)):
+        return path
+    from_root = os.path.join(project_root, path)
+    if not os.path.exists(from_root):
+        return None
+    translated = os.path.relpath(from_root, base)
+    # A leading "./" keeps the runner from reading the path as an option.
+    return f"./{translated}" if translated.startswith("-") else translated
+
+
+def _resolve_scope_paths(
+    scope: str, project_root: str, test_dir: str | None, test_target: str
+) -> tuple[str, str | None]:
+    """scope with each path in the form the adapter needs, and the first path
+    found nowhere (else None). Options and words that aren't paths stay as
+    they are. An option's arity is unknown, so the token after a bare option
+    is rewritten only when spelled as a path, and reported missing only when
+    it ends like one of test_target's files (an output path such as a report
+    needn't exist)."""
+    test_suffixes = {
+        os.path.splitext(token.partition("::")[0])[1]
+        for token in test_target.split()
+    } - {""}
+    try:
+        tokens = shlex.split(scope)
+    except ValueError:
+        return scope, None
+    resolved = []
+    missing = None
+    after_bare_option = False
+    for token in tokens:
+        is_option = token.startswith("-")
+        path, separator, selector = token.partition("::")
+        if not is_option and (not after_bare_option or _looks_like_path(path)):
+            found = _adapter_path_form(path, project_root, test_dir)
+            if found is not None:
+                token = f"{found}{separator}{selector}"
+            elif missing is None and (
+                os.path.splitext(path)[1] in test_suffixes
+                if after_bare_option
+                else _looks_like_path(path)
+            ):
+                missing = path
+        after_bare_option = is_option and "=" not in token
+        resolved.append(token)
+    # An untouched scope keeps the caller's own spelling and quoting.
+    return (scope if resolved == tokens else shlex.join(resolved)), missing
 
 
 def _split_scope(
@@ -729,6 +865,7 @@ def load_config(config_path: str) -> dict[str, Any]:
     _require_string(config, "defaultTestDir", config_path, required=False)
     _require_string(config, "recreateDbArgs", config_path, required=False)
     _require_string(config, "testNamePattern", config_path, required=False)
+    _require_string(config, "testWorkingDir", config_path, required=False)
     for field in ("adapterTimeoutSeconds", "maxAdapterTimeoutSeconds"):
         _require_positive_int(config, field, config_path)
     if (
@@ -821,14 +958,28 @@ def _adapter_failure(exc: AdapterError, config: dict[str, Any]) -> dict[str, Any
     return payload
 
 
+def timeout_note(config: dict[str, Any], requested: Any) -> dict[str, str]:
+    """The timeoutNote response field for a ``requested`` timeout that was
+    clamped to maxAdapterTimeoutSeconds, else nothing."""
+    cap = max_adapter_timeout(config)
+    if not isinstance(requested, int) or requested <= cap:
+        return {}
+    return {
+        "timeoutNote": (
+            f"timeoutSeconds {requested} is above maxAdapterTimeoutSeconds "
+            f"({cap}); this run was limited to {cap} seconds."
+        )
+    }
+
+
 def resolve_adapter_timeout(
     config: dict[str, Any], requested: Any = None
 ) -> int:
     """The adapter timeout for one run.
 
-    A per-call ``requested`` value wins over the env var and the config but
-    is never silently capped: asking above maxAdapterTimeoutSeconds is an
-    error naming that key, so the caller knows what to change.
+    A per-call ``requested`` value wins over the env var and the config. Like
+    them it is capped at maxAdapterTimeoutSeconds; ``timeout_note`` tells
+    the caller when that happened to their request.
     """
     cap = max_adapter_timeout(config)
     if requested is not None:
@@ -839,13 +990,7 @@ def resolve_adapter_timeout(
             raise AdapterError(
                 f"timeoutSeconds must be a positive integer, got {requested!r}"
             )
-        if requested > cap:
-            raise AdapterError(
-                f"timeoutSeconds {requested} is above maxAdapterTimeoutSeconds "
-                f"({cap}); raise maxAdapterTimeoutSeconds in .tdd-config.json "
-                "to allow it."
-            )
-        return requested
+        return min(requested, cap)
     raw_env = os.environ.get("TDD_ADAPTER_TIMEOUT_S")
     if raw_env is not None:
         try:
@@ -2225,16 +2370,22 @@ class TDDServer:
         adapter_path = config["adapterPath"]
         default = config.get("regressionScopeDefault", "affected")
         changed = sorted(set(self._changed_paths(rename_sources=True) or []))
-        changed_scope = scope_for_changed_files(
-            adapter_path, self.project_root, changed, mode="changed"
+        changed_scope = self._in_adapter_form(
+            config,
+            scope_for_changed_files(
+                adapter_path, self.project_root, changed, mode="changed"
+            ),
         )
         if default != "changed":
             # No mapping means the whole suite, as before the key existed.
             changed_scope = changed_scope or default_test_dir
             affected = None
             if default == "affected":
-                affected = scope_for_changed_files(
-                    adapter_path, self.project_root, changed
+                affected = self._in_adapter_form(
+                    config,
+                    scope_for_changed_files(
+                        adapter_path, self.project_root, changed
+                    ),
                 )
             return {
                 "suggestedScope": affected or default_test_dir,
@@ -2245,7 +2396,7 @@ class TDDServer:
         # offer here (and run_tests refuses it as a regressionScope).
         scopes = {"fullSuite": "gate"}
         if changed_scope is None or self._scope_covers_suite(
-            adapter_path, changed_scope, default_test_dir
+            config, changed_scope, default_test_dir
         ):
             # No mapping, or one as broad as the suite (which run_tests would
             # refuse): the follow-up run_tests(regressionScope="skip") still
@@ -2262,13 +2413,38 @@ class TDDServer:
             **scopes,
         }
 
+    def _adapter_test_dir(self, config: dict[str, Any]) -> str | None:
+        return _test_working_dir(
+            config,
+            self.project_root,
+            [self.sm.test_file, config.get("defaultTestDir")],
+        )
+
+    def _in_adapter_form(
+        self, config: dict[str, Any], scope: str | None
+    ) -> str | None:
+        """A scope.sh answer (paths relative to the project root) with its
+        paths as the adapter takes them."""
+        if scope is None:
+            return None
+        return _resolve_scope_paths(
+            scope,
+            self.project_root,
+            self._adapter_test_dir(config),
+            self.sm.test_file or "",
+        )[0]
+
     def _scope_covers_suite(
-        self, adapter_path: str, scope: str, default_test_dir: str
+        self, config: dict[str, Any], scope: str, default_test_dir: str
     ) -> bool:
         """Whether scope runs everything default_test_dir runs: the
         adapter's own answer when it has one (it knows which of its
         runner's options only change output), else the runner-agnostic
         check."""
+        adapter_path = config["adapterPath"]
+        # Compared in one spelling: either may be relative to the root.
+        scope = self._in_adapter_form(config, scope)
+        default_test_dir = self._in_adapter_form(config, default_test_dir)
         answer = covers_full_suite(
             adapter_path, self.project_root, scope, default_test_dir
         )
@@ -2278,7 +2454,7 @@ class TDDServer:
 
     def _run_tests(
         self,
-        regression_scope: str | None = None,
+        regression_scope: str | list[str] | None = None,
         recreate_db: bool = False,
         timeout_seconds: Any = None,
     ) -> dict[str, Any]:
@@ -2297,6 +2473,12 @@ class TDDServer:
         # running a no-op regression check that looks like real coverage.
         if default_test_dir is not None and not default_test_dir.strip():
             default_test_dir = None
+
+        if regression_scope is not None:
+            try:
+                regression_scope = _scope_text(regression_scope)
+            except ValueError as exc:
+                return {"error": str(exc), **self.sm.status()}
 
         # Closing a base-level REFACTOR cycle is what unlocks
         # complete_feature() — check the whole suite (not just this cycle's
@@ -2317,12 +2499,25 @@ class TDDServer:
                 **self._regression_scopes(config, default_test_dir),
                 **self.sm.status(),
             }
+        sweeping_given_scope = (
+            self.sm.phase == "refactor"
+            and self.sm.depth == 1
+            and regression_scope not in (None, "skip")
+            # The configured expression is what the adapter already takes.
+            and regression_scope.strip() != (default_test_dir or "").strip()
+        )
+        missing_path = None
+        if sweeping_given_scope:
+            test_dir = self._adapter_test_dir(config)
+            regression_scope, missing_path = _resolve_scope_paths(
+                regression_scope, self.project_root, test_dir, test_target
+            )
         if (
             would_close_base_refactor
             and config.get("regressionScopeDefault") == "changed"
             and regression_scope is not None
             and self._scope_covers_suite(
-                adapter_path, regression_scope, default_test_dir
+                config, regression_scope, default_test_dir
             )
         ):
             return {
@@ -2331,6 +2526,22 @@ class TDDServer:
                     "runs at the orchestrator's gate, not here. Re-call "
                     "run_tests with regressionScope set to suggestedScope, "
                     "changedScope or \"skip\"."
+                ),
+                **self.sm.status(),
+            }
+        if missing_path is not None:
+            relative_to = self.project_root
+            if test_dir:
+                relative_to += f" (or {os.path.join(self.project_root, test_dir)})"
+            suggested = (
+                self._regression_scopes(config, default_test_dir)["suggestedScope"]
+                if default_test_dir
+                else "skip"
+            )
+            return {
+                "error": (
+                    f"regressionScope path '{missing_path}' not found; paths "
+                    f"are relative to {relative_to}; suggestedScope: {suggested}"
                 ),
                 **self.sm.status(),
             }
@@ -2386,13 +2597,14 @@ class TDDServer:
                 }
             run_target = f"{recreate_db_args} {run_target}"
 
+        clamp_note = timeout_note(config, timeout_seconds)
         try:
             timeout_s = resolve_adapter_timeout(config, requested=timeout_seconds)
             result = run_adapter(
                 adapter_path, run_target, self.project_root, timeout_s=timeout_s
             )
         except AdapterError as exc:
-            return _adapter_failure(exc, config)
+            return {**_adapter_failure(exc, config), **clamp_note}
 
         own_target_broke = None
         has_extra_regressions = False
@@ -2405,7 +2617,7 @@ class TDDServer:
                     adapter_path, test_target, self.project_root, timeout_s=timeout_s
                 )
             except AdapterError as exc:
-                return _adapter_failure(exc, config)
+                return {**_adapter_failure(exc, config), **clamp_note}
             own_target_broke = own_result.failed > 0
             has_extra_regressions = result.failed > own_result.failed
             if not own_target_broke or has_extra_regressions:
@@ -2476,6 +2688,7 @@ class TDDServer:
                 "failures": capped_failures,
             },
             **recreate_evidence,
+            **clamp_note,
             **self.sm.status(include_last_result=False),
         }
 
@@ -2490,13 +2703,30 @@ async def _dispatch_tool(
     return tdd.call_tool(name, arguments)
 
 
+def tools_for_config(config_path: str) -> list[types.Tool]:
+    """TOOLS, with run_tests naming the largest timeoutSeconds this project's
+    config allows (the default while there is no readable config)."""
+    try:
+        cap = max_adapter_timeout(load_config(config_path))
+    except (OSError, ValueError, ConfigError):
+        cap = DEFAULT_MAX_ADAPTER_TIMEOUT_S
+    tools = []
+    for tool in TOOLS:
+        if tool.name == "run_tests":
+            tool = tool.model_copy(deep=True)
+            timeout = tool.inputSchema["properties"]["timeoutSeconds"]
+            timeout["description"] += f" The maximum here is {cap}."
+        tools.append(tool)
+    return tools
+
+
 def build_server() -> Server:
     tdd = TDDServer(PROJECT_ROOT, CONFIG_PATH)
     server: Server = Server("outside-in-tdd")
 
     @server.list_tools()
     async def list_tools() -> list[types.Tool]:
-        return TOOLS
+        return tools_for_config(CONFIG_PATH)
 
     @server.call_tool()
     async def call_tool(

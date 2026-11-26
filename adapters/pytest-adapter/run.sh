@@ -60,6 +60,23 @@ def _clean_longrepr(text: str) -> str:
     return "\n".join(kept)
 
 
+def _collection_message(report: dict, stderr: str, raw_output: str) -> str:
+    """Why collection failed: the tracebacks of the modules that failed to
+    import, else pytest's own "ERROR: ..." line (a bad path or option, on
+    stderr, after everything _trim_for_message keeps), else the output."""
+    tracebacks = [
+        _clean_longrepr(str(collector["longrepr"]))
+        for collector in report.get("collectors", [])
+        if collector.get("outcome") == "failed" and collector.get("longrepr")
+    ]
+    if tracebacks:
+        return "\n".join(tracebacks)
+    errors = re.search(r"^ERROR: .*", stderr, re.MULTILINE | re.DOTALL)
+    if errors:
+        return errors.group().strip()
+    return _trim_for_message(raw_output)
+
+
 def _pytest_commands(project_root: str) -> list[str]:
     """Candidate pytest executables, in preference order: the target
     project's own .venv pytest (so tests run against the project's own
@@ -164,9 +181,8 @@ def main() -> int:
         # the only remaining signal. Exit code 5 ("no tests collected") is
         # excluded on purpose — an empty selection isn't a failure.
         failed += 1
-        failures.append(
-            {"name": "collection", "message": _trim_for_message(raw_output)[-500:]}
-        )
+        message = _collection_message(report, proc.stderr, raw_output)
+        failures.append({"name": "collection", "message": message[-500:]})
 
     result = {
         "passed": summary.get("passed", 0),

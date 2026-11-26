@@ -50,7 +50,7 @@ def test_a_timeout_suggests_double_the_used_timeout(server_with_timing_out_adapt
     assert seen == [60, 200]
 
 
-def test_at_the_cap_there_is_no_retry_but_a_hint_and_above_it_nothing_runs(
+def test_at_the_cap_there_is_no_retry_but_a_hint_and_above_it_runs_at_the_cap(
     server_with_timing_out_adapter,
 ):
     server, seen = server_with_timing_out_adapter
@@ -60,9 +60,9 @@ def test_at_the_cap_there_is_no_retry_but_a_hint_and_above_it_nothing_runs(
     assert "maxAdapterTimeoutSeconds" in at_cap["hint"]
 
     above = run_tests(server, timeoutSeconds=301)
-    assert "maxAdapterTimeoutSeconds" in above["error"]
+    assert "maxAdapterTimeoutSeconds" in above["timeoutNote"]
     assert "retryTimeoutSeconds" not in above
-    assert seen == [300]
+    assert seen == [300, 300]
 
 
 def test_run_tests_advertises_timeout_seconds_and_retry_timeout_seconds():

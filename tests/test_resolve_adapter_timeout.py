@@ -94,8 +94,7 @@ def test_a_requested_timeout_overrides_env_and_config_up_to_the_cap(monkeypatch)
     monkeypatch.setenv("TDD_ADAPTER_TIMEOUT_S", "3")
     config = {"adapterTimeoutSeconds": 7, "maxAdapterTimeoutSeconds": 20}
     assert resolve_adapter_timeout(config, requested=20) == 20
-    with pytest.raises(AdapterError, match="maxAdapterTimeoutSeconds"):
-        resolve_adapter_timeout(config, requested=21)
+    assert resolve_adapter_timeout(config, requested=21) == 20
 
 
 def test_retry_timeout_doubles_the_used_timeout_capped_and_is_none_at_the_cap():
